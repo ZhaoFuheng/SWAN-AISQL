@@ -94,18 +94,83 @@ treated as equally selective (results are unchanged, call counts can be higher).
 ## Use
 
 ```sql
-SET ai_endpoint = 'http://localhost:4001';           -- the cache proxy (default)
+SET ai_endpoint = 'http://localhost:4001';           -- the cache proxy; the built-in default is litellm at :4000
 SET ai_model = 'gpt-5.6-luna';                        -- the default
 SELECT title FROM movies WHERE ai_filter('This review is clearly positive: ' || review);
-SELECT * FROM ai_usage();                             -- calls, cache hits, tokens, cost per query
+SELECT * FROM ai_usage();                             -- calls, cache hits, failed calls, tokens, cost per query
 ```
 
-Settings: `ai_endpoint / ai_model / ai_api_key / ai_concurrency / ai_embed_endpoint / ai_embed_model`;
-optimizer toggles `ai_factorize (off/filters/all)`, `ai_join_factorize (off/pushdown/factor)`, `ai_reorder`,
-`ai_pullup`, `ai_limit`, `ai_semi_reduce`, `ai_local_cache`; `ai_typesafe` routes `ai_filter` / `ai_classify`
-to TypeSafe System One (Jev) with `ai_typesafe_endpoint / ai_typesafe_model / ai_typesafe_api_key /
-ai_typesafe_threshold`; and an `ai_debug_*` expert namespace. `AI_MODEL`, `AI_PROXY_URL`,
-`AI_MAX_CONCURRENCY` and the other `AI_*` environment variables seed the defaults.
+**If a function returns `NULL` and `ai_usage()` shows `llm_calls = 0`**, the request never got an answer:
+`failed_calls` counts such requests and the CLI prints one `[aisql] LLM request to <endpoint> failed: …`
+line with the reason (typically nothing listening on the endpoint — start `serve/start_stack.sh`, or
+`SET ai_endpoint` / `AI_PROXY_URL` to where litellm or the proxy runs). Failed answers are never cached,
+so the next query retries. `SET ai_max_retries` (default 6, exponential backoff) bounds the wait.
+
+### Settings
+
+All settings are `SET`-able per connection; the `AI_*` environment variable in the last column seeds the
+default when set (the bench harnesses use them). `SELECT name, value FROM duckdb_settings() WHERE name LIKE 'ai_%'`
+shows the live values.
+
+**Connection and model**
+
+| setting | values | default | what it does |
+|---|---|---|---|
+| `ai_endpoint` | URL (http) | `http://localhost:4000` | OpenAI-compatible chat endpoint: litellm directly, or `http://localhost:4001` for the cache proxy (`AI_PROXY_URL`) |
+| `ai_model` | model id | `gpt-5.6-luna` | chat model for every AI function (`AI_MODEL`) |
+| `ai_api_key` | string | *(empty)* | bearer token sent to `ai_endpoint`; empty for the local stack (`AI_API_KEY`) |
+| `ai_reasoning_effort` | `low` / `medium` / `high` / *(empty)* | *(empty = omit)* | forwarded per request when set (`AI_REASONING_EFFORT`) |
+| `ai_concurrency` | integer ≥ 1 | `20` | in-flight LLM requests, process-wide (`AI_MAX_CONCURRENCY`) |
+| `ai_max_retries` | integer ≥ 0 | `6` | retries per request on 429/503/529 or a transient failure, exponential backoff (`AI_MAX_RETRIES`) |
+| `ai_hedge` | `true` / `false` | `true` | duplicate a call still unanswered past the observed p99 latency; first answer wins (`AI_HEDGE`) |
+| `ai_http_keepalive` | `true` / `false` | `true` | reuse HTTP connections across requests (`AI_HTTP_KEEPALIVE`) |
+| `ai_prefix_cache` | `true` / `false` | `true` | explicit provider prompt caching for factor-graph pair prompts (`AI_PREFIX_CACHE`) |
+| `ai_local_cache` | `true` / `false` | `true` | in-process response cache for chat + embeddings |
+| `ai_local_cache_scope` | `query` / `cross_query` | `query` | `query`: one query never serves another (the benchmark rule); `cross_query`: process lifetime |
+| `ai_embed_endpoint` | URL (http) | `http://localhost:4002` | embeddings server for the selectivity model (`AI_EMBED_URL`) |
+| `ai_embed_model` | model id | `sentence-transformers/all-MiniLM-L6-v2` | model name sent to the embeddings server (`AI_EMBED_MODEL`; `serve/start_stack.sh` serves the CLIP dual encoder) |
+
+**TypeSafe System One (Jev) backend** — optional, per function
+
+| setting | values | default | what it does |
+|---|---|---|---|
+| `ai_typesafe` | csv of `filter`, `classify` | *(empty = off)* | route `ai_filter` → Noul and/or `ai_classify` → Choice to TypeSafe; image-bearing prompts stay on the chat model (`AI_TYPESAFE`) |
+| `ai_typesafe_endpoint` | URL (http) | `http://localhost:4001` | the cache proxy, which terminates TLS towards `https://api.typesafe.ai` (`AI_TYPESAFE_URL`) |
+| `ai_typesafe_model` | model id | `jev-latest` | (`AI_TYPESAFE_MODEL`) |
+| `ai_typesafe_api_key` | string | *(empty)* | (`TYPESAFE_API_KEY`) |
+| `ai_typesafe_threshold` | 0.0 – 1.0 | `0.5` | Noul probability at or above which `ai_filter` is true (`AI_TYPESAFE_THRESHOLD`) |
+
+**Optimizer** — every stage is result-preserving; each can be switched off independently
+
+| setting | values | default | what it does |
+|---|---|---|---|
+| `ai_inline_ai_ctes` | `true` / `false` | `true` | inline CTEs that contain AI functions so pruning and pull-up can reach the predicate |
+| `ai_semi_reduce` | `true` / `false` | `true` | Yannakakis semi-join reduction before any AI evaluation |
+| `ai_pullup` | `true` / `false` | `true` | lift semantic filters above the joins (`DUCKDB_SEMANTIC_PULLUP`) |
+| `ai_reorder` | `true` / `false` | `true` | DP ordering of AI predicates with learned selectivity + speculative evaluation (`DUCKDB_AI_REORDER`) |
+| `ai_factorize` | `off` / `filters` / `all` | `all` | AI region placement: none / above AI filters only / every AI call (`DUCKDB_AI_DEDUP`, `DUCKDB_AI_SCAN_REGION`) |
+| `ai_join_factorize` | `off` / `pushdown` / `factor` | `factor` | AI-condition joins: expand / push the region below the join / factor graph over the pair domain (`DUCKDB_AI_GROUP_JOIN`) |
+| `ai_limit` | `true` / `false` | `true` | LIMIT push-down into AI evaluation (early stop) (`DUCKDB_AI_LIMIT`) |
+
+**Debug / experiment knobs** (`ai_debug_*`) — stable but not part of the user contract
+
+| setting | values | default | what it does |
+|---|---|---|---|
+| `ai_debug_log` | csv of `region`, `spec`, `yann`, `leaftexts`, `mock` | *(empty)* | stderr diagnostics per subsystem (`region` prints the leaf-region timers) |
+| `ai_debug_wave_overlap` | integer ≥ 1 | `8` | region waves kept in flight at once (1 = synchronous) |
+| `ai_debug_wave_size` | integer | `0` | override the region wave floor (0 = 5 × `ai_concurrency`) |
+| `ai_debug_region_blocking` | `true` / `false` | `false` | disable the region's streaming sink (materialize, then evaluate) |
+| `ai_debug_graph_eval` | `staged` / `lazy` / `lazy-adaptive` | `lazy-adaptive` | factor-graph scheduler |
+| `ai_debug_no_train` | `true` / `false` | `false` | freeze the selectivity model (no training from verdicts) |
+| `ai_debug_mlp_seed` | integer | `0` | seed for the selectivity model's init and warm-up picks |
+| `ai_debug_speculative_always` | `true` / `false` | `true` | drop the speculative fan-out gate |
+| `ai_debug_speculative_min_fanout` | 0.0 – 1.0 | `0.3` | minimum fan-out to add a speculative node |
+| `ai_debug_speculative_threshold` | 0.0 – 1.0 | `0.5` | speculative pass-through threshold |
+| `ai_debug_trust_image_estimate` | `true` / `false` | `false` | let speculative all-image rows trust the estimate instead of always evaluating |
+| `ai_debug_prompt_variant` | `strict` / `soft` / `plain` | `strict` | `ai_filter` system prompt; `plain` sends the bare prompt (cross-engine, prompt-identical comparisons) |
+| `ai_debug_semi_reduce_force` | `true` / `false` | `false` | semi-reduce every join cluster, AI or not (A/B benchmarking) |
+| `ai_debug_embed_filter` | `true` / `false` | `false` | embedding pre-filter pass |
+| `ai_debug_agg_distinct` | `true` / `false` | `false` | allow `ai_agg` over DISTINCT inputs (changes the multiset) |
 
 ## Benchmarks
 

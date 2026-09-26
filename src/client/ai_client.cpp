@@ -756,11 +756,14 @@ struct ConnLease {
 	bool healthy = false; // set by the caller once an HTTP exchange completed on this socket
 };
 
+//! `error` describes a failed attempt (transport error, HTTP status + body head, unparseable body) for
+//! the diagnostic the caller prints once the request is given up on.
 static AIResult DoSingleRequest(const AIConfig &config, const AIRequest &request, idx_t query_index,
-                                AICallOutcome &outcome, int32_t &retry_after_ms) {
+                                AICallOutcome &outcome, int32_t &retry_after_ms, string &error) {
 	ChatGatePermit gate_permit; // global in-flight cap, held for this attempt only
 	outcome = AICallOutcome::ERROR;
 	retry_after_ms = -1;
+	error.clear();
 	AIResult result;
 	if (request.prompt.empty() && request.system_prompt.empty()) {
 		outcome = AICallOutcome::OK; // nothing to send: benign, not a throttle
@@ -774,12 +777,7 @@ static AIResult DoSingleRequest(const AIConfig &config, const AIRequest &request
 	} catch (const std::exception &e) {
 		// e.g. an https URL in a build without TLS support: a permanent, reported failure -- never
 		// an uncaught exception on a worker thread.
-		static std::atomic<bool> reported {false};
-		if (!reported.exchange(true)) {
-			fprintf(stderr, "[ai_client] cannot connect to %s: %s (route it through an http proxy, e.g. "
-			                "serve/ai_cache_server.py)\n",
-			        endpoint.c_str(), e.what());
-		}
+		error = string("cannot open a connection: ") + e.what() + " (route it through an http proxy, e.g. serve/ai_cache_server.py)";
 		return result;
 	}
 	ConnLease &lease = *lease_holder;
@@ -807,19 +805,26 @@ static AIResult DoSingleRequest(const AIConfig &config, const AIRequest &request
 	}
 	if (!response) {
 		outcome = AICallOutcome::TRANSIENT; // network error (timeout / reset): retry
+		error = "no response (" + duckdb_httplib::to_string(response.error()) + ")";
 		return result;
 	}
 	lease.healthy = true; // full HTTP exchange completed: socket reusable regardless of status
+	auto http_error = [&](const char *what) {
+		error = string(what) + " HTTP " + std::to_string(response->status) + ": " + response->body.substr(0, 200);
+	};
 	if (response->status == 429 || response->status == 503 || response->status == 529) {
 		outcome = AICallOutcome::THROTTLED;
 		retry_after_ms = ParseRetryAfterMs(*response);
+		http_error("throttled,");
 		return result;
 	}
 	if (response->status >= 500) {
 		outcome = AICallOutcome::TRANSIENT; // upstream 5xx (500/502/504): retry
+		http_error("upstream error,");
 		return result;
 	}
 	if (response->status < 200 || response->status >= 300) {
+		http_error("rejected,");
 		return result; // other 4xx: permanent, do not retry
 	}
 	string content;
@@ -827,6 +832,7 @@ static AIResult DoSingleRequest(const AIConfig &config, const AIRequest &request
 	                             : ParseChatContent(response->body, content);
 	if (!parsed) {
 		outcome = AICallOutcome::TRANSIENT; // 2xx but unparseable (e.g. truncated under load): retry
+		error = "unparseable response body: " + response->body.substr(0, 200);
 		return result;
 	}
 	AccountUsage(query_index, response->body, response->get_header_value("x-litellm-response-cost"), config,
@@ -1070,6 +1076,27 @@ static void SleepBackoff(idx_t attempt, int32_t retry_after_ms, idx_t seed) {
 //! (network error / 5xx / unparseable body). Permanent 4xx errors are returned without retry.
 //! When `limiter` is set (turbo), gate each attempt through it and feed it AIMD signals; otherwise
 //! concurrency is fixed by the caller's thread pool and only the retry loop applies.
+//! A request given up on: count it (ai_usage().failed_calls) and say so ONCE per endpoint + failure
+//! kind on stderr. Before this, an unreachable endpoint produced NULLs and a zero-call ai_usage()
+//! with no message at all -- indistinguishable from "nothing to do".
+static void NoteCallFailure(const AIConfig &config, const AIRequest &request, idx_t query_index, const string &error) {
+	{
+		std::lock_guard<std::mutex> lock(g_usage_mutex);
+		g_queries[query_index].failed_calls++;
+	}
+	static std::mutex reported_mutex;
+	static std::set<string> reported;
+	const string endpoint = AIUsesTypeSafe(request) ? config.typesafe_url : config.base_url;
+	std::lock_guard<std::mutex> lock(reported_mutex);
+	if (reported.insert(endpoint + "\x1f" + error.substr(0, 32)).second) {
+		fprintf(stderr,
+		        "[aisql] LLM request to %s failed: %s\n[aisql] The AI function returns NULL for the affected rows; "
+		        "ai_usage().failed_calls counts them. Is the endpoint running (serve/start_stack.sh)? "
+		        "SET ai_endpoint / AI_PROXY_URL selects it.\n",
+		        endpoint.c_str(), error.c_str());
+	}
+}
+
 static AIResult DoRequestWithRetry(const AIConfig &config, const AIRequest &request, idx_t query_index, idx_t seed,
                                    AdaptiveLimiter *limiter) {
 	idx_t attempt = 0;
@@ -1079,7 +1106,8 @@ static AIResult DoRequestWithRetry(const AIConfig &config, const AIRequest &requ
 		}
 		AICallOutcome outcome;
 		int32_t retry_after_ms;
-		AIResult result = DoSingleRequest(config, request, query_index, outcome, retry_after_ms);
+		string error;
+		AIResult result = DoSingleRequest(config, request, query_index, outcome, retry_after_ms, error);
 		if (limiter) {
 			limiter->Release();
 		}
@@ -1089,6 +1117,9 @@ static AIResult DoRequestWithRetry(const AIConfig &config, const AIRequest &requ
 				limiter->OnThrottle();
 			}
 			if (attempt >= config.max_retries) {
+				NoteCallFailure(config, request, query_index,
+				                error + " (after " + std::to_string(attempt + 1) + " attempt(s); ai_max_retries=" +
+				                    std::to_string(config.max_retries) + ")");
 				return result; // exhausted retries: keep the failure result
 			}
 			attempt++;
@@ -1097,6 +1128,9 @@ static AIResult DoRequestWithRetry(const AIConfig &config, const AIRequest &requ
 		}
 		if (limiter && outcome == AICallOutcome::OK) {
 			limiter->OnSuccess();
+		}
+		if (outcome == AICallOutcome::ERROR) {
+			NoteCallFailure(config, request, query_index, error); // permanent (4xx, no connection possible)
 		}
 		return result; // OK or permanent error (neutral to the AIMD window)
 	}

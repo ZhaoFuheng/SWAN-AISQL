@@ -148,6 +148,7 @@ struct AIQueryUsage {
 	uint64_t embed_tokens = 0;      // subset of input_tokens/total_tokens from ai_embed requests
 	uint64_t cache_hits = 0;        // inputs served from response cache / in-batch de-dup (no call)
 	uint64_t hedged_calls = 0;      // duplicate attempts fired past the p99 hedge deadline
+	uint64_t failed_calls = 0;      // requests that got no usable answer (transport error / non-2xx after retries): the AI function returned NULL
 	uint64_t input_tokens = 0;      // prompt tokens
 	uint64_t cached_tokens = 0;     // provider-cached prompt tokens (subset of input_tokens)
 	uint64_t output_tokens = 0;     // completion tokens

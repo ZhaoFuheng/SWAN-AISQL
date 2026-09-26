@@ -1006,11 +1006,11 @@ static unique_ptr<FunctionData> AIUsageBind(ClientContext &context, TableFunctio
                                             vector<LogicalType> &return_types, vector<Identifier> &names) {
 	names = {"query_id",      "query_text",    "llm_calls",        "cache_hits",   "input_tokens",
 	         "cached_tokens", "output_tokens", "reasoning_tokens", "total_tokens", "cost_usd",
-	         "embed_calls",   "embed_tokens",  "hedged_calls"};
+	         "embed_calls",   "embed_tokens",  "hedged_calls",     "failed_calls"};
 	return_types = {LogicalType::UBIGINT, LogicalType::VARCHAR, LogicalType::UBIGINT, LogicalType::UBIGINT,
 	                LogicalType::UBIGINT, LogicalType::UBIGINT, LogicalType::UBIGINT, LogicalType::UBIGINT,
 	                LogicalType::UBIGINT, LogicalType::DOUBLE,  LogicalType::UBIGINT, LogicalType::UBIGINT,
-	                LogicalType::UBIGINT};
+	                LogicalType::UBIGINT, LogicalType::UBIGINT};
 	return nullptr;
 }
 
@@ -1043,6 +1043,7 @@ static void AIUsageFunction(ClientContext &context, TableFunctionInput &data_p, 
 		output.SetValue(10, row, Value::UBIGINT(u.embed_calls));
 		output.SetValue(11, row, Value::UBIGINT(u.embed_tokens));
 		output.SetValue(12, row, Value::UBIGINT(u.hedged_calls));
+		output.SetValue(13, row, Value::UBIGINT(u.failed_calls));
 	}
 	data.offset += this_count;
 }

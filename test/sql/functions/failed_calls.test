@@ -1,0 +1,42 @@
+# name: test/sql/functions/failed_calls.test
+# description: A request that gets no usable answer must be VISIBLE: the function yields NULL and
+#              ai_usage().failed_calls counts it (llm_calls counts only answered requests). Before,
+#              an unreachable endpoint gave NULLs and a zero-call ai_usage() with no message -- the
+#              "SELECT ai_filter('some text') -> NULL, 0 llm calls" report from a first-time user.
+# group: [aisql]
+
+require aisql
+
+# no mock: point at a port nothing listens on, no retries so the test is instant
+statement ok
+SET ai_endpoint = 'http://127.0.0.1:1';
+
+statement ok
+SET ai_max_retries = 0;
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT ai_filter('some text') IS NULL;
+----
+true
+
+query II
+SELECT sum(llm_calls)::BIGINT, sum(failed_calls)::BIGINT FROM ai_usage();
+----
+0	1
+
+# a failed answer is never cached: the retry pays (and fails) again rather than replaying a NULL
+query I
+SELECT ai_classify('some text', ['a', 'b']) IS NULL;
+----
+true
+
+query I
+SELECT sum(failed_calls)::BIGINT FROM ai_usage();
+----
+2
+
+statement ok
+SET ai_max_retries = 6;

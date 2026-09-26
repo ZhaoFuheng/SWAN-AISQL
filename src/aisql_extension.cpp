@@ -70,6 +70,10 @@ static void RegisterAISettings(DatabaseInstance &db) {
 		                          }
 		                          AIConfig::Mutable().max_concurrency = c;
 	                          });
+	config.AddExtensionOption("ai_max_retries", "Retries per request on throttle (429/503/529) or transient failure",
+	                          LogicalType::UBIGINT, Value::UBIGINT(ai.max_retries), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().max_retries = v.GetValue<uint64_t>();
+	                          });
 	config.AddExtensionOption("ai_embed_endpoint", "Embeddings endpoint (text + image)", LogicalType::VARCHAR,
 	                          Value(ai.embed_url), [](ClientContext &, SetScope, Value &v) {
 		                          AIConfig::Mutable().embed_url = StringValue::Get(v);
