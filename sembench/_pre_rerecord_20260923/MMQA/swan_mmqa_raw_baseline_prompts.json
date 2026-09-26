@@ -1,0 +1,1058 @@
+{
+  "q1": {
+    "predicted": [
+      "Michael Ritchie"
+    ],
+    "gold": [
+      "Michael Ritchie"
+    ]
+  },
+  "q5": {
+    "predicted": [
+      "Lizzy Caplan"
+    ],
+    "gold": [
+      "Lizzy Caplan"
+    ]
+  },
+  "q3a": {
+    "predicted": [
+      "The World's End (film)",
+      "Magical Mystery Tour (film)",
+      "The Mouse That Roared (film)",
+      "The Interview",
+      "My Best Friend's Girl",
+      "Bachelorette",
+      "Shorts (2009 film)",
+      "The People We Hate at the Wedding",
+      "Save the Date",
+      "High Road",
+      "That's What She Said (film)",
+      "Orange County",
+      "The Butcher Boy (1997 film)",
+      "Whiskey Tango Foxtrot (film)",
+      "Hot Tub Time Machine",
+      "3, 2, 1... Frankie Go Boom",
+      "The Night Before",
+      "Mean Girls",
+      "The Disaster Artist",
+      "Queens of Country"
+    ],
+    "gold": [
+      "Orange County",
+      "Mean Girls",
+      "My Best Friend's Girl",
+      "Hot Tub Time Machine",
+      "High Road",
+      "Save the Date",
+      "Bachelorette",
+      "3, 2, 1... Frankie Go Boom",
+      "Queens of Country",
+      "The Interview",
+      "The Night Before",
+      "The Disaster Artist",
+      "The People We Hate at the Wedding"
+    ]
+  },
+  "q3f": {
+    "predicted": [
+      "My Best Friend's Girl",
+      "The People We Hate at the Wedding",
+      "Save the Date",
+      "That's What She Said (film)",
+      "Mean Girls"
+    ],
+    "gold": [
+      "My Best Friend's Girl",
+      "Save the Date",
+      "The People We Hate at the Wedding"
+    ]
+  },
+  "q4": {
+    "predicted": [
+      [
+        "action",
+        "Item 47"
+      ],
+      [
+        "science fiction",
+        "Item 47"
+      ],
+      [
+        "superhero",
+        "Item 47"
+      ],
+      [
+        "crime",
+        "Item 47"
+      ],
+      [
+        "short",
+        "Item 47"
+      ],
+      [
+        "political satire",
+        "The Interview"
+      ],
+      [
+        "action",
+        "The Interview"
+      ],
+      [
+        "comedy",
+        "The Interview"
+      ],
+      [
+        "biography",
+        "127 Hours"
+      ],
+      [
+        "drama",
+        "127 Hours"
+      ],
+      [
+        "survival",
+        "127 Hours"
+      ],
+      [
+        "adventure",
+        "127 Hours"
+      ],
+      [
+        "heist",
+        "Now You See Me 2"
+      ],
+      [
+        "crime",
+        "Now You See Me 2"
+      ],
+      [
+        "mystery",
+        "Now You See Me 2"
+      ],
+      [
+        "thriller",
+        "Now You See Me 2"
+      ],
+      [
+        "romantic",
+        "Allied"
+      ],
+      [
+        "war",
+        "Allied"
+      ],
+      [
+        "drama",
+        "Allied"
+      ],
+      [
+        "thriller",
+        "Allied"
+      ],
+      [
+        "romantic comedy",
+        "My Best Friend's Girl"
+      ],
+      [
+        "comedy",
+        "My Best Friend's Girl"
+      ],
+      [
+        "romance",
+        "My Best Friend's Girl"
+      ],
+      [
+        "comedy",
+        "Bachelorette"
+      ],
+      [
+        "drama",
+        "Bachelorette"
+      ],
+      [
+        "drama",
+        "Love Is the Drug"
+      ],
+      [
+        "crime",
+        "Love Is the Drug"
+      ],
+      [
+        "thriller",
+        "Love Is the Drug"
+      ],
+      [
+        "mystery",
+        "Love Is the Drug"
+      ],
+      [
+        "romance",
+        "Love Is the Drug"
+      ],
+      [
+        "coming-of-age",
+        "Love Is the Drug"
+      ],
+      [
+        "psychological",
+        "Love Is the Drug"
+      ],
+      [
+        "romance",
+        "The People We Hate at the Wedding"
+      ],
+      [
+        "comedy",
+        "The People We Hate at the Wedding"
+      ],
+      [
+        "romance",
+        "Save the Date"
+      ],
+      [
+        "comedy",
+        "Save the Date"
+      ],
+      [
+        "drama",
+        "Save the Date"
+      ],
+      [
+        "crime",
+        "Crossing Over"
+      ],
+      [
+        "drama",
+        "Crossing Over"
+      ],
+      [
+        "found footage",
+        "Cloverfield"
+      ],
+      [
+        "monster",
+        "Cloverfield"
+      ],
+      [
+        "horror",
+        "Cloverfield"
+      ],
+      [
+        "comedy",
+        "High Road"
+      ],
+      [
+        "crime",
+        "High Road"
+      ],
+      [
+        "road movie",
+        "High Road"
+      ],
+      [
+        "buddy",
+        "High Road"
+      ],
+      [
+        "independent",
+        "High Road"
+      ],
+      [
+        "comedy",
+        "Orange County"
+      ],
+      [
+        "horror",
+        "Cobweb"
+      ],
+      [
+        "drama",
+        "Crashing"
+      ],
+      [
+        "science fiction",
+        "Hot Tub Time Machine"
+      ],
+      [
+        "comedy",
+        "Hot Tub Time Machine"
+      ],
+      [
+        "farce",
+        "Hot Tub Time Machine"
+      ],
+      [
+        "western",
+        "The Last Rites of Ransom Pride"
+      ],
+      [
+        "comedy",
+        "3, 2, 1... Frankie Go Boom"
+      ],
+      [
+        "christmas",
+        "The Night Before"
+      ],
+      [
+        "comedy",
+        "The Night Before"
+      ],
+      [
+        "stoner",
+        "The Night Before"
+      ],
+      [
+        "buddy",
+        "The Night Before"
+      ],
+      [
+        "science fiction",
+        "Extinction"
+      ],
+      [
+        "action",
+        "Extinction"
+      ],
+      [
+        "thriller",
+        "Extinction"
+      ],
+      [
+        "drama",
+        "Extinction"
+      ],
+      [
+        "comedy",
+        "Mean Girls"
+      ],
+      [
+        "teen comedy",
+        "Mean Girls"
+      ],
+      [
+        "coming-of-age",
+        "Mean Girls"
+      ],
+      [
+        "satire\ncomedy",
+        "Mean Girls"
+      ],
+      [
+        "fantasy",
+        "Mean Girls"
+      ],
+      [
+        "family",
+        "Mean Girls"
+      ],
+      [
+        "teen comedy",
+        "Mean Girls"
+      ],
+      [
+        "body-swap",
+        "Mean Girls"
+      ],
+      [
+        "romance",
+        "The Disaster Artist"
+      ],
+      [
+        "drama",
+        "The Disaster Artist"
+      ],
+      [
+        "cult\nbiographical",
+        "The Disaster Artist"
+      ],
+      [
+        "comedy",
+        "The Disaster Artist"
+      ],
+      [
+        "drama",
+        "The Disaster Artist"
+      ],
+      [
+        "comedy",
+        "Queens of Country"
+      ]
+    ],
+    "gold": [
+      [
+        "comedy",
+        "Orange County"
+      ],
+      [
+        "comedy",
+        "Mean Girls"
+      ],
+      [
+        "comedy",
+        "My Best Friend's Girl"
+      ],
+      [
+        "comedy",
+        "Hot Tub Time Machine"
+      ],
+      [
+        "comedy",
+        "High Road"
+      ],
+      [
+        "comedy",
+        "Save the Date"
+      ],
+      [
+        "comedy",
+        "Bachelorette"
+      ],
+      [
+        "comedy",
+        "3, 2, 1... Frankie Go Boom"
+      ],
+      [
+        "comedy",
+        "Queens of Country"
+      ],
+      [
+        "comedy",
+        "The Interview"
+      ],
+      [
+        "comedy",
+        "The Night Before"
+      ],
+      [
+        "comedy",
+        "The Disaster Artist"
+      ],
+      [
+        "comedy",
+        "The People We Hate at the Wedding"
+      ],
+      [
+        "drama",
+        "Love Is the Drug"
+      ],
+      [
+        "drama",
+        "Crashing"
+      ],
+      [
+        "drama",
+        "Crossing Over"
+      ],
+      [
+        "drama",
+        "127 Hours"
+      ],
+      [
+        "drama",
+        "Save the Date"
+      ],
+      [
+        "drama",
+        "Allied"
+      ],
+      [
+        "drama",
+        "The Disaster Artist"
+      ],
+      [
+        "crime",
+        "Crossing Over"
+      ],
+      [
+        "science fiction",
+        "Hot Tub Time Machine"
+      ],
+      [
+        "science fiction",
+        "Item 47"
+      ],
+      [
+        "science fiction",
+        "Extinction"
+      ],
+      [
+        "romance",
+        "My Best Friend's Girl"
+      ],
+      [
+        "romance",
+        "Save the Date"
+      ],
+      [
+        "romance",
+        "Allied"
+      ],
+      [
+        "romance",
+        "The People We Hate at the Wedding"
+      ],
+      [
+        "horror",
+        "Cloverfield"
+      ],
+      [
+        "horror",
+        "Cobweb"
+      ],
+      [
+        "western",
+        "The Last Rites of Ransom Pride"
+      ],
+      [
+        "heist",
+        "Now You See Me 2"
+      ],
+      [
+        "biography",
+        "127 Hours"
+      ],
+      [
+        "biography",
+        "The Disaster Artist"
+      ],
+      [
+        "action",
+        "The Interview"
+      ],
+      [
+        "action",
+        "Extinction"
+      ],
+      [
+        "satire",
+        "The Interview"
+      ],
+      [
+        "war",
+        "Allied"
+      ],
+      [
+        "thriller",
+        "Allied"
+      ]
+    ]
+  },
+  "q6a": {
+    "predicted": [
+      "Korean Air",
+      "Delta Air Lines",
+      "Cathay Pacific",
+      "China Airlines",
+      "Egyptair",
+      "Egyptair",
+      "Air China",
+      "Korean Air",
+      "flydubai",
+      "Sichuan Airlines",
+      "American Airlines",
+      "Cathay Pacific",
+      "China Southern Airlines",
+      "Hainan Airlines",
+      "Middle East Airlines",
+      "Garuda Indonesia",
+      "Qatar Airways",
+      "Emirates",
+      "Ethiopian Airlines",
+      "Emirates",
+      "WestJet",
+      "Vietnam Airlines",
+      "Royal Air Maroc",
+      "Air Canada",
+      "Biman Bangladesh Airlines",
+      "Air Alg\u00e9rie",
+      "Malaysia Airlines",
+      "Qatar Airways",
+      "Air Transat",
+      "Malaysia Airlines",
+      "Thai Airways International",
+      "Qatar Airways",
+      "Saudia",
+      "Singapore Airlines",
+      "Cathay Pacific",
+      "Air China",
+      "China Southern Airlines",
+      "Kuwait Airways",
+      "Korean Air",
+      "Saudia",
+      "Tunisair",
+      "Asiana Airlines",
+      "Discover Airlines",
+      "Emirates",
+      "United Airlines",
+      "American Airlines",
+      "Thai Airways International",
+      "Oman Air",
+      "United Airlines",
+      "Air China",
+      "Air Canada",
+      "Uzbekistan Airways",
+      "EVA Air",
+      "Saudia",
+      "Pakistan International Airlines"
+    ],
+    "gold": [
+      "Discover Airlines"
+    ]
+  },
+  "q6b": {
+    "predicted": [
+      "Korean Air",
+      "Delta Air Lines",
+      "Cathay Pacific",
+      "China Airlines",
+      "Egyptair",
+      "S7 Airlines",
+      "Egyptair",
+      "British Airways",
+      "Air China",
+      "Korean Air",
+      "Shanghai Airlines",
+      "flydubai",
+      "Sichuan Airlines",
+      "American Airlines",
+      "Cathay Pacific",
+      "China Southern Airlines",
+      "Aerom\u00e9xico",
+      "Hainan Airlines",
+      "Middle East Airlines",
+      "Delta Air Lines",
+      "Qatar Airways",
+      "Emirates",
+      "Ethiopian Airlines",
+      "Emirates",
+      "Air India",
+      "Vietnam Airlines",
+      "Egyptair",
+      "Royal Air Maroc",
+      "Air Canada",
+      "Biman Bangladesh Airlines",
+      "Air Alg\u00e9rie",
+      "Malaysia Airlines",
+      "American Airlines",
+      "Aerom\u00e9xico",
+      "Qatar Airways",
+      "China Eastern Airlines",
+      "Air Transat",
+      "Malaysia Airlines",
+      "Thai Airways International",
+      "Qatar Airways",
+      "Saudia",
+      "Singapore Airlines",
+      "Cathay Pacific",
+      "Air China",
+      "China Southern Airlines",
+      "Air Canada Rouge",
+      "China Eastern Airlines",
+      "Kuwait Airways",
+      "Korean Air",
+      "Saudia",
+      "Tunisair",
+      "Asiana Airlines",
+      "Discover Airlines",
+      "Emirates",
+      "United Airlines",
+      "American Airlines",
+      "Thai Airways International",
+      "Oman Air",
+      "United Airlines",
+      "Sichuan Airlines",
+      "Air China",
+      "Air India",
+      "Air Canada",
+      "Uzbekistan Airways",
+      "EVA Air",
+      "Saudia",
+      "Air Cairo",
+      "Uzbekistan Airways"
+    ],
+    "gold": [
+      "Discover Airlines"
+    ]
+  },
+  "q6c": {
+    "predicted": [
+      "IndiGo",
+      "Korean Air",
+      "Delta Air Lines",
+      "Cathay Pacific",
+      "China Airlines",
+      "Egyptair",
+      "JetBlue",
+      "S7 Airlines",
+      "WestJet",
+      "Egyptair",
+      "British Airways",
+      "Air China",
+      "LATAM Brasil",
+      "Korean Air",
+      "Shanghai Airlines",
+      "flydubai",
+      "Sichuan Airlines",
+      "American Airlines",
+      "Cathay Pacific",
+      "China Southern Airlines",
+      "VietJet Air",
+      "Aerom\u00e9xico",
+      "Middle East Airlines",
+      "IndiGo",
+      "JetBlue",
+      "Garuda Indonesia",
+      "Delta Air Lines",
+      "Qatar Airways",
+      "Emirates",
+      "Ethiopian Airlines",
+      "Emirates",
+      "WestJet",
+      "Air India",
+      "Air Canada Rouge",
+      "Vietnam Airlines",
+      "Egyptair",
+      "Royal Air Maroc",
+      "Virgin Atlantic",
+      "Air Canada",
+      "Biman Bangladesh Airlines",
+      "Air Alg\u00e9rie",
+      "Malaysia Airlines",
+      "American Airlines",
+      "Avianca",
+      "VietJet Air",
+      "Aerom\u00e9xico",
+      "Qatar Airways",
+      "China Eastern Airlines",
+      "Air Transat",
+      "Malaysia Airlines",
+      "Thai Airways International",
+      "WestJet",
+      "Qatar Airways",
+      "Saudia",
+      "Singapore Airlines",
+      "Cathay Pacific",
+      "Air China",
+      "China Southern Airlines",
+      "Air Canada Rouge",
+      "China Eastern Airlines",
+      "Kuwait Airways",
+      "Korean Air",
+      "Avianca",
+      "Saudia",
+      "Tunisair",
+      "Asiana Airlines",
+      "AirAsia",
+      "Discover Airlines",
+      "Emirates",
+      "Avianca",
+      "United Airlines",
+      "American Airlines",
+      "Thai Airways International",
+      "Oman Air",
+      "United Airlines",
+      "Sichuan Airlines",
+      "Air China",
+      "Air India",
+      "Air Canada",
+      "SCAT Airlines",
+      "Saudia",
+      "Air Cairo",
+      "Sun Country Airlines",
+      "Uzbekistan Airways",
+      "Edelweiss Air",
+      "Pakistan International Airlines"
+    ],
+    "gold": [
+      "British Airways",
+      "Delta Air Lines",
+      "Discover Airlines",
+      "Edelweiss Air",
+      "Virgin Atlantic"
+    ]
+  },
+  "q2a": {
+    "predicted": [
+      [
+        0,
+        "117d500aaa630023c4038b8268b309c0.png"
+      ],
+      [
+        0,
+        "0a8338eedd3ebeced9ad26a9bb98a642.jpg"
+      ],
+      [
+        2,
+        "0a8338eedd3ebeced9ad26a9bb98a642.jpg"
+      ],
+      [
+        3,
+        "0a8338eedd3ebeced9ad26a9bb98a642.jpg"
+      ],
+      [
+        5,
+        "117d500aaa630023c4038b8268b309c0.png"
+      ],
+      [
+        6,
+        "117d500aaa630023c4038b8268b309c0.png"
+      ],
+      [
+        8,
+        "0a8338eedd3ebeced9ad26a9bb98a642.jpg"
+      ],
+      [
+        9,
+        "117d500aaa630023c4038b8268b309c0.png"
+      ],
+      [
+        9,
+        "0a8338eedd3ebeced9ad26a9bb98a642.jpg"
+      ],
+      [
+        10,
+        "117d500aaa630023c4038b8268b309c0.png"
+      ],
+      [
+        10,
+        "0a8338eedd3ebeced9ad26a9bb98a642.jpg"
+      ],
+      [
+        12,
+        "0a8338eedd3ebeced9ad26a9bb98a642.jpg"
+      ]
+    ],
+    "gold": [
+      [
+        0,
+        "117d500aaa630023c4038b8268b309c0.png"
+      ],
+      [
+        5,
+        "117d500aaa630023c4038b8268b309c0.png"
+      ],
+      [
+        6,
+        "117d500aaa630023c4038b8268b309c0.png"
+      ],
+      [
+        9,
+        "117d500aaa630023c4038b8268b309c0.png"
+      ],
+      [
+        10,
+        "117d500aaa630023c4038b8268b309c0.png"
+      ]
+    ]
+  },
+  "q2b": {
+    "predicted": [
+      [
+        0,
+        "117d500aaa630023c4038b8268b309c0.png",
+        "blue"
+      ],
+      [
+        0,
+        "0a8338eedd3ebeced9ad26a9bb98a642.jpg",
+        "maroon"
+      ],
+      [
+        2,
+        "0a8338eedd3ebeced9ad26a9bb98a642.jpg",
+        "maroon"
+      ],
+      [
+        3,
+        "0a8338eedd3ebeced9ad26a9bb98a642.jpg",
+        "maroon"
+      ],
+      [
+        5,
+        "117d500aaa630023c4038b8268b309c0.png",
+        "blue"
+      ],
+      [
+        6,
+        "117d500aaa630023c4038b8268b309c0.png",
+        "blue"
+      ],
+      [
+        8,
+        "0a8338eedd3ebeced9ad26a9bb98a642.jpg",
+        "maroon"
+      ],
+      [
+        9,
+        "117d500aaa630023c4038b8268b309c0.png",
+        "blue"
+      ],
+      [
+        9,
+        "0a8338eedd3ebeced9ad26a9bb98a642.jpg",
+        "maroon"
+      ],
+      [
+        10,
+        "117d500aaa630023c4038b8268b309c0.png",
+        "blue"
+      ],
+      [
+        10,
+        "0a8338eedd3ebeced9ad26a9bb98a642.jpg",
+        "maroon"
+      ],
+      [
+        12,
+        "0a8338eedd3ebeced9ad26a9bb98a642.jpg",
+        "maroon"
+      ]
+    ],
+    "gold": [
+      [
+        0,
+        "117d500aaa630023c4038b8268b309c0.png",
+        "blue"
+      ],
+      [
+        5,
+        "117d500aaa630023c4038b8268b309c0.png",
+        "blue"
+      ],
+      [
+        6,
+        "117d500aaa630023c4038b8268b309c0.png",
+        "blue"
+      ],
+      [
+        9,
+        "117d500aaa630023c4038b8268b309c0.png",
+        "blue"
+      ],
+      [
+        10,
+        "117d500aaa630023c4038b8268b309c0.png",
+        "blue"
+      ]
+    ]
+  },
+  "q7": {
+    "predicted": [
+      [
+        "Air Cairo",
+        "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+      ],
+      [
+        "Air Cairo",
+        "0ac83693b42f451f27c992a887c38887.jpg"
+      ],
+      [
+        "Air Transat",
+        "0bf44cd47c202f590ef58e012c52117e.jpg"
+      ],
+      [
+        "British Airways",
+        "cwncgabxti09zmf36t4phvaz1xzv10wu.png"
+      ],
+      [
+        "China Southern Airlines",
+        "0cfaa3d5a46a430485706f811b3d2f55.png"
+      ],
+      [
+        "China Southern Airlines",
+        "0cfaa3d5a46a430485706f811b3d2f55.png"
+      ],
+      [
+        "Delta Air Lines",
+        "1sz0kf8wcmj0q8n3pu6mg61gl158vvz1.png"
+      ],
+      [
+        "Delta Air Lines",
+        "1sz0kf8wcmj0q8n3pu6mg61gl158vvz1.png"
+      ],
+      [
+        "Discover Airlines",
+        "nqr1pjql5qs3dp8rz2a4zzq7rn0xyp6k.png"
+      ],
+      [
+        "Discover Airlines",
+        "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+      ],
+      [
+        "Edelweiss Air",
+        "6zpijbg5jv4jftpftpmla6xbizne28d9.png"
+      ],
+      [
+        "IndiGo",
+        "0e428fd848ba49bf388935fdcafe1b5c.png"
+      ],
+      [
+        "IndiGo",
+        "0e428fd848ba49bf388935fdcafe1b5c.png"
+      ],
+      [
+        "Middle East Airlines",
+        "0cfaa3d5a46a430485706f811b3d2f55.png"
+      ],
+      [
+        "Qatar Airways",
+        "0cfaa3d5a46a430485706f811b3d2f55.png"
+      ],
+      [
+        "Qatar Airways",
+        "0cfaa3d5a46a430485706f811b3d2f55.png"
+      ],
+      [
+        "Qatar Airways",
+        "0cfaa3d5a46a430485706f811b3d2f55.png"
+      ],
+      [
+        "SCAT Airlines",
+        "0cdbe38cdf213b9f46182f98230aa5f7.jpg"
+      ],
+      [
+        "SCAT Airlines",
+        "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+      ],
+      [
+        "SCAT Airlines",
+        "0ac83693b42f451f27c992a887c38887.jpg"
+      ],
+      [
+        "SCAT Airlines",
+        "0e428fd848ba49bf388935fdcafe1b5c.png"
+      ],
+      [
+        "Uzbekistan Airways",
+        "0e428fd848ba49bf388935fdcafe1b5c.png"
+      ],
+      [
+        "Virgin Atlantic",
+        "antbx4oxst0z5o6pe2g1thrjr0dz073j.png"
+      ]
+    ],
+    "gold": [
+      [
+        "British Airways",
+        "cwncgabxti09zmf36t4phvaz1xzv10wu.png"
+      ],
+      [
+        "Delta Air Lines",
+        "1sz0kf8wcmj0q8n3pu6mg61gl158vvz1.png"
+      ],
+      [
+        "Discover Airlines",
+        "nqr1pjql5qs3dp8rz2a4zzq7rn0xyp6k.png"
+      ],
+      [
+        "Edelweiss Air",
+        "6zpijbg5jv4jftpftpmla6xbizne28d9.png"
+      ],
+      [
+        "Virgin Atlantic",
+        "antbx4oxst0z5o6pe2g1thrjr0dz073j.png"
+      ]
+    ]
+  }
+}

@@ -1,0 +1,203 @@
+# name: test/sql/semi_reduce/computed_key_reduction.test
+# description: Yannakakis semi-reduction must reach the AI leaf even when the join key is
+#              COMPUTED in a projection above the ai_filter. The reducer descends below the
+#              ai_filter so the LLM runs on reduced rows only; a computed key (CAST/SPLIT_PART,
+#              arithmetic, concat) lives in a projection on that path, so the key expression is
+#              TRANSLATED through each projection instead of stopping there. Stopping made the
+#              SEMI land above the AI filter and saved nothing -- the agent_bench Q6-Q9
+#              fingerprint (~150 calls where ~9 join candidates survive).
+#              Every case asserts BOTH the call count (the optimization) and exact result
+#              parity against the whole stack disabled (the correctness).
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+# 200 books; 600 reviews over the same 200 keys, of which the relational predicates keep a
+# handful. The AI side is the BIG side, so only the reduction can shrink it.
+statement ok
+CREATE TABLE books AS SELECT 'b_'||range::VARCHAR AS book_id, 'title '||range::VARCHAR AS title,
+       'sub '||range::VARCHAR AS subtitle, range AS bnum FROM range(200);
+
+statement ok
+CREATE TABLE reviews AS SELECT 'p_'||(range%200)::VARCHAR AS purchase_id, range AS rid,
+       range % 40 AS rating, range % 2 AS verified FROM range(600);
+
+# the ground-truth candidate count: distinct keys surviving the reviews-side predicates
+query I
+SELECT count(DISTINCT CAST(SPLIT_PART(purchase_id,'_',2) AS INTEGER))
+FROM reviews WHERE verified = 1 AND rating >= 36;
+----
+10
+
+# === case 1: computed key on BOTH sides (CAST(SPLIT_PART(...))) -- the Q6-Q9 shape ===
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE c1_on AS
+WITH cand AS (
+  SELECT CAST(SPLIT_PART(book_id,'_',2) AS INTEGER) AS bidx, book_id, title FROM books
+  WHERE title IS NOT NULL AND ai_filter('[p=60] good? ' || title || ' ' || subtitle)
+), rf AS (
+  SELECT CAST(SPLIT_PART(purchase_id,'_',2) AS INTEGER) AS pidx, rid FROM reviews
+  WHERE verified = 1 AND rating >= 36
+)
+SELECT c.book_id, r.rid FROM cand c JOIN rf r ON r.pidx = c.bidx;
+
+# exactly the surviving candidates get an LLM call (pre-fix: ~131)
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+10
+
+# === case 2: arithmetic computed key (bnum + 0 style expression in the projection) ===
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE c2_on AS
+WITH cand AS (
+  SELECT bnum * 2 AS bkey, book_id FROM books
+  WHERE ai_filter('[p=60] pick? ' || title || ' ' || subtitle)
+), rf AS (
+  SELECT rid * 2 AS rkey, rid FROM reviews WHERE verified = 1 AND rating >= 38
+)
+SELECT c.book_id, r.rid FROM cand c JOIN rf r ON r.rkey = c.bkey;
+
+# the reviews side keeps few distinct keys -> the AI side is reduced to that many calls
+query I
+SELECT ((sum(llm_calls) - sum(embed_calls)) < 30)::BOOLEAN FROM ai_usage();
+----
+true
+
+# === case 3: DIRECT column key (no projection on the path) -- guards the pre-existing path ===
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE c3_on AS
+SELECT b.book_id, r.rid
+FROM (SELECT bnum, book_id, title, subtitle FROM books WHERE ai_filter('[p=60] ok? ' || title || ' ' || subtitle)) b
+JOIN (SELECT rid, rating FROM reviews WHERE verified = 1 AND rating >= 38) r ON r.rid = b.bnum;
+
+query I
+SELECT ((sum(llm_calls) - sum(embed_calls)) < 30)::BOOLEAN FROM ai_usage();
+----
+true
+
+# === case 4: multi-hop through an intermediate table.
+# KNOWN GAP (pre-existing, not this fix): DuckDB materializes a CTE referenced more than once
+# into a CTE operator, which is not an inner-join/cross cluster node, so GatherCluster finds a
+# single leaf and the reduction never runs (the same query with inline subqueries and direct
+# keys DOES reduce -- see the [yann] trace). Measured 2026-09-21 on agent_bench Q26, where this
+# costs ~1,040 calls vs PLOP (their older DuckDB base inlines, giving their DP one flat join
+# tree). Investigated and ruled out as fixes: (a) function stability -- materialization here is
+# DuckDB's version default, NOT driven by our VOLATILE marking (a plain AI-free CTE referenced
+# twice materializes identically); (b) forcing inlining (NOT MATERIALIZED) -- it does cut Q26 to
+# ~390 calls, matching PLOP, but returns 0 rows instead of 125 even with the whole optimizer
+# stack disabled, because each inlined copy RESAMPLES the predicate instead of sharing verdicts
+# (2,891 calls vs 2,429 naive), so copies disagree and the self-join empties.
+# The real fix is to teach the cluster walk / pull-up to see through materialized CTE operators.
+# Asserted here for CORRECTNESS only. ===
+statement ok
+CREATE TABLE mid AS SELECT range AS mkey, range % 200 AS bref FROM range(200);
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE c4_on AS
+WITH cand AS (
+  SELECT CAST(SPLIT_PART(book_id,'_',2) AS INTEGER) AS bidx, book_id, title FROM books
+  WHERE ai_filter('[p=60] hop? ' || title || ' ' || subtitle)
+), m AS (
+  SELECT mkey, bref FROM mid
+), rf AS (
+  SELECT CAST(SPLIT_PART(purchase_id,'_',2) AS INTEGER) AS pidx, rid FROM reviews
+  WHERE verified = 1 AND rating >= 39
+)
+SELECT c.book_id, r.rid FROM cand c JOIN m ON m.bref = c.bidx JOIN rf r ON r.pidx = m.mkey;
+
+# === correctness: every case must match the fully-disabled stack exactly ===
+statement ok
+SET ai_pullup=false; SET ai_factorize='off'; SET ai_semi_reduce=false;
+SET ai_reorder=false; SET ai_join_factorize='off'; SET ai_limit=false;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE c1_off AS
+WITH cand AS (
+  SELECT CAST(SPLIT_PART(book_id,'_',2) AS INTEGER) AS bidx, book_id, title FROM books
+  WHERE title IS NOT NULL AND ai_filter('[p=60] good? ' || title || ' ' || subtitle)
+), rf AS (
+  SELECT CAST(SPLIT_PART(purchase_id,'_',2) AS INTEGER) AS pidx, rid FROM reviews
+  WHERE verified = 1 AND rating >= 36
+)
+SELECT c.book_id, r.rid FROM cand c JOIN rf r ON r.pidx = c.bidx;
+
+statement ok
+CREATE TABLE c2_off AS
+WITH cand AS (
+  SELECT bnum * 2 AS bkey, book_id FROM books
+  WHERE ai_filter('[p=60] pick? ' || title || ' ' || subtitle)
+), rf AS (
+  SELECT rid * 2 AS rkey, rid FROM reviews WHERE verified = 1 AND rating >= 38
+)
+SELECT c.book_id, r.rid FROM cand c JOIN rf r ON r.rkey = c.bkey;
+
+statement ok
+CREATE TABLE c3_off AS
+SELECT b.book_id, r.rid
+FROM (SELECT bnum, book_id, title, subtitle FROM books WHERE ai_filter('[p=60] ok? ' || title || ' ' || subtitle)) b
+JOIN (SELECT rid, rating FROM reviews WHERE verified = 1 AND rating >= 38) r ON r.rid = b.bnum;
+
+statement ok
+CREATE TABLE c4_off AS
+WITH cand AS (
+  SELECT CAST(SPLIT_PART(book_id,'_',2) AS INTEGER) AS bidx, book_id, title FROM books
+  WHERE ai_filter('[p=60] hop? ' || title || ' ' || subtitle)
+), m AS (
+  SELECT mkey, bref FROM mid
+), rf AS (
+  SELECT CAST(SPLIT_PART(purchase_id,'_',2) AS INTEGER) AS pidx, rid FROM reviews
+  WHERE verified = 1 AND rating >= 39
+)
+SELECT c.book_id, r.rid FROM cand c JOIN m ON m.bref = c.bidx JOIN rf r ON r.pidx = m.mkey;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM c1_on EXCEPT SELECT * FROM c1_off)
+                      UNION ALL (SELECT * FROM c1_off EXCEPT SELECT * FROM c1_on));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM c2_on EXCEPT SELECT * FROM c2_off)
+                      UNION ALL (SELECT * FROM c2_off EXCEPT SELECT * FROM c2_on));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM c3_on EXCEPT SELECT * FROM c3_off)
+                      UNION ALL (SELECT * FROM c3_off EXCEPT SELECT * FROM c3_on));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM c4_on EXCEPT SELECT * FROM c4_off)
+                      UNION ALL (SELECT * FROM c4_off EXCEPT SELECT * FROM c4_on));
+----
+0

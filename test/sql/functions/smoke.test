@@ -1,0 +1,25 @@
+# name: test/sql/functions/smoke.test
+# description: aisql extension loads, registers settings and functions
+# group: [aisql]
+
+require aisql
+
+query I
+SELECT aisql_version();
+----
+aisql 0.1.0
+
+statement ok
+SET ai_concurrency = 4;
+
+query I
+SELECT current_setting('ai_concurrency');
+----
+4
+
+statement ok
+SET ai_factorize = 'filters';
+
+# unknown value is accepted at SET time (validated at use); reset to default
+statement ok
+SET ai_factorize = 'all';

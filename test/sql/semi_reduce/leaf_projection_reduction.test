@@ -1,0 +1,118 @@
+# name: test/sql/semi_reduce/leaf_projection_reduction.test
+# description: Yannakakis semi-reduction lands BELOW an AI projection leaf (ai_complete / ai_classify
+#              computed per row and then joined -- MMQA q1's "extract the director, join on title"),
+#              so the LLM computes only the rows the join keeps. Before: the reducer only descended
+#              below AI *filters*, so the SEMI landed above the projection and pruned rows already
+#              paid for. The join key is COMPUTED in that projection so DuckDB's runtime join filter
+#              cannot reach the scan; only the reducer can shrink the AI input.
+#              Also: a leaf's AI stage is visible to the reducer regardless of ai_pullup.
+#              (The AI column must be consumed: an unreferenced projection is removed as unused.)
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE docs AS SELECT range AS id, 'k_'||range::VARCHAR AS key, 'doc '||range::VARCHAR AS text FROM range(100);
+
+statement ok
+CREATE TABLE sel AS SELECT range::INTEGER AS id FROM range(100);
+
+# --- ai_complete projection feeding a join: exactly the 2 surviving rows are computed ---
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE on_reduce AS
+WITH extracted AS (
+  SELECT CAST(SPLIT_PART(key, '_', 2) AS INTEGER) AS kid, ai_complete('name of ' || text) AS name FROM docs
+)
+SELECT s.id, e.name FROM sel s JOIN extracted e ON e.kid = s.id WHERE s.id IN (1, 50);
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+2
+
+# the reducer is what saves the calls: without it every row is extracted
+statement ok
+SET ai_semi_reduce = false;
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE off_reduce AS
+WITH extracted AS (
+  SELECT CAST(SPLIT_PART(key, '_', 2) AS INTEGER) AS kid, ai_complete('name of ' || text) AS name FROM docs
+)
+SELECT s.id, e.name FROM sel s JOIN extracted e ON e.kid = s.id WHERE s.id IN (1, 50);
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+100
+
+# result-preserving: a SEMI join only drops rows that join nothing
+query I
+SELECT count(*) FROM (SELECT * FROM on_reduce EXCEPT SELECT * FROM off_reduce) UNION ALL SELECT count(*) FROM (SELECT * FROM off_reduce EXCEPT SELECT * FROM on_reduce);
+----
+0
+0
+
+statement ok
+SET ai_semi_reduce = true;
+
+# --- the leaf's AI stage is seen without the pull-up flag ---
+statement ok
+SET ai_pullup = false;
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+WITH extracted AS (
+  SELECT CAST(SPLIT_PART(key, '_', 2) AS INTEGER) AS kid, ai_complete('name of ' || text) AS name FROM docs
+)
+SELECT count(e.name) FROM sel s JOIN extracted e ON e.kid = s.id WHERE s.id IN (1, 50);
+----
+2
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+2
+
+statement ok
+SET ai_pullup = true;
+
+# --- ai_classify projection leaf: same descent ---
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+WITH labeled AS (
+  SELECT CAST(SPLIT_PART(key, '_', 2) AS INTEGER) AS kid, ai_classify(text, ['alpha', 'beta']) AS label FROM docs
+)
+SELECT count(l.label) FROM sel s JOIN labeled l ON l.kid = s.id WHERE s.id IN (3, 7, 99);
+----
+3
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+statement ok
+CALL ai_mock_stop();

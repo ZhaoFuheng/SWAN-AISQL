@@ -1,0 +1,202 @@
+# name: test/sql/semi_reduce/cte_boundary_multicte.test
+# description: The CTE-boundary spec for MULTI-CTE queries (3-6 CTEs), which is where boundary
+#              regressions actually show. The single-CTE shapes in cte_boundary_shapes.test all
+#              survive a broken boundary implementation; these do not.
+#
+#              COVERAGE: shape I discriminates -- with the (unwired) semantic split enabled it goes
+#              16 -> 189 calls on unchanged rows. It must live in its OWN file: run after the
+#              single-CTE shapes in the same session it returns 18 either way, because the
+#              preceding statements change the plan it gets. A discriminating test that only
+#              discriminates in isolation has to BE isolated, so nothing is added above this line.
+#
+#              What shape I captures is the agent_bench Q26 arrangement: a CTE shared between
+#              another CTE's body and the main query, with a second AI CTE alongside. It is the
+#              smallest query found that reproduces the failure.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE doc AS SELECT range AS id, 'doc '||range::VARCHAR AS body, range % 10 AS bucket FROM range(200);
+
+# 10 ids
+statement ok
+CREATE TABLE hot AS SELECT range AS id FROM range(200) WHERE range % 20 = 0;
+
+# 8 ids
+statement ok
+CREATE TABLE warm AS SELECT range AS id FROM range(200) WHERE range % 25 = 0;
+
+# ---------------------------------------------------------------------------------------------
+# H. THREE CTEs, chained: a relational CTE feeds an AI CTE, whose result is joined to a third.
+#    The predicate must see the rows that survive BOTH the relational CTE and the downstream join.
+# ---------------------------------------------------------------------------------------------
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE h_on AS
+WITH base AS (SELECT id, body FROM doc WHERE bucket < 5),
+     sem  AS (SELECT id, body FROM base WHERE ai_filter('[p=60] h? '||body)),
+     keys AS (SELECT id FROM hot)
+SELECT s.id FROM sem s JOIN keys k ON k.id = s.id;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+10
+
+# ---------------------------------------------------------------------------------------------
+# I. FOUR CTEs, TWO of them AI-bearing, one of those SHARED between another CTE's body and the
+#    main query. This is the agent_bench Q26 arrangement and the shape that catches boundary
+#    regressions: the semantic split blows it up by an order of magnitude on the same rows.
+# ---------------------------------------------------------------------------------------------
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE i_on AS
+WITH a AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] a? '||body)),
+     b AS (SELECT id FROM hot),
+     bridge AS (SELECT a.id FROM a JOIN b ON b.id = a.id),
+     c AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] c? '||body))
+SELECT br.id FROM bridge br JOIN a a2 ON a2.id = br.id JOIN c ON c.id = br.id;
+
+# BOUND, not an exact count: this shape's count is not stable run to run (16-18 observed) because
+# two AI CTEs are evaluated concurrently and the per-row adaptive ordering makes slightly
+# different choices depending on which verdicts land first. The bound is what discriminates --
+# a boundary regression takes this into the hundreds, an order of magnitude clear of the noise.
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT <= 30 FROM ai_usage();
+----
+true
+
+# ---------------------------------------------------------------------------------------------
+# J. FIVE CTEs with COMPUTED keys and a union of two key sources. The predicate must see the
+#    union of what both branches admit, reached through a computed key on each side.
+# ---------------------------------------------------------------------------------------------
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE j_on AS
+WITH k1 AS (SELECT 'k_'||id::VARCHAR AS k, body FROM doc WHERE ai_filter('[p=60] j? '||body)),
+     k2 AS (SELECT 'k_'||id::VARCHAR AS k FROM hot),
+     k3 AS (SELECT 'k_'||id::VARCHAR AS k FROM warm),
+     u  AS (SELECT k FROM k2 UNION ALL SELECT k FROM k3),
+     f  AS (SELECT k1.k FROM k1 JOIN u ON u.k = k1.k)
+SELECT f.k FROM f;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+16
+
+# ---------------------------------------------------------------------------------------------
+# K. SIX CTEs in a deep chain, where the AI CTE's result is narrowed twice downstream and then
+#    read at TWO different depths. The predicate must still see only the rows the chain admits.
+# ---------------------------------------------------------------------------------------------
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE k_on AS
+WITH s1 AS (SELECT id, body FROM doc WHERE bucket < 8),
+     s2 AS (SELECT id, body FROM s1 WHERE ai_filter('[p=60] k? '||body)),
+     s3 AS (SELECT id FROM hot),
+     s4 AS (SELECT s2.id FROM s2 JOIN s3 ON s3.id = s2.id),
+     s5 AS (SELECT id FROM warm),
+     s6 AS (SELECT s4.id FROM s4 JOIN s5 ON s5.id = s4.id)
+SELECT id FROM s6 UNION ALL SELECT id FROM s4;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+10
+
+# ---------------------------------------------------------------------------------------------
+# CORRECTNESS: every shape must select exactly what the fully disabled stack selects.
+# ---------------------------------------------------------------------------------------------
+statement ok
+SET ai_pullup=false; SET ai_factorize='off'; SET ai_semi_reduce=false; SET ai_reorder=false;
+SET ai_join_factorize='off'; SET ai_limit=false; SET ai_inline_ai_ctes=false;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE h_off AS
+WITH base AS (SELECT id, body FROM doc WHERE bucket < 5),
+     sem  AS (SELECT id, body FROM base WHERE ai_filter('[p=60] h? '||body)),
+     keys AS (SELECT id FROM hot)
+SELECT s.id FROM sem s JOIN keys k ON k.id = s.id;
+
+statement ok
+CREATE TABLE i_off AS
+WITH a AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] a? '||body)),
+     b AS (SELECT id FROM hot),
+     bridge AS (SELECT a.id FROM a JOIN b ON b.id = a.id),
+     c AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] c? '||body))
+SELECT br.id FROM bridge br JOIN a a2 ON a2.id = br.id JOIN c ON c.id = br.id;
+
+statement ok
+CREATE TABLE j_off AS
+WITH k1 AS (SELECT 'k_'||id::VARCHAR AS k, body FROM doc WHERE ai_filter('[p=60] j? '||body)),
+     k2 AS (SELECT 'k_'||id::VARCHAR AS k FROM hot),
+     k3 AS (SELECT 'k_'||id::VARCHAR AS k FROM warm),
+     u  AS (SELECT k FROM k2 UNION ALL SELECT k FROM k3),
+     f  AS (SELECT k1.k FROM k1 JOIN u ON u.k = k1.k)
+SELECT f.k FROM f;
+
+statement ok
+CREATE TABLE k_off AS
+WITH s1 AS (SELECT id, body FROM doc WHERE bucket < 8),
+     s2 AS (SELECT id, body FROM s1 WHERE ai_filter('[p=60] k? '||body)),
+     s3 AS (SELECT id FROM hot),
+     s4 AS (SELECT s2.id FROM s2 JOIN s3 ON s3.id = s2.id),
+     s5 AS (SELECT id FROM warm),
+     s6 AS (SELECT s4.id FROM s4 JOIN s5 ON s5.id = s4.id)
+SELECT id FROM s6 UNION ALL SELECT id FROM s4;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM h_on EXCEPT SELECT * FROM h_off) UNION ALL (SELECT * FROM h_off EXCEPT SELECT * FROM h_on));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM i_on EXCEPT SELECT * FROM i_off) UNION ALL (SELECT * FROM i_off EXCEPT SELECT * FROM i_on));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM j_on EXCEPT SELECT * FROM j_off) UNION ALL (SELECT * FROM j_off EXCEPT SELECT * FROM j_on));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM k_on EXCEPT SELECT * FROM k_off) UNION ALL (SELECT * FROM k_off EXCEPT SELECT * FROM k_on));
+----
+0
+
+# every shape keeps some rows and not all of them, so the parity checks above are not vacuous
+query I
+SELECT min(n) > 0 AND max(n) < 200 FROM (
+  SELECT count(*) AS n FROM h_on UNION ALL SELECT count(*) FROM i_on UNION ALL
+  SELECT count(*) FROM j_on UNION ALL SELECT count(*) FROM k_on);
+----
+true

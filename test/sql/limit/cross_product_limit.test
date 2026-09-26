@@ -1,0 +1,114 @@
+# name: test/sql/limit/cross_product_limit.test
+# description: LIMIT k above a CROSS PRODUCT caps the AI-bearing side's INPUT.
+#
+#              A cross product has no join condition, so every row of one side pairs with every row
+#              of the other: the first k output rows need at most k rows from either side. Capping
+#              one side is therefore result-VALID -- it can only lose rows the outer LIMIT was
+#              going to discard.
+#
+#              WHERE THE CAP GOES IS THE WHOLE POINT. The AI region is a BLOCKING operator: it
+#              consumes its entire input, folds it to distinct values and calls the model before
+#              emitting a single row. A LIMIT placed ABOVE it stops nothing -- the calls are
+#              already paid for. The cap has to land on the region's INPUT. Sound only while the
+#              path down to the region is projections: a FILTER there could leave fewer than k
+#              survivors, so the walk stops at anything else.
+#
+#              agent_bench Q1 classifies 200 books to return 5 rows; 202 calls -> 5.
+#
+#              An unordered LIMIT returns an ARBITRARY k rows, so this changes WHICH rows come
+#              back -- every one of them still correct. Scoring such a query by row identity
+#              measures which rows an engine reached first, not whether it is right; see
+#              sembench/AGENTBENCH/eval_agentbench.py, which checks soundness and cardinality.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE big AS SELECT range AS id, 'title '||range::VARCHAR AS title FROM range(200);
+
+statement ok
+CREATE TABLE small AS SELECT range AS id, 'title '||range::VARCHAR AS title FROM range(6);
+
+statement ok
+CREATE TABLE decades AS SELECT range AS d FROM range(13);
+
+statement ok
+SELECT ai_usage_reset();
+
+# 200 rows for a LIMIT 5: cap it, and only 5 books are ever classified
+statement ok
+CREATE TABLE capped AS
+SELECT title, d, c FROM (SELECT title, ai_complete('[p=50] cat? '||title) AS c FROM big) x
+CROSS JOIN decades LIMIT 5;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+5
+
+# the LIMIT is still honoured exactly
+query I
+SELECT count(*) FROM capped;
+----
+5
+
+# SOUND: every row returned must exist in the unlimited result. Row identity is not asserted --
+# any 5 rows are a correct answer to an unordered LIMIT.
+statement ok
+CREATE TABLE unlimited AS
+SELECT title, d FROM (SELECT title, ai_complete('[p=50] cat? '||title) AS c FROM big) x
+CROSS JOIN decades;
+
+query I
+SELECT count(*) FROM (SELECT title, d FROM capped EXCEPT SELECT title, d FROM unlimited);
+----
+0
+
+# --- the cap applies at any size: a 6-row side and a LIMIT 5 still evaluates only 5
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE small_capped AS
+SELECT title, d, c FROM (SELECT title, ai_complete('[p=50] cat? '||title) AS c FROM small) x
+CROSS JOIN decades LIMIT 5;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+5
+
+query I
+SELECT count(*) FROM small_capped;
+----
+5
+
+# --- a FILTER between the cross product and the region blocks the cap: k inputs could leave fewer
+# than k survivors, so the limit must not be pushed past it.
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE filtered AS
+SELECT title, d FROM (SELECT title FROM big WHERE ai_filter('[p=50] keep? '||title)) x
+CROSS JOIN decades LIMIT 5;
+
+# more than 5 calls: the predicate cannot know which rows survive without evaluating them
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT > 5 FROM ai_usage();
+----
+true
+
+query I
+SELECT count(*) FROM filtered;
+----
+5

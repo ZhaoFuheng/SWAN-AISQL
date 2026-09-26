@@ -1,0 +1,11 @@
+context_id,context_name,audience,message_focus,target_year,quality_rule,book_signal
+ctx_01,military_family_bedtime_comfort_toddler,parents with toddlers,supporting soldiers and veteran families plus bedtime comfort,2020,verified + rating=5 + helpful>=2,children picture book about Buddy the Soldier Bear
+ctx_02,school_library_kindness_story,elementary school librarians,empathy and friendship building,2019,verified + rating>=4 + helpful>=1,children storybook suitable for read aloud
+ctx_03,veteran_outreach_gift_pick,military community organizers,thank-you gift for veteran families,2021,verified + rating>=4.5 + helpful>=2,patriotic children title with warm tone
+ctx_04,new_parent_evening_read,new parents,short calming bedtime narrative,2020,verified + rating>=4 + helpful>=1,picture book with comforting character arc
+ctx_05,holiday_charity_book_drive,nonprofit volunteers,family values and support messaging,2020,verified + rating>=4 + helpful>=2,children title appropriate for donations
+ctx_06,homeschool_reading_list,homeschool educators,moral lesson plus accessible language,2018,verified + rating>=4 + helpful>=1,young-reader friendly children book
+ctx_07,pediatric_waiting_room_pick,pediatric clinic staff,calming and reassuring tone for kids,2022,verified + rating>=4 + helpful>=1,non-scary children picture book
+ctx_08,community_book_club_parents,parent book club,discussion around service and family,2020,verified + rating>=4.5 + helpful>=2,children book tied to military family themes
+ctx_09,teacher_social_emotional_unit,K-2 teachers,social emotional learning through story,2019,verified + rating>=4 + helpful>=1,classroom-friendly children narrative
+ctx_10,gift_shop_patriotic_children_section,museum gift shop buyers,patriotic but age-appropriate storytelling,2020,verified + rating>=4 + helpful>=2,children picture book with military-support message

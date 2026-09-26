@@ -1,0 +1,69 @@
+# name: test/sql/functions/case_branch_laziness.test
+# description: CASE with a semantic operator per branch fires exactly ONE op per row: the
+#              pre-issue machinery (scan-region hoist, speculative prefetch) must never eagerly
+#              evaluate a THEN branch or a non-first WHEN condition a row might not take.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+# --- THEN-branch ops: 90 rows across 3 branches -> exactly 90 calls (270 if any branch pre-fires)
+statement ok
+CREATE TABLE t3 AS SELECT i, 'row nr '||i::VARCHAR AS s, i % 3 AS g FROM range(90) r(i);
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TEMP TABLE o1 AS
+SELECT CASE WHEN g=0 THEN ai_complete('branch A summarize: '||s)
+            WHEN g=1 THEN ai_complete('branch B translate: '||s)
+            ELSE          ai_complete('branch C classify: '||s) END AS v
+FROM t3;
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+90
+
+# --- WHEN-condition ops short-circuit: c2 fires only where c1 was false. The mock's [p=NN]
+# hash pass is deterministic, so the exact split is stable: 44 of 80 pass c1 -> 80 + 36 = 116.
+# An eager evaluator would pay exactly 160.
+statement ok
+CREATE TABLE t2 AS SELECT 'item nr '||i::VARCHAR AS s FROM range(80) r(i);
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TEMP TABLE o2 AS
+SELECT CASE WHEN ai_filter('[p=50] c1: '||s) THEN 'a'
+            WHEN ai_filter('[p=50] c2: '||s) THEN 'b' ELSE 'c' END AS v
+FROM t2;
+
+query I
+SELECT ((sum(llm_calls) - sum(embed_calls)) < 160)::BOOLEAN FROM ai_usage();
+----
+true
+
+# --- branch laziness must not break dedup: 300 duplicate-heavy rows, 3 branches x 10 distinct
+# values -> 30 calls, everything else served by the local cache.
+statement ok
+CREATE TABLE td AS SELECT 'dup '||(i % 10)::VARCHAR AS s, i % 3 AS g FROM range(300) r(i);
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TEMP TABLE o3 AS
+SELECT CASE WHEN g=0 THEN ai_complete('X: '||s)
+            WHEN g=1 THEN ai_complete('Y: '||s)
+            ELSE          ai_complete('Z: '||s) END AS v
+FROM td;
+
+query II
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT, sum(cache_hits)::BIGINT FROM ai_usage();
+----
+30	270

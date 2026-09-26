@@ -1,0 +1,95 @@
+# name: test/sql/functions/keybind_idempotent.test
+# description: AI function binding must be IDEMPOTENT. DuckDB re-binds a function whenever it
+#              duplicates a plan (LogicalOperator::Copy serializes + deserializes; CTE inlining
+#              copies the body once per reference). AIKeyBind appends one history-key column per
+#              column-ref in the prompt, so a second bind used to append them AGAIN -- shifting
+#              key_start and growing the argument list, which can select a different overload
+#              (ai_complete(prompt) -> ai_complete(prompt, json_schema), reading a key column as
+#              the schema). The call then silently produced nothing.
+#              Symptom that found it (agent_bench Q26): an inlined CTE self-cross-joined
+#              returned 0 rows instead of 671*671 -- impossible for a cross product of a
+#              non-empty relation. Verified A/B on the real endpoint: 450,241 with the fix,
+#              0 without.
+#              COVERAGE: this file fails with the fix reverted. That required a mock-fidelity
+#              fix too -- the mock used to answer a request whose body was not valid JSON with a
+#              benign "ok", hiding exactly this failure; it now returns 400 like the provider.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE items AS SELECT range AS k, 'name '||range::VARCHAR AS nm, 'desc '||range::VARCHAR AS ds
+FROM range(12);
+
+# --- how many rows the predicate keeps with a single reference (no duplication involved)
+statement ok
+CREATE TABLE base AS
+SELECT k FROM items WHERE (lower(ai_complete('classify: '||nm||' / '||ds)) IN ('ok'));
+
+# the mock answers 'ok' for every prompt, so all 12 survive
+query I
+SELECT count(*) FROM base;
+----
+12
+
+# --- NESTED call form (ai_complete inside lower(..) IN (..)), CTE referenced TWICE so DuckDB
+# must duplicate + re-bind it. The cross product must be exactly 12 x 12.
+query I
+WITH c AS NOT MATERIALIZED (
+  SELECT k, nm, ds FROM items WHERE (lower(ai_complete('classify: '||nm||' / '||ds)) IN ('ok'))
+)
+SELECT count(*) FROM c a, c b;
+----
+144
+
+# equi-join on the duplicated CTE's own key: every row must find itself
+query I
+WITH c AS NOT MATERIALIZED (
+  SELECT k, nm, ds FROM items WHERE (lower(ai_complete('classify: '||nm||' / '||ds)) IN ('ok'))
+)
+SELECT count(*) FROM c a JOIN c b ON b.k = a.k;
+----
+12
+
+# --- BARE predicate form, same duplication
+query I
+WITH c AS NOT MATERIALIZED (
+  SELECT k, nm FROM items WHERE ai_filter('[p=100] keep? '||nm)
+)
+SELECT count(*) FROM c a, c b;
+----
+144
+
+# --- the duplicated copies must agree, not merely be non-empty: an inlined copy that resampled
+# or mis-bound would lose rows here
+query I
+WITH c AS NOT MATERIALIZED (
+  SELECT k FROM items WHERE (lower(ai_complete('classify: '||nm||' / '||ds)) IN ('ok'))
+)
+SELECT count(*) FROM (SELECT k FROM c INTERSECT SELECT k FROM c) x;
+----
+12
+
+# --- materialized and inlined must agree exactly
+statement ok
+CREATE TABLE mat AS
+WITH c AS (
+  SELECT k FROM items WHERE (lower(ai_complete('classify: '||nm||' / '||ds)) IN ('ok'))
+)
+SELECT a.k FROM c a JOIN c b ON b.k = a.k;
+
+statement ok
+CREATE TABLE inl AS
+WITH c AS NOT MATERIALIZED (
+  SELECT k FROM items WHERE (lower(ai_complete('classify: '||nm||' / '||ds)) IN ('ok'))
+)
+SELECT a.k FROM c a JOIN c b ON b.k = a.k;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM mat EXCEPT SELECT * FROM inl)
+                      UNION ALL (SELECT * FROM inl EXCEPT SELECT * FROM mat));
+----
+0

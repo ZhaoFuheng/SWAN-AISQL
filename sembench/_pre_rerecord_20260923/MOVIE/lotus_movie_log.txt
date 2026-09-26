@@ -1,0 +1,47 @@
+
+== 2026-09-04 01:21:54 EDT ==
+LOTUS MOVIE gpt-5-mini via http://localhost:4001  concurrency=20  sf2000  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10']
+q1   lat=  250.4s fresh=  1864 tok=   537490 $0.6421  n=5/1487  P/a=1.0 R/b=1.0 quality=1.0
+q2   lat=   16.6s fresh=     0 tok=    31347 $0.0376  n=5/14  P/a=1.0 R/b=1.0 quality=1.0
+q3   lat=   17.2s fresh=   120 tok=    30540 $0.0366  n=1/1  P/a=11.0 R/b=0.2143 quality=0.786
+q4   lat=   14.9s fresh=   119 tok=    29315 $0.0339  n=1/1  P/a=0.0833 R/b=0.2857 quality=0.714
+q5   lat=10075.6s fresh= 18422 tok= 26721341 $29.7587  n=10/32288  P/a=0.889 R/b=0.8 quality=0.842
+q6   lat=10348.9s fresh= 18426 tok= 27401928 $31.2346  n=10/32736  P/a=1.0 R/b=0.9 quality=0.947
+q7   lat=10244.8s fresh=     0 tok= 27389516 $31.2097  n=28196/32736  P/a=0.808 R/b=0.766 quality=0.786
+q8   lat=   13.6s fresh=   119 tok=    23411 $0.0232  n=2/2  P/a=0.0 R/b=0.0404 quality=0.96
+q9   lat=   33.0s fresh=   142 tok=    87807 $0.0778  n=256/256  P/a=0.766 R/b=0.587 quality=0.766
+q10  lat=  233.0s fresh=  1736 tok=   630945 $0.5385  n=105/116  P/a=0.41 R/b=0.288 quality=0.41
+TOTAL(10q)  latency=31248.0s  cost=$93.5927  tokens=82883640  fresh=40948  macro-quality=0.821
+
+== 2026-09-18 04:39:33 PDT ==
+LOTUS MOVIE gpt-5.6-luna via http://localhost:4001  concurrency=20  sf2000  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10']
+q1   lat=   94.4s fresh=  1864 tok=   291597 $0.1025  n=5/1487  P/a=1.0 R/b=1.0 quality=1.0
+q2   lat=    7.1s fresh=     0 tok=    17153 $0.0062  n=5/14  P/a=0.8 R/b=0.8 quality=0.8
+q3   lat=    7.4s fresh=   119 tok=    16701 $0.0060  n=1/1  P/a=10.0 R/b=0.2857 quality=0.714
+q4   lat=    6.1s fresh=   120 tok=    16277 $0.0054  n=1/1  P/a=0.0917 R/b=0.2143 quality=0.786
+q5   lat= 3152.0s fresh= 18322 tok= 15088478 $4.5725  n=10/32288  P/a=0.778 R/b=0.7 quality=0.737
+q6   lat= 3559.5s fresh= 18258 tok= 15282968 $4.8714  n=10/32736  P/a=1.0 R/b=1.0 quality=1.0
+q7   lat= 3521.1s fresh=     0 tok= 15275944 $4.8630  n=24804/32736  P/a=0.759 R/b=0.723 quality=0.74
+q8   lat=    7.8s fresh=   119 tok=    14114 $0.0034  n=2/2  P/a=0.0 R/b=0.1213 quality=0.879
+q9   lat=   12.0s fresh=   143 tok=    56894 $0.0124  n=256/256  P/a=0.76 R/b=0.606 quality=0.76
+q10  lat=   93.0s fresh=  1736 tok=   421442 $0.0924  n=105/116  P/a=0.43 R/b=0.305 quality=0.43
+TOTAL(10q)  latency=10460.4s  cost=$14.5353  tokens=46481568  fresh=40681  macro-quality=0.785
+
+== 2026-09-18 10:40:09 PDT ==
+LOTUS MOVIE gpt-5.6-luna via http://localhost:4001  concurrency=20  sf2000  queries=['q2']
+q2   lat=    8.4s calls=   120 fresh=     0 tok=    17153 $0.0062  n=5/14  P/a=0.8 R/b=0.8 quality=0.8
+TOTAL(10q)  latency=10461.7s  cost=$14.5353  tokens=46481568  fresh=40681  macro-quality=0.785
+
+== 2026-09-18 10:50:45 PDT ==
+LOTUS MOVIE gpt-5.6-luna via http://localhost:4001  concurrency=20  sf2000  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10']
+q1   lat=   93.1s calls=  2000 fresh=     0 tok=   291597 $0.1025  n=5/1487  P/a=1.0 R/b=1.0 quality=1.0
+q2   lat=    7.2s calls=   120 fresh=     0 tok=    17153 $0.0062  n=5/14  P/a=0.8 R/b=0.8 quality=0.8
+q3   lat=    7.3s calls=   120 fresh=     0 tok=    16701 $0.0060  n=1/1  P/a=10.0 R/b=0.2857 quality=0.714
+q4   lat=    6.3s calls=   120 fresh=     0 tok=    16271 $0.0054  n=1/1  P/a=0.0917 R/b=0.2143 quality=0.786
+q5   lat= 3130.8s calls= 67284 fresh=     0 tok= 15080848 $4.5633  n=10/32288  P/a=0.778 R/b=0.7 quality=0.737
+q6   lat= 3527.7s calls= 65536 fresh=     0 tok= 15275944 $4.8630  n=10/32736  P/a=1.0 R/b=1.0 quality=1.0
+q7   lat= 3693.6s calls= 65536 fresh=     0 tok= 15275944 $4.8630  n=24804/32736  P/a=0.759 R/b=0.723 quality=0.74
+q8   lat=    7.7s calls=   120 fresh=     0 tok=    14114 $0.0034  n=2/2  P/a=0.0 R/b=0.1213 quality=0.879
+q9   lat=   11.9s calls=   256 fresh=     0 tok=    56894 $0.0124  n=256/256  P/a=0.759 R/b=0.604 quality=0.759
+q10  lat=   92.0s calls=  2000 fresh=     0 tok=   421442 $0.0924  n=105/116  P/a=0.43 R/b=0.305 quality=0.43
+TOTAL(10q)  latency=10577.6s  cost=$14.5177  tokens=46466908  fresh=0  macro-quality=0.784

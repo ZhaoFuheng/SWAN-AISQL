@@ -1,0 +1,122 @@
+# name: test/sql/lotus_envelope/never_worse_than_lotus.test
+# description: The LOTUS envelope: on every core shape, aisql's chat calls must be <= the
+#   LOTUS-equivalent count (flat evaluation: every operator evaluates every input row - a filter
+#   over N rows = N calls, a semantic join = |A|x|B| calls, no dedup, no early-stop), and results
+#   must equal flat evaluation's. "Never worse than LOTUS" in calls and answers, per shape.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+# ---- shape 1: filter over a base table with duplicates. LOTUS-equivalent = 300 calls.
+statement ok
+CREATE TABLE t1 AS SELECT 'doc '||(range % 30)::VARCHAR AS d FROM range(300);
+
+statement ok
+SELECT ai_local_cache_clear();
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) > 0 FROM t1 WHERE ai_filter('keep '||d||'?');
+----
+true
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT <= 300 FROM ai_usage();
+----
+true
+
+# ---- shape 2: join fan-out. 20 docs x 5 qs = 100 pairs; LOTUS sem_join = 100 calls.
+statement ok
+CREATE TABLE docs2 AS SELECT 'd'||(range % 20)::VARCHAR AS body FROM range(200);
+CREATE TABLE qs2 AS SELECT 'q'||range::VARCHAR AS q FROM range(5);
+
+statement ok
+SELECT ai_local_cache_clear();
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM docs2 d, qs2 q WHERE ai_filter('does '||d.body||' match '||q.q||'?');
+----
+true
+
+# 200x5 = 1000 joined rows would be LOTUS's 1000 calls even before its join semantics;
+# the distinct pair domain is 20x5 = 100. We must be <= the flat-evaluation envelope AND
+# in fact hit the factorized optimum here.
+query II
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT <= 1000,
+       (sum(llm_calls) - sum(embed_calls))::BIGINT = 100 FROM ai_usage();
+----
+true	true
+
+# ---- shape 3: LIMIT k. LOTUS evaluates all 400 rows then truncates; we may stop early.
+statement ok
+CREATE TABLE t3 AS SELECT 'row '||range::VARCHAR AS d FROM range(400);
+
+statement ok
+SELECT ai_local_cache_clear();
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM (SELECT d FROM t3 WHERE ai_filter('ok '||d||'?') LIMIT 5);
+----
+5
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT <= 400 FROM ai_usage();
+----
+true
+
+# ---- shape 4: DISTINCT consumer over a join: LOTUS = every joined row; we semi-convert.
+statement ok
+CREATE TABLE a4 AS SELECT range AS aid, range % 50 AS k, 'item '||(range%8)::VARCHAR AS x FROM range(200);
+CREATE TABLE b4 AS SELECT range AS bid FROM range(40);
+
+statement ok
+SELECT ai_local_cache_clear();
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) <= 2 FROM (SELECT DISTINCT ai_classify(a4.x, {'p':'p','q':'q'}) FROM a4 JOIN b4 ON a4.k = b4.bid);
+----
+true
+
+# joined rows = 160; distinct survivors' inputs = 8. Envelope <= 160, optimum = 8.
+query II
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT <= 160,
+       (sum(llm_calls) - sum(embed_calls))::BIGINT = 8 FROM ai_usage();
+----
+true	true
+
+# ---- result parity: the optimized stack answers exactly like flat evaluation (all passes off)
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT string_agg(d, ',' ORDER BY d) FROM t1 WHERE ai_filter('keep '||d||'?') AND d LIKE '%1%';
+----
+<REGEX>:.+
+
+statement ok
+CREATE TABLE flat_result AS SELECT d FROM t1 WHERE ai_filter('keep '||d||'?');
+
+statement ok
+SET ai_pullup=false; SET ai_factorize='off'; SET ai_semi_reduce=false;
+SET ai_reorder=false; SET ai_join_factorize='off'; SET ai_limit=false;
+
+query I
+SELECT count(*) FROM (
+  (SELECT d FROM t1 WHERE ai_filter('keep '||d||'?') EXCEPT SELECT d FROM flat_result)
+  UNION ALL
+  (SELECT d FROM flat_result EXCEPT SELECT d FROM t1 WHERE ai_filter('keep '||d||'?')));
+----
+0
+
+statement ok
+RESET ai_pullup; RESET ai_factorize; RESET ai_semi_reduce;
+RESET ai_reorder; RESET ai_join_factorize; RESET ai_limit;
+
+statement ok
+CALL ai_mock_stop();

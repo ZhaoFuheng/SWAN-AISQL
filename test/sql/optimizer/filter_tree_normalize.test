@@ -1,0 +1,130 @@
+# name: test/sql/optimizer/filter_tree_normalize.test
+# description: The boolean tree handed to the DP orderer is normalized: leaves are identified by
+#              their PROMPT (the same question asked twice is one leaf), NOT is pushed to the
+#              leaves (De Morgan), same-type nodes are flattened, and duplicate / absorbed /
+#              common-factored subtrees collapse.
+#              WHY, precisely: this is not a call saving. A repeated leaf already costs one call
+#              (the two occurrences share a prompt, so the local cache serves the second), and
+#              lazy AND/OR already short-circuits. The DP orderer, however, costs the tree
+#              assuming leaves are INDEPENDENT -- two occurrences of one predicate are perfectly
+#              correlated, so an un-normalized tree is mis-costed and can be ordered badly.
+#              Normalizing makes the model's assumption true.
+#              KLEENE ONLY: every rule below holds in three-valued logic, which is the logic an AI
+#              leaf lives in (its verdict may be NULL/UNKNOWN). Complement (`a AND NOT a`) is NOT
+#              applied -- it is UNKNOWN, not FALSE, when a is UNKNOWN.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE t AS SELECT range AS k, 'row '||range::VARCHAR AS nm FROM range(40);
+
+# --- shapes. The folded node carries the serialized tree, so the normal form is directly visible.
+
+# same question twice under AND is ONE leaf, and two different questions stay two
+query II
+EXPLAIN SELECT k FROM t WHERE ai_filter('[p=60] a? '||nm) AND ai_filter('[p=60] b? '||nm);
+----
+physical_plan	<REGEX>:.*ai_function_with_embed\('A\(L0,L1\)'.*
+
+# De Morgan: NOT over a conjunction becomes a disjunction of negated leaves
+query II
+EXPLAIN SELECT k FROM t WHERE NOT(ai_filter('[p=60] a? '||nm) AND ai_filter('[p=60] b? '||nm));
+----
+physical_plan	<REGEX>:.*ai_function_with_embed\('O\(N\(L0\),N\(L1\)\)'.*
+
+# factoring: (a AND b) OR (a AND c) == a AND (b OR c) -- one leaf for a, not one per branch
+query II
+EXPLAIN SELECT k FROM t WHERE (ai_filter('[p=60] a? '||nm) AND ai_filter('[p=60] b? '||nm))
+                           OR (ai_filter('[p=60] a? '||nm) AND ai_filter('[p=60] c? '||nm));
+----
+physical_plan	<REGEX>:.*ai_function_with_embed\('A\(L0,O\(L1,L2\)\)'.*
+
+# absorption: a OR (a AND b) == a -- collapses to a single leaf, so no folded node at all.
+# The prompt carries AIKeyBind's all-columns-NULL guard; for a non-nullable column its condition
+# constant-folds to `false`, so the guard costs nothing where it cannot apply.
+query II
+EXPLAIN SELECT k FROM t
+WHERE ai_filter('[p=60] a? '||nm) OR (ai_filter('[p=60] a? '||nm) AND ai_filter('[p=60] b? '||nm));
+----
+physical_plan	<REGEX>:.*ai_filter\(CASE.*'\[p=60\] a\? '.*
+
+# --- correctness: each normalized form must select exactly what its hand-simplified equivalent does
+
+statement ok
+CREATE TABLE factored AS SELECT k FROM t
+WHERE (ai_filter('[p=60] a? '||nm) AND ai_filter('[p=60] b? '||nm))
+   OR (ai_filter('[p=60] a? '||nm) AND ai_filter('[p=60] c? '||nm));
+
+statement ok
+CREATE TABLE factored_ref AS SELECT k FROM t
+WHERE ai_filter('[p=60] a? '||nm) AND (ai_filter('[p=60] b? '||nm) OR ai_filter('[p=60] c? '||nm));
+
+query I
+SELECT count(*) FROM ((SELECT * FROM factored EXCEPT SELECT * FROM factored_ref)
+                      UNION ALL (SELECT * FROM factored_ref EXCEPT SELECT * FROM factored));
+----
+0
+
+# the predicate is genuinely selective (an all-true or all-false tree would match trivially)
+query I
+SELECT count(*) > 0 AND count(*) < 40 FROM factored;
+----
+true
+
+statement ok
+CREATE TABLE absorbed AS SELECT k FROM t
+WHERE ai_filter('[p=60] a? '||nm) OR (ai_filter('[p=60] a? '||nm) AND ai_filter('[p=60] b? '||nm));
+
+statement ok
+CREATE TABLE absorbed_ref AS SELECT k FROM t WHERE ai_filter('[p=60] a? '||nm);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM absorbed EXCEPT SELECT * FROM absorbed_ref)
+                      UNION ALL (SELECT * FROM absorbed_ref EXCEPT SELECT * FROM absorbed));
+----
+0
+
+statement ok
+CREATE TABLE demorgan AS SELECT k FROM t
+WHERE NOT(ai_filter('[p=60] a? '||nm) AND ai_filter('[p=60] b? '||nm));
+
+statement ok
+CREATE TABLE demorgan_ref AS SELECT k FROM t
+WHERE (NOT ai_filter('[p=60] a? '||nm)) OR (NOT ai_filter('[p=60] b? '||nm));
+
+query I
+SELECT count(*) FROM ((SELECT * FROM demorgan EXCEPT SELECT * FROM demorgan_ref)
+                      UNION ALL (SELECT * FROM demorgan_ref EXCEPT SELECT * FROM demorgan));
+----
+0
+
+# --- THREE-VALUED check: a NULL input makes the verdict UNKNOWN, and the rules must still agree.
+# A NULL column poisons the concatenated prompt, so these rows carry an UNKNOWN leaf.
+statement ok
+CREATE TABLE tn AS
+SELECT range AS k, CASE WHEN range % 4 = 0 THEN NULL ELSE 'row '||range::VARCHAR END AS nm FROM range(40);
+
+statement ok
+CREATE TABLE kleene AS SELECT k FROM tn
+WHERE (ai_filter('[p=60] a? '||nm) AND ai_filter('[p=60] b? '||nm))
+   OR (ai_filter('[p=60] a? '||nm) AND ai_filter('[p=60] c? '||nm));
+
+statement ok
+CREATE TABLE kleene_ref AS SELECT k FROM tn
+WHERE ai_filter('[p=60] a? '||nm) AND (ai_filter('[p=60] b? '||nm) OR ai_filter('[p=60] c? '||nm));
+
+query I
+SELECT count(*) FROM ((SELECT * FROM kleene EXCEPT SELECT * FROM kleene_ref)
+                      UNION ALL (SELECT * FROM kleene_ref EXCEPT SELECT * FROM kleene));
+----
+0
+
+# the UNKNOWN rows really are present and really are excluded (10 of 40 have a NULL prompt)
+query I
+SELECT count(*) FROM kleene WHERE k % 4 = 0;
+----
+0

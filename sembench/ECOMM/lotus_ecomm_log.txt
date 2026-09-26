@@ -1,0 +1,155 @@
+
+== 2026-07-22 17:40:04 MDT ==
+LOTUS ECOMM gpt-5-mini via http://localhost:4001  concurrency=20  sf500  queries=['q1']
+q1   lat=   65.4s fresh=  500 tok=  233558 $0.1508  n=7/7  P=1.0 R=1.0 f1=1.0
+TOTAL(1q)  latency=65.4s  cost=$0.1508  tokens=233558  fresh=500  macro-quality=1.0
+
+== 2026-07-22 17:41:31 MDT ==
+LOTUS ECOMM gpt-5-mini via http://localhost:4001  concurrency=20  sf500  queries=['q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q11', 'q12', 'q13', 'q14']
+q2   lat=  174.9s fresh=  500 tok= 1337636 $0.3981  n=16/5  P=0.312 R=1.0 f1=0.476
+q3   lat=   54.8s fresh=  500 tok=  228358 $0.1412  n=500/500  P=1.0 R=1.0 ari=0.975
+q4   lat=  101.9s fresh=  294 tok=  810921 $0.2487  n=294/294  P=1.0 R=1.0 ari=0.716
+q5   lat=   21.3s fresh=  228 tok=  144535 $0.0659  n=228/228  P=1.0 R=1.0 ari=0.983
+q6   lat=   88.1s fresh=  228 tok=  698584 $0.1947  n=228/228  P=1.0 R=1.0 ari=0.791
+q7   lat= 1086.5s fresh= 7832 tok= 6141905 $3.9882  n=173/173  P=0.902 R=0.902 f1=0.902
+q8   lat=  191.6s fresh=  500 tok= 1356208 $0.4221  n=17/1  P=0.0 R=0.0 f1=0.0
+q9   lat=  314.8s fresh=  784 tok= 4531034 $1.1482  n=65/46  P=0.662 R=0.935 f1=0.775
+q10  lat=  311.1s fresh= 1328 tok= 3474233 $1.4072  n=26/8  P=0.0 R=0.0 f1=0.0
+q11  lat=  727.0s fresh= 2580 tok= 5790013 $1.9045  n=36/18  P=0.5 R=1.0 f1=0.667
+q12  lat=  107.8s fresh=  540 tok=  476977 $0.2596  n=63/58  P=0.873 R=0.948 f1=0.909
+q13  lat=  230.0s fresh=  500 tok= 1581590 $0.3879  n=11/12  P=0.818 R=0.75 f1=0.783
+q14  lat=  301.4s fresh=  542 tok= 1491682 $0.4026  n=3/2  P=0.667 R=1.0 f1=0.8
+TOTAL(14q)  latency=3776.6s  cost=$11.1199  tokens=28297234  fresh=16856  macro-quality=0.698
+
+== 2026-08-30 02:28:39 PDT ==
+LOTUS ECOMM gpt-5-mini via http://localhost:4001  concurrency=20  sf500  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q11', 'q12', 'q13', 'q14']
+q1   lat=   58.7s fresh=    0 tok=  233558 $0.1508  n=7/7  P=1.0 R=1.0 f1=1.0
+q2   lat=  174.8s fresh=    0 tok= 1337636 $0.3981  n=16/5  P=0.312 R=1.0 f1=0.476
+q3   lat= 1826.4s fresh=    0 tok=  228358 $0.1412  n=500/500  P=1.0 R=1.0 ari=0.975
+q4   lat=  100.3s fresh=    0 tok=  810921 $0.2487  n=294/294  P=1.0 R=1.0 ari=0.716
+q5   lat= 1819.6s fresh=    0 tok=  144535 $0.0659  n=228/228  P=1.0 R=1.0 ari=0.983
+q6   lat= 1334.0s fresh=    0 tok=  698584 $0.1947  n=228/228  P=1.0 R=1.0 ari=0.791
+q7   lat=21618.9s fresh=    0 tok= 6140369 $3.9852  n=173/173  P=0.902 R=0.902 f1=0.902
+q8   lat=  212.2s fresh=    0 tok= 1356208 $0.4221  n=17/1  P=0.0 R=0.0 f1=0.0
+q9   lat=  314.2s fresh=    0 tok= 4531034 $1.1482  n=65/46  P=0.662 R=0.935 f1=0.775
+q10  lat=  311.4s fresh=    0 tok= 3474233 $1.4072  n=26/8  P=0.0 R=0.0 f1=0.0
+q11  lat=  765.2s fresh=    0 tok= 5787581 $1.9079  n=36/18  P=0.5 R=1.0 f1=0.667
+q12  lat=  105.8s fresh=    0 tok=  476977 $0.2596  n=63/58  P=0.873 R=0.948 f1=0.909
+q13  lat=  244.9s fresh=    0 tok= 1581590 $0.3879  n=11/12  P=0.818 R=0.75 f1=0.783
+q14  lat=  604.2s fresh=    6 tok= 1503004 $0.4055  n=3/2  P=0.667 R=1.0 f1=0.8
+TOTAL(14q)  latency=29490.6s  cost=$11.1232  tokens=28304588  fresh=6  macro-quality=0.698
+
+== 2026-08-30 18:33:46 PDT ==
+LOTUS ECOMM gpt-5-mini via http://localhost:4001  concurrency=20  sf500  queries=['q3', 'q5', 'q6', 'q7', 'q14']
+q3   lat=   56.5s fresh=    0 tok=  228358 $0.1412  n=500/500  P=1.0 R=1.0 ari=0.975
+q5   lat=   21.6s fresh=    0 tok=  144535 $0.0659  n=228/228  P=1.0 R=1.0 ari=0.983
+q6   lat=   98.8s fresh=    0 tok=  698584 $0.1947  n=228/228  P=1.0 R=1.0 ari=0.791
+q7   lat= 1084.5s fresh=    0 tok= 6140369 $3.9852  n=173/173  P=0.902 R=0.902 f1=0.902
+q14  lat=  297.2s fresh=    5 tok= 1518762 $0.4097  n=3/2  P=0.667 R=1.0 f1=0.8
+TOTAL(14q)  latency=3846.1s  cost=$11.1274  tokens=28320346  fresh=5  macro-quality=0.698
+
+== 2026-09-18 03:00:24 PDT ==
+LOTUS ECOMM gpt-5.6-luna via http://localhost:4001  concurrency=20  sf500  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q11', 'q12', 'q13', 'q14']
+q1   lat=   22.9s fresh=  500 tok=  184334 $0.0404  n=7/7  P=1.0 R=1.0 f1=1.0
+q2   lat=  322.0s fresh=  500 tok= 1693420 $0.3418  n=15/5  P=0.333 R=1.0 f1=0.5
+q3   lat=   27.2s fresh=  500 tok=  187167 $0.0443  n=500/500  P=1.0 R=1.0 ari=0.936
+q4   lat=  199.4s fresh=  294 tok= 1039094 $0.2111  n=294/294  P=1.0 R=1.0 ari=0.739
+q5   lat=   10.9s fresh=  228 tok=  128638 $0.0269  n=228/228  P=1.0 R=1.0 ari=1.0
+q6   lat=  206.0s fresh=  228 tok=  928559 $0.1868  n=228/228  P=1.0 R=1.0 ari=0.688
+q7   lat=  407.5s fresh= 7832 tok= 4908946 $1.1504  n=183/173  P=0.869 R=0.919 f1=0.893
+q8   lat=  323.9s fresh=  500 tok= 1709296 $0.3534  n=14/1  P=0.071 R=1.0 f1=0.133
+q9   lat=  856.0s fresh=  784 tok= 6083384 $1.1542  n=121/46  P=0.364 R=0.957 f1=0.527
+q10  lat=  316.3s fresh=  772 tok= 2123405 $0.4351  n=0/8  P=0.0 R=0.0 f1=0.0
+q11  lat= 1102.9s fresh= 3744 tok= 8042780 $1.6727  n=88/18  P=0.205 R=1.0 f1=0.34
+q12  lat=   73.8s fresh=  540 tok=  478432 $0.1013  n=63/58  P=0.873 R=0.948 f1=0.909
+q13  lat=  326.3s fresh=  500 tok= 1896541 $0.3791  n=11/12  P=0.818 R=0.75 f1=0.783
+q14  lat=  352.7s fresh=  536 tok= 1889815 $0.3807  n=3/2  P=1.0 R=0.5 f1=0.667
+TOTAL(14q)  latency=4547.8s  cost=$6.4783  tokens=31293811  fresh=17458  macro-quality=0.651
+
+== 2026-09-19 00:10:05 PDT ==
+LOTUS ECOMM gpt-5.6-luna via http://localhost:4001  concurrency=20  sf500  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q11', 'q12', 'q13', 'q14']
+q1   lat=   22.5s fresh=    0 tok=  184334 $0.0404  n=7/7  P=1.0 R=1.0 f1=1.0
+q2   lat=  322.6s fresh=    0 tok= 1693420 $0.3418  n=15/5  P=0.333 R=1.0 f1=0.5
+q3   lat=   26.7s fresh=    0 tok=  187167 $0.0443  n=500/500  P=1.0 R=1.0 ari=0.936
+q4   lat=  199.2s fresh=    0 tok= 1039094 $0.2111  n=294/294  P=1.0 R=1.0 ari=0.739
+q5   lat=   10.7s fresh=    0 tok=  128638 $0.0269  n=228/228  P=1.0 R=1.0 ari=1.0
+q6   lat=  205.9s fresh=    0 tok=  928559 $0.1868  n=228/228  P=1.0 R=1.0 ari=0.688
+q7   lat=  400.3s fresh=    0 tok= 4908407 $1.1498  n=183/173  P=0.869 R=0.919 f1=0.893
+q8   lat=  315.3s fresh=    0 tok= 1709296 $0.3534  n=14/1  P=0.071 R=1.0 f1=0.133
+q9   lat=  795.2s fresh=    0 tok= 6083384 $1.1542  n=121/46  P=0.364 R=0.957 f1=0.527
+q10  lat=  329.0s fresh=    0 tok= 2123405 $0.4351  n=0/8  P=0.0 R=0.0 f1=0.0
+q11  lat= 1126.1s fresh=    0 tok= 8042560 $1.6955  n=84/18  P=0.214 R=1.0 f1=0.353
+q12  lat=   73.5s fresh=    0 tok=  478432 $0.1013  n=63/58  P=0.873 R=0.948 f1=0.909
+q13  lat=  331.3s fresh=    0 tok= 1896541 $0.3791  n=11/12  P=0.818 R=0.75 f1=0.783
+q14  lat=  364.7s fresh=    5 tok= 1911931 $0.3854  n=3/2  P=0.5 R=0.5 f1=0.5
+TOTAL(14q)  latency=4523.0s  cost=$6.505  tokens=31315168  fresh=5  macro-quality=0.64
+
+== 2026-09-23 18:12:21 MDT ==
+LOTUS ECOMM gpt-5.6-luna via http://127.0.0.1:4011  concurrency=20  sf500  queries=['q1']
+q1   lat=   24.9s fresh=  500 tok=  184175 $0.0402  n=7/7  P=1.0 R=1.0 f1=1.0
+TOTAL(14q)  latency=4525.4s  cost=$6.5049  tokens=31315009  fresh=505  macro-quality=0.64
+
+== 2026-09-23 18:13:26 MDT ==
+LOTUS ECOMM gpt-5.6-luna via http://127.0.0.1:4011  concurrency=20  sf500  queries=['q2']
+q2   lat=  127.7s fresh=  500 tok= 1693431 $0.3418  n=15/5  P=0.333 R=1.0 f1=0.5
+TOTAL(14q)  latency=4330.5s  cost=$6.5049  tokens=31315020  fresh=1005  macro-quality=0.64
+
+== 2026-09-23 18:16:27 MDT ==
+LOTUS ECOMM gpt-5.6-luna via http://127.0.0.1:4011  concurrency=20  sf500  queries=['q3']
+q3   lat=   32.1s fresh=  500 tok=  187057 $0.0442  n=500/500  P=1.0 R=1.0 ari=0.941
+TOTAL(14q)  latency=4335.9s  cost=$6.5047  tokens=31314910  fresh=1505  macro-quality=0.64
+
+== 2026-09-23 18:17:37 MDT ==
+LOTUS ECOMM gpt-5.6-luna via http://127.0.0.1:4011  concurrency=20  sf500  queries=['q4']
+q4   lat=   94.2s fresh=  294 tok= 1039094 $0.2111  n=294/294  P=1.0 R=1.0 ari=0.719
+TOTAL(14q)  latency=4230.9s  cost=$6.5047  tokens=31314910  fresh=1799  macro-quality=0.639
+
+== 2026-09-23 18:19:49 MDT ==
+LOTUS ECOMM gpt-5.6-luna via http://127.0.0.1:4011  concurrency=20  sf500  queries=['q5']
+q5   lat=   12.2s fresh=  228 tok=  128638 $0.0269  n=228/228  P=1.0 R=1.0 ari=1.0
+TOTAL(14q)  latency=4232.4s  cost=$6.5047  tokens=31314910  fresh=2027  macro-quality=0.639
+
+== 2026-09-23 18:20:25 MDT ==
+LOTUS ECOMM gpt-5.6-luna via http://127.0.0.1:4011  concurrency=20  sf500  queries=['q6']
+q6   lat=   89.8s fresh=  228 tok=  928559 $0.1868  n=228/228  P=1.0 R=1.0 ari=0.688
+TOTAL(14q)  latency=4116.3s  cost=$6.5047  tokens=31314910  fresh=2255  macro-quality=0.639
+
+== 2026-09-23 18:22:31 MDT ==
+LOTUS ECOMM gpt-5.6-luna via http://127.0.0.1:4011  concurrency=20  sf500  queries=['q7']
+q7   lat=  414.7s fresh= 7832 tok= 4876739 $1.1118  n=183/173  P=0.869 R=0.919 f1=0.893
+TOTAL(14q)  latency=4130.7s  cost=$6.4667  tokens=31283242  fresh=10087  macro-quality=0.639
+
+== 2026-09-23 18:36:21 MDT ==
+LOTUS ECOMM gpt-5.6-luna via http://127.0.0.1:4011  concurrency=20  sf500  queries=['q8']
+q8   lat=  126.7s fresh=  500 tok= 1708901 $0.3529  n=17/1  P=0.059 R=1.0 f1=0.111
+TOTAL(14q)  latency=3942.1s  cost=$6.4662  tokens=31282847  fresh=10587  macro-quality=0.637
+
+== 2026-09-23 18:39:17 MDT ==
+LOTUS ECOMM gpt-5.6-luna via http://127.0.0.1:4011  concurrency=20  sf500  queries=['q9']
+q9   lat=  173.1s fresh=  784 tok= 6082880 $1.2227  n=121/46  P=0.372 R=0.978 f1=0.539
+TOTAL(14q)  latency=3320.0s  cost=$6.5347  tokens=31282343  fresh=11371  macro-quality=0.638
+
+== 2026-09-23 18:43:30 MDT ==
+LOTUS ECOMM gpt-5.6-luna via http://127.0.0.1:4011  concurrency=20  sf500  queries=['q10']
+q10  lat=  105.3s fresh=  709 tok= 1756582 $0.3607  n=1/8  P=0.0 R=0.0 f1=0.0
+TOTAL(14q)  latency=3096.3s  cost=$6.4603  tokens=30915520  fresh=12080  macro-quality=0.638
+
+== 2026-09-23 18:47:33 MDT ==
+LOTUS ECOMM gpt-5.6-luna via http://127.0.0.1:4011  concurrency=20  sf500  queries=['q11']
+q11  lat=  472.0s fresh= 3928 tok= 7764342 $1.6683  n=79/18  P=0.228 R=1.0 f1=0.371
+TOTAL(14q)  latency=2442.2s  cost=$6.4331  tokens=30637302  fresh=16008  macro-quality=0.64
+
+== 2026-09-23 18:58:01 MDT ==
+LOTUS ECOMM gpt-5.6-luna via http://127.0.0.1:4011  concurrency=20  sf500  queries=['q12']
+q12  lat=   47.0s fresh=  540 tok=  478244 $0.1011  n=63/58  P=0.873 R=0.948 f1=0.909
+TOTAL(14q)  latency=2415.7s  cost=$6.4329  tokens=30637114  fresh=16548  macro-quality=0.64
+
+== 2026-09-23 18:59:39 MDT ==
+LOTUS ECOMM gpt-5.6-luna via http://127.0.0.1:4011  concurrency=20  sf500  queries=['q13']
+q13  lat=  132.8s fresh=  500 tok= 1895973 $0.3666  n=12/12  P=0.75 R=0.75 f1=0.75
+TOTAL(14q)  latency=2217.2s  cost=$6.4204  tokens=30636546  fresh=17048  macro-quality=0.637
+
+== 2026-09-23 19:02:43 MDT ==
+LOTUS ECOMM gpt-5.6-luna via http://127.0.0.1:4011  concurrency=20  sf500  queries=['q14']
+q14  lat=  137.7s fresh=  529 tok= 1847332 $0.3630  n=3/2  P=0.5 R=0.5 f1=0.5
+TOTAL(14q)  latency=1990.2s  cost=$6.398  tokens=30571947  fresh=17572  macro-quality=0.637

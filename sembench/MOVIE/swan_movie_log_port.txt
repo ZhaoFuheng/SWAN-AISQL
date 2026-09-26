@@ -1,0 +1,14 @@
+
+== 2026-09-25 22:30:54 CDT ==
+SWAN MOVIE gpt-5.6-luna via http://localhost:4001  concurrency=20  sf2000  serial  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10']
+q1   lat=    2.6s calls=    30 fresh=    0 tok=     5367 $0.0012  n=5/1487  P/a=1.0 R/b=1.0 quality=1.0
+q2   lat=    6.1s calls=    90 fresh=    0 tok=    13051 $0.0034  n=5/14  P/a=1.0 R/b=1.0 quality=1.0
+q3   lat=    6.2s calls=   119 fresh=    0 tok=    13532 $0.0043  n=1/1  P/a=9.0 R/b=0.3571 quality=0.643
+q4   lat=    6.2s calls=   119 fresh=    0 tok=    13663 $0.0044  n=1/1  P/a=0.0917 R/b=0.2143 quality=0.786
+q5   lat=    3.2s calls=    35 fresh=    0 tok=    10164 $0.0019  n=10/32288  P/a=1.0 R/b=0.9 quality=0.947
+q6   lat=    3.7s calls=    46 fresh=    0 tok=    12675 $0.0030  n=10/32736  P/a=1.0 R/b=0.9 quality=0.947
+q7   lat=  931.2s calls= 16256 fresh=    0 tok=  3471984 $1.3183  n=33980/32736  P/a=0.689 R/b=0.848 quality=0.76
+q8   lat=    6.2s calls=   119 fresh=    0 tok=    17804 $0.0052  n=2/2  P/a=0.0 R/b=0.0809 quality=0.919
+q9   lat=    9.0s calls=   128 fresh=    0 tok=    39935 $0.0129  n=256/256  P/a=0.749 R/b=0.584 quality=0.749
+q10  lat=  108.9s calls=  1864 fresh=    0 tok=   550711 $0.1732  n=105/116  P/a=0.427 R/b=0.301 quality=0.427
+TOTAL(10q)  latency=1083.3s  wall=1083.7s  cost=$1.5276  tokens=4148886  fresh=0  macro-quality=0.818

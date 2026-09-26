@@ -1,0 +1,15 @@
+Exchange,Currency
+"New York Stock Exchange",USD
+NASDAQ,USD
+"Hong Kong Stock Exchange",HKD
+"Shanghai Stock Exchange",CNY
+"Tokyo Stock Exchange",JPY
+Euronext,EUR
+"Shenzhen Stock Exchange",CNY
+"Toronto Stock Exchange",CAD
+"National Stock Exchange of India",INR
+"Frankfurt Stock Exchange",EUR
+"Korea Exchange",KRW
+"SIX Swiss Exchange",CHF
+"Taiwan Stock Exchange",TWD
+"Johannesburg Stock Exchange",ZAR

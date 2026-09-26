@@ -1,0 +1,52 @@
+# name: test/sql/limit/limit_speculative_stand_down.test
+# description: speculative leaf nodes stand down when LIMIT k is pushed into the evaluation above
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE a AS SELECT i AS id, i%50 AS k, 'a'||(i%40)::VARCHAR AS x FROM range(500) r(i);
+
+statement ok
+CREATE TABLE b AS SELECT i AS k, 'b'||i AS y FROM range(50) r(i);
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+# pull-up leaves a speculative node on a's leaf; the pushed LIMIT 5 stands it down
+query I
+SELECT count(*) FROM (SELECT b.y FROM a, b WHERE a.k=b.k AND ai_filter('is '||a.x||' ok?') LIMIT 5);
+----
+5
+
+# with stand-down the leaf never drives its whole 40-prompt domain: chat calls stay
+# strictly below 40 (without stand-down the speculative leaf evaluates all 40 and
+# defeats the LIMIT early-stop)
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT < 40 FROM ai_usage();
+----
+true
+
+# soundness: every returned row is a true passer
+statement ok
+CREATE TABLE limited AS SELECT a.x, b.y FROM a, b WHERE a.k=b.k AND ai_filter('is '||a.x||' ok?') LIMIT 5;
+
+query I
+SELECT count(*) FROM limited l WHERE NOT ai_filter('is '||l.x||' ok?');
+----
+0
+
+# no LIMIT: speculative leaf runs normally and the query is still correct
+query I
+SELECT count(*) >= 5 FROM (SELECT b.y FROM a, b WHERE a.k=b.k AND ai_filter('is '||a.x||' ok?'));
+----
+true
+
+statement ok
+CALL ai_mock_stop();

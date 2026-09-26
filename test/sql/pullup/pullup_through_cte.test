@@ -1,0 +1,113 @@
+# name: test/sql/pullup/pullup_through_cte.test
+# description: The semantic pull-up must descend through a materialized-CTE node. Such a node
+#              sits BETWEEN the cluster top and the join tree, and stopping there hid every AI
+#              filter below it -- the predicate then ran on its full base table instead of on the
+#              rows the joins leave (agent_bench Q26: the walk found 1 of 4 AI filters, and part
+#              was evaluated on 1,000 rows where 5 survive; 1,425 -> 421 calls once fixed).
+#              Only the MAIN QUERY child is descended into. The CTE BODY is off limits: lifting a
+#              predicate out of a body that other references also read would drop the filter for
+#              those references -- asserted below.
+#              HONEST LIMIT: the call-count assertion here does NOT discriminate -- it also
+#              passes with the descend reverted, because this small plan does not reproduce
+#              Q26's topology (cluster ABOVE the materialized CTE with the AI filters beneath).
+#              The measured effect is on agent_bench Q26: 4 of 4 AI filters found instead of 1,
+#              1,425 -> 421 calls, results unchanged. What this file does guard is the
+#              CORRECTNESS half: parity with the stack disabled, and that a CTE body read by two
+#              references is never raided.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE prod AS SELECT range AS pk, 'prod '||range::VARCHAR AS pname FROM range(200);
+
+statement ok
+CREATE TABLE line AS SELECT range % 200 AS l_pk, range AS lid, range % 10 AS flag FROM range(400);
+
+# A materialized CTE (referenced twice, so DuckDB keeps it) wraps a join tree that carries an AI
+# filter. Pre-fix the pull-up stopped at the CTE node and the filter ran on all 200 products.
+statement ok
+CREATE TABLE ctx AS SELECT range AS cid, 'ctx '||range::VARCHAR AS cname FROM range(3);
+
+statement ok
+SELECT ai_usage_reset();
+
+# Q26's shape: a top-level CROSS JOIN makes the CLUSTER sit ABOVE the materialized CTE, so the
+# pull-up's walk meets the CTE node on its way down to the join tree and the prod filter.
+statement ok
+CREATE TABLE res_on AS
+WITH sel AS (SELECT lid, l_pk FROM line WHERE flag = 0),
+     c AS (SELECT cid, cname FROM ctx WHERE ai_filter('[p=100] ctx? ' || cname))
+SELECT p.pname, s1.lid, c.cname
+FROM prod p
+JOIN sel s1 ON s1.l_pk = p.pk
+JOIN sel s2 ON s2.l_pk = p.pk
+CROSS JOIN c
+WHERE ai_filter('[p=60] pick? ' || p.pname);
+
+# the prod filter must see only join survivors (40 distinct l_pk), not all 200 products;
+# +3 for the ctx filter
+query I
+SELECT ((sum(llm_calls) - sum(embed_calls)) <= 45)::BOOLEAN FROM ai_usage();
+----
+true
+
+# --- correctness: identical to the fully-disabled stack
+statement ok
+SET ai_pullup=false; SET ai_factorize='off'; SET ai_semi_reduce=false;
+SET ai_reorder=false; SET ai_join_factorize='off'; SET ai_limit=false;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE res_off AS
+WITH sel AS (SELECT lid, l_pk FROM line WHERE flag = 0),
+     c AS (SELECT cid, cname FROM ctx WHERE ai_filter('[p=100] ctx? ' || cname))
+SELECT p.pname, s1.lid, c.cname
+FROM prod p
+JOIN sel s1 ON s1.l_pk = p.pk
+JOIN sel s2 ON s2.l_pk = p.pk
+CROSS JOIN c
+WHERE ai_filter('[p=60] pick? ' || p.pname);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM res_on EXCEPT SELECT * FROM res_off)
+                      UNION ALL (SELECT * FROM res_off EXCEPT SELECT * FROM res_on));
+----
+0
+
+# --- the CTE BODY must NOT be raided: an AI filter inside a body read by two references has to
+# stay there, or the second reference silently loses it.
+statement ok
+SET ai_pullup=true; SET ai_factorize='all'; SET ai_semi_reduce=true;
+SET ai_reorder=true; SET ai_join_factorize='factor'; SET ai_limit=true;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE body_on AS
+WITH keep AS (SELECT pk, pname FROM prod WHERE ai_filter('[p=50] body? ' || pname))
+SELECT a.pk FROM keep a JOIN keep b ON b.pk = a.pk;
+
+statement ok
+SET ai_pullup=false; SET ai_factorize='off'; SET ai_semi_reduce=false;
+SET ai_reorder=false; SET ai_join_factorize='off'; SET ai_limit=false;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE body_off AS
+WITH keep AS (SELECT pk, pname FROM prod WHERE ai_filter('[p=50] body? ' || pname))
+SELECT a.pk FROM keep a JOIN keep b ON b.pk = a.pk;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM body_on EXCEPT SELECT * FROM body_off)
+                      UNION ALL (SELECT * FROM body_off EXCEPT SELECT * FROM body_on));
+----
+0

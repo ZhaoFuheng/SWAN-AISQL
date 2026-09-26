@@ -1,0 +1,64 @@
+# name: test/sql/region/wave_chunk_overflow.test
+# description: A wave may carry more unfired reps than one DataChunk holds, and must still be
+#              evaluated correctly. The unfired set is (remainder below the floor) + (new distinct
+#              reps from one input chunk), so it can reach (floor-1) + STANDARD_VECTOR_SIZE -- past
+#              a chunk's capacity. EmitFactorized therefore emits at most a chunk's worth and leaves
+#              the surplus staged for the next wave; before that it sized one chunk to the whole
+#              unfired set and the query died with
+#              "Vector::SetSize out of range - trying to set size to 2098 for vector with capacity 2048".
+#              The shape below builds exactly that: a first chunk of 2048 rows carrying only 50
+#              distinct keys (50 < floor, so no wave fires and 50 reps stay staged), then a chunk of
+#              2048 all-distinct keys -> 2098 unfired.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+# threads=1 keeps the scan in ONE sink segment -- two segments would each get their own map and the
+# remainder would never meet the burst, which is what makes this shape hard to hit by accident.
+statement ok
+SET threads=1;
+
+statement ok
+CREATE TABLE t AS SELECT CASE WHEN i < 2048 THEN (i % 50) ELSE i END AS k FROM range(4096) tbl(i);
+
+statement ok
+CREATE TABLE stream_res AS SELECT k FROM t WHERE ai_filter('[p=50] is '||t.k::VARCHAR||' interesting?');
+
+# Same query through the blocking path (one global evaluation) -- an independent implementation, so
+# agreement is evidence about the streaming path rather than about a shared helper.
+statement ok
+SET ai_debug_region_blocking=true;
+
+statement ok
+CREATE TABLE block_res AS SELECT k FROM t WHERE ai_filter('[p=50] is '||t.k::VARCHAR||' interesting?');
+
+statement ok
+SET ai_debug_region_blocking=false;
+
+# every row decided the same way by both paths
+query I
+SELECT count(*) FROM ((SELECT * FROM stream_res EXCEPT ALL SELECT * FROM block_res)
+                      UNION ALL (SELECT * FROM block_res EXCEPT ALL SELECT * FROM stream_res));
+----
+0
+
+# ... and the predicate really splits the input: an all-pass or all-fail tree would agree trivially.
+query I
+SELECT count(*) > 0 AND count(*) < 4096 FROM stream_res;
+----
+true
+
+# The surplus is evaluated, not dropped: every one of the 2098 distinct keys gets a verdict, so the
+# rows that survive must cover both the 50 repeated keys and the 2048 unique ones.
+query I
+SELECT count(*) > 0 FROM stream_res WHERE k < 50;
+----
+true
+
+query I
+SELECT count(*) > 0 FROM stream_res WHERE k >= 2048;
+----
+true

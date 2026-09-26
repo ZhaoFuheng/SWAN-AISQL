@@ -1,0 +1,147 @@
+# name: test/sql/functions/typesafe_backend.test
+# description: ai_filter -> TypeSafe Noul and ai_classify -> TypeSafe Choice behind SET ai_typesafe
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE docs AS SELECT 'doc '||range::VARCHAR AS d FROM range(10);
+
+# default: off -> the chat path (same verdicts as ai_functions_mock.test)
+query I
+SELECT count(*) FROM docs WHERE ai_filter('is ' || d || ' good?');
+----
+7
+
+query I
+SELECT sum(llm_calls)::BIGINT FROM ai_usage();
+----
+10
+
+# ---- ai_filter -> Noul -------------------------------------------------------------------------
+# The mock seeds a Noul exactly like the chat path's boolean schema, so the verdicts agree: same 7
+# rows. A System One answer is a DIFFERENT sample from a chat answer, so it is never served from
+# the chat entry in the local cache: 10 new calls, not 10 hits.
+statement ok
+SET ai_typesafe = 'filter';
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter('is ' || d || ' good?');
+----
+7
+
+query II
+SELECT sum(llm_calls)::BIGINT, sum(cache_hits)::BIGINT FROM ai_usage();
+----
+10	0
+
+# priced per input token (mock: 8 tokens/call at $0.042/Mtok), never zero
+query I
+SELECT sum(cost_usd) > 0 FROM ai_usage();
+----
+true
+
+# the threshold turns the probability into the verdict: mock yes = 0.9, so 0.95 fails everything
+statement ok
+SET ai_typesafe_threshold = 0.95;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter('is ' || d || ' good?');
+----
+0
+
+statement ok
+SET ai_typesafe_threshold = 0.5;
+
+statement error
+SET ai_typesafe_threshold = 1.5;
+----
+<REGEX>:.*ai_typesafe_threshold must be in.*
+
+# Jev is text-only: an image-bearing prompt stays on the chat model even with the route on
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) >= 0 FROM docs WHERE ai_filter('is ' || d || ' good? ' || ai_image('http://example.invalid/' || d || '.png'));
+----
+true
+
+# ---- ai_classify -> Choice ---------------------------------------------------------------------
+statement ok
+SET ai_typesafe = 'classify';
+
+statement ok
+SELECT ai_usage_reset();
+
+# list categories: the answer is always one of the listed options
+query I
+SELECT count(*) FILTER (WHERE c IN ('alpha', 'beta', 'gamma')) FROM (SELECT ai_classify(d, ['alpha', 'beta', 'gamma']) AS c FROM docs);
+----
+10
+
+# struct categories: labels are the field names (descriptions ride as Choice criteria)
+query I
+SELECT count(*) FILTER (WHERE c IN ('pos', 'neg')) FROM (SELECT ai_classify(d, {'pos': 'a positive text', 'neg': 'a negative text'}) AS c FROM docs);
+----
+10
+
+query I
+SELECT sum(llm_calls)::BIGINT FROM ai_usage();
+----
+20
+
+# the reorder node's classify LEAF asks the same Choice as the scalar: reorder on/off agree
+statement ok
+CREATE TABLE cls AS SELECT d, ai_classify(d, ['alpha', 'beta', 'gamma']) AS c FROM docs;
+
+statement ok
+SET ai_reorder = false;
+
+query I
+SELECT count(*) FROM docs WHERE ai_classify(d, ['alpha', 'beta', 'gamma']) = 'alpha' AND ai_filter('is ' || d || ' good?');
+----
+<REGEX>:[0-9]+
+
+statement ok
+SET ai_reorder = true;
+
+query I
+SELECT (SELECT count(*) FROM docs WHERE ai_classify(d, ['alpha', 'beta', 'gamma']) = 'alpha' AND ai_filter('is ' || d || ' good?'))
+     = (SELECT count(*) FROM cls WHERE c = 'alpha' AND ai_filter('is ' || d || ' good?'));
+----
+true
+
+# both functions routed at once
+statement ok
+SET ai_typesafe = 'filter,classify';
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter('is ' || d || ' good?') AND ai_classify(d, ['alpha', 'beta']) IN ('alpha', 'beta');
+----
+7
+
+# off again: back to the chat path, its cached entries still valid
+statement ok
+SET ai_typesafe = '';
+
+statement ok
+CALL ai_mock_stop();

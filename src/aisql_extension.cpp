@@ -1,0 +1,293 @@
+//===----------------------------------------------------------------------===//
+// aisql: semantic SQL for DuckDB (SWAN AI-SQL v2)
+//
+// Entry point: registers settings, AI scalar/table functions, the in-process
+// mock backend, and the optimizer pipeline. See DESIGN in the repo plan.
+//===----------------------------------------------------------------------===//
+#include "aisql_extension.hpp"
+
+#include "ai_client.hpp"
+#include "ai_functions.hpp"
+#include "ai_mock_server.hpp"
+#include "optimizer/aisql_optimizer.hpp"
+#include "duckdb/common/exception.hpp"
+#include "duckdb/function/scalar_function.hpp"
+#include "duckdb/main/config.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
+
+#include <cstdlib>
+
+namespace duckdb {
+
+//! Env fallback for settings without an AIConfig field: default seeded from the legacy env var.
+static Value EnvOr(const char *env, const Value &def) {
+	const char *v = std::getenv(env);
+	if (!v || !v[0]) {
+		return def;
+	}
+	return Value(v).DefaultCastAs(def.type());
+}
+
+
+//! Legacy on-unless-off env flag (fork semantics): unset or any value -> def; "off"/"0" -> false.
+static Value EnvOnUnlessOff(const char *env, bool def) {
+	const char *v = std::getenv(env);
+	if (!v || !v[0]) {
+		return Value::BOOLEAN(def);
+	}
+	const string s(v);
+	return Value::BOOLEAN(!(s == "off" || s == "0"));
+}
+
+//! SET-callback bridge into the client's process-global AIConfig (env vars seed its initial
+//! values inside AIConfig::Get(); a SET afterwards wins).
+static void RegisterAISettings(DatabaseInstance &db) {
+	auto &config = DBConfig::GetConfig(db);
+	const auto &ai = AIConfig::Get(); // force env seeding before defaults are read
+	// Connection surface (defaults mirror the seeded AIConfig; SET updates it live)
+	config.AddExtensionOption("ai_endpoint", "OpenAI-compatible LLM endpoint", LogicalType::VARCHAR,
+	                          Value(ai.base_url), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().base_url = StringValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_model", "LLM model id", LogicalType::VARCHAR, Value(ai.model),
+	                          [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().model = StringValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_api_key", "LLM API key", LogicalType::VARCHAR, Value(ai.api_key),
+	                          [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().api_key = StringValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_reasoning_effort", "Reasoning effort per request (low/medium/high; empty = omit)",
+	                          LogicalType::VARCHAR, EnvOr("AI_REASONING_EFFORT", Value("")),
+	                          [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().reasoning_effort = StringValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_concurrency", "Max in-flight LLM calls", LogicalType::UBIGINT,
+	                          Value::UBIGINT(ai.max_concurrency), [](ClientContext &, SetScope, Value &v) {
+		                          const auto c = v.GetValue<uint64_t>();
+		                          if (c == 0) {
+			                          throw InvalidInputException("ai_concurrency must be >= 1");
+		                          }
+		                          AIConfig::Mutable().max_concurrency = c;
+	                          });
+	config.AddExtensionOption("ai_embed_endpoint", "Embeddings endpoint (text + image)", LogicalType::VARCHAR,
+	                          Value(ai.embed_url), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().embed_url = StringValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_embed_model", "Dual-encoder embedding model (text + image)", LogicalType::VARCHAR,
+	                          Value(ai.embed_model), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().embed_model = StringValue::Get(v);
+	                          });
+	// TypeSafe System One (Jev) as an optional backend for ai_filter (Noul) / ai_classify (Choice)
+	config.AddExtensionOption("ai_typesafe", "Route these AI functions to TypeSafe System One (csv of filter,classify)",
+	                          LogicalType::VARCHAR,
+	                          Value(string(ai.typesafe_filter ? "filter," : "") + (ai.typesafe_classify ? "classify" : "")),
+	                          [](ClientContext &, SetScope, Value &v) {
+		                          const string s = StringValue::Get(v);
+		                          AIConfig::Mutable().typesafe_filter = s.find("filter") != string::npos;
+		                          AIConfig::Mutable().typesafe_classify = s.find("classify") != string::npos;
+	                          });
+	config.AddExtensionOption("ai_typesafe_endpoint", "TypeSafe API base URL (http; the cache proxy terminates TLS)", LogicalType::VARCHAR,
+	                          Value(ai.typesafe_url), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().typesafe_url = StringValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_typesafe_model", "TypeSafe model id (jev-latest)", LogicalType::VARCHAR,
+	                          Value(ai.typesafe_model), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().typesafe_model = StringValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_typesafe_api_key", "TypeSafe API key", LogicalType::VARCHAR,
+	                          Value(ai.typesafe_api_key), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().typesafe_api_key = StringValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_typesafe_threshold", "Noul probability at or above which ai_filter is true",
+	                          LogicalType::DOUBLE, Value::DOUBLE(ai.typesafe_threshold),
+	                          [](ClientContext &, SetScope, Value &v) {
+		                          const double t = v.GetValue<double>();
+		                          if (t < 0 || t > 1) {
+			                          throw InvalidInputException("ai_typesafe_threshold must be in [0, 1]");
+		                          }
+		                          AIConfig::Mutable().typesafe_threshold = t;
+	                          });
+	config.AddExtensionOption("ai_local_cache", "Local (in-process) response cache for chat + embeddings",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(true), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().local_cache = BooleanValue::Get(v);
+	                          });
+	// Optimizer surface (defaults = the soaked SWAN composition)
+	config.AddExtensionOption("ai_factorize", "AI region placement: off/filters/all", LogicalType::VARCHAR,
+	                          Value(BooleanValue::Get(EnvOnUnlessOff("DUCKDB_AI_DEDUP", true))
+	                                    ? (BooleanValue::Get(EnvOnUnlessOff("DUCKDB_AI_SCAN_REGION", true)) ? "all"
+	                                                                                                        : "filters")
+	                                    : "off"));
+	{
+		// Legacy env mapping: unset -> the new 'factor' default; off/0 -> off; 'factor' -> factor;
+		// any other explicit value (the fork's =1) -> 'pushdown' (the behavior its tests assert).
+		const char *gj = std::getenv("DUCKDB_AI_GROUP_JOIN");
+		const string mode = !gj || !gj[0]              ? "factor"
+		                    : (string(gj) == "off" || string(gj) == "0") ? "off"
+		                    : (string(gj) == "factor") ? "factor"
+		                                               : "pushdown";
+		config.AddExtensionOption("ai_join_factorize", "AI join strategy: off/pushdown/factor",
+		                          LogicalType::VARCHAR, Value(mode));
+	}
+	config.AddExtensionOption("ai_reorder", "AI predicate reordering + speculative evaluation",
+	                          LogicalType::BOOLEAN, EnvOnUnlessOff("DUCKDB_AI_REORDER", true));
+	config.AddExtensionOption("ai_pullup", "Semantic filter pull-up above joins", LogicalType::BOOLEAN,
+	                          EnvOnUnlessOff("DUCKDB_SEMANTIC_PULLUP", true));
+	config.AddExtensionOption("ai_limit", "LIMIT pushdown into AI evaluation", LogicalType::BOOLEAN,
+	                          EnvOnUnlessOff("DUCKDB_AI_LIMIT", true));
+	config.AddExtensionOption("ai_semi_reduce", "Yannakakis semi-join reduction before AI evaluation",
+	                          LogicalType::BOOLEAN, EnvOnUnlessOff("DUCKDB_YANNAKAKIS", true));
+	// Debug/expert namespace
+	config.AddExtensionOption("ai_prefix_cache",
+	                          "Explicit provider prompt caching for factor-graph pair prompts (GPT-5.6+)",
+	                          LogicalType::BOOLEAN,
+	                          Value::BOOLEAN(!(std::getenv("AI_PREFIX_CACHE") != nullptr &&
+	                                           string(std::getenv("AI_PREFIX_CACHE")) == "off")),
+	                          [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().prefix_cache = BooleanValue::Get(v);
+	                          });
+	// ON by default: a materialised CTE is an optimisation barrier, and a semantic filter sealed
+	// inside one runs on its FULL base table however selective the outer query is (agent_bench
+	// Q22: 89 calls where 10 rows survive; Q26: 1,425 where 5 do). Inlining AI-bearing CTEs is
+	// what lets relational pushdown and the semi-join reduction reach the predicate -- it is
+	// boundary removal, not an optimisation in itself. Correct since the AIKeyBind idempotence
+	// fix (a duplicated AI subtree used to come back mis-bound). See DESIGN.md §3.
+	config.AddExtensionOption("ai_inline_ai_ctes",
+	                          "Inline CTEs containing AI functions so relational pruning and the "
+	                          "semantic pull-up can reach the predicate",
+	                          LogicalType::BOOLEAN, EnvOnUnlessOff("AI_INLINE_AI_CTES", true));
+	config.AddExtensionOption("ai_hedge", "Hedge straggler calls past the observed p99 latency",
+	                          LogicalType::BOOLEAN, EnvOnUnlessOff("AI_HEDGE", true),
+	                          [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().hedge = BooleanValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_http_keepalive", "Reuse HTTP connections across LLM/embed requests",
+	                          LogicalType::BOOLEAN, EnvOnUnlessOff("AI_HTTP_KEEPALIVE", true),
+	                          [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().http_keepalive = BooleanValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_local_cache_scope",
+	                          "Local response cache scope: query (Q1 never serves Q2) or cross_query "
+	                          "(process-lifetime, lotus-style)",
+	                          LogicalType::VARCHAR, EnvOr("AI_LOCAL_CACHE_SCOPE", Value("query")),
+	                          [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().local_cache_cross_query = StringValue::Get(v) == "cross_query";
+	                          });
+	config.AddExtensionOption("ai_debug_region_blocking", "Disable the region's streaming sink",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(false), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().region_streaming = !BooleanValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_debug_wave_size", "Override region wave size (0 = derived)",
+	                          LogicalType::UBIGINT, EnvOr("DUCKDB_AI_STREAM_WAVE", Value::UBIGINT(0)),
+	                          [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().wave_size = v.GetValue<uint64_t>();
+	                          });
+	config.AddExtensionOption("ai_debug_wave_overlap", "Region waves kept in flight at once (1 = synchronous)",
+	                          LogicalType::UBIGINT, EnvOr("DUCKDB_AI_WAVE_OVERLAP", Value::UBIGINT(8)),
+	                          [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().wave_overlap = v.GetValue<uint64_t>();
+	                          });
+	config.AddExtensionOption("ai_debug_no_train", "Disable MLP selectivity training", LogicalType::BOOLEAN,
+	                          Value::BOOLEAN(false));
+	config.AddExtensionOption("ai_debug_mlp_seed", "Seed for MLP init / warm-up picks", LogicalType::UBIGINT,
+	                          EnvOr("AI_MLP_SEED", Value::UBIGINT(0)));
+	config.AddExtensionOption("ai_debug_speculative_threshold", "Speculative pass-through threshold",
+	                          LogicalType::DOUBLE, EnvOr("AI_SPECULATIVE_THRESHOLD", Value::DOUBLE(0.5)));
+	config.AddExtensionOption("ai_debug_speculative_min_fanout", "Min fan-out to add a speculative node",
+	                          LogicalType::DOUBLE, EnvOr("AI_SPECULATIVE_MIN_FANOUT", Value::DOUBLE(0.3)));
+	config.AddExtensionOption("ai_debug_log", "Debug logging channels (csv: region,spec,yann)",
+	                          LogicalType::VARCHAR, Value(""), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().debug_log = StringValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_debug_prompt_variant", "ai_filter prompt variant: strict/soft/plain",
+	                          LogicalType::VARCHAR, EnvOr("AI_PROMPT_VARIANT", Value("strict")),
+	                          [](ClientContext &, SetScope, Value &v) {
+		                          const string pv = StringValue::Get(v);
+		                          AIConfig::Mutable().prompt_variant_soft = pv == "soft";
+		                          AIConfig::Mutable().prompt_variant_plain = pv == "plain";
+	                          });
+	if (const char *pv = std::getenv("AI_PROMPT_VARIANT")) {
+		AIConfig::Mutable().prompt_variant_soft = string(pv) == "soft";
+		AIConfig::Mutable().prompt_variant_plain = string(pv) == "plain";
+	}
+	config.AddExtensionOption("ai_debug_graph_eval", "Factor graph evaluation: staged/lazy/lazy-adaptive",
+	                          LogicalType::VARCHAR, EnvOr("AI_GRAPH_EVAL", Value("lazy-adaptive")),
+	                          [](ClientContext &, SetScope, Value &v) {
+		                          const string mode = StringValue::Get(v);
+		                          AIConfig::Mutable().graph_eval_lazy = mode == "lazy" || mode == "lazy-adaptive";
+		                          AIConfig::Mutable().graph_eval_adaptive = mode == "lazy-adaptive";
+	                          });
+	if (const char *cs = std::getenv("AI_LOCAL_CACHE_SCOPE")) {
+		AIConfig::Mutable().local_cache_cross_query = string(cs) == "cross_query";
+	}
+	if (const char *ge = std::getenv("AI_GRAPH_EVAL")) {
+		const string mode(ge);
+		AIConfig::Mutable().graph_eval_lazy = mode == "lazy" || mode == "lazy-adaptive";
+		AIConfig::Mutable().graph_eval_adaptive = mode == "lazy-adaptive";
+	}
+	config.AddExtensionOption("ai_debug_trust_image_estimate",
+	                          "Speculative all-image rows trust the estimate instead of always evaluating",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(false), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().trust_image_estimate = BooleanValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_debug_embed_filter", "Enable the embedding pre-filter pass",
+	                          LogicalType::BOOLEAN,
+	                          Value::BOOLEAN(std::getenv("DUCKDB_AI_EMBED_FILTER") != nullptr));
+	{
+		// Legacy opt-in semantics: ai_agg DISTINCT only when DUCKDB_AI_DEDUP is EXPLICITLY set (not off).
+		const char *d = std::getenv("DUCKDB_AI_DEDUP");
+		const bool agg_distinct = d && d[0] && !(string(d) == "off" || string(d) == "0");
+		config.AddExtensionOption("ai_debug_agg_distinct", "Allow ai_agg over DISTINCT inputs (changes the multiset)",
+		                          LogicalType::BOOLEAN, Value::BOOLEAN(agg_distinct));
+	}
+	{
+		// Legacy force semantics: DUCKDB_YANNAKAKIS set to any non-off value forces reduction.
+		const char *y = std::getenv("DUCKDB_YANNAKAKIS");
+		const bool force = y && y[0] && !(string(y) == "off" || string(y) == "0");
+		config.AddExtensionOption("ai_debug_semi_reduce_force", "Semi-reduce every join cluster (A/B benchmarking)",
+		                          LogicalType::BOOLEAN, Value::BOOLEAN(force));
+	}
+	// Default ON (user decision): with ai_semi_reduce always-on, leaf rows are join-surviving, so
+	// speculative evaluation is call-safe; the fan-out gate remains an opt-back knob for the ~1:1
+	// shapes where it only re-times calls. AI_SPECULATIVE_ALWAYS=0 pins the gated (fork) behavior.
+	config.AddExtensionOption("ai_debug_speculative_always", "Drop the speculative fan-out gate",
+	                          LogicalType::BOOLEAN, EnvOr("AI_SPECULATIVE_ALWAYS", Value::BOOLEAN(true)));
+}
+
+static void LoadInternal(ExtensionLoader &loader) {
+	RegisterAISettings(loader.GetDatabaseInstance());
+	// Stage 1 smoke function; replaced by the full AI function registration as porting proceeds.
+	auto version_fn = ScalarFunction("aisql_version", {}, LogicalType::VARCHAR,
+	                                 [](DataChunk &args, ExpressionState &state, Vector &result) {
+		                                 result.Reference(Value("aisql 0.1.0"), count_t(args.size()));
+	                                 });
+	loader.RegisterFunction(version_fn);
+	RegisterAIFunctions(loader);
+	RegisterAIMockFunctions(loader);
+	RegisterAisqlOptimizer(loader.GetDatabaseInstance());
+}
+
+void AisqlExtension::Load(ExtensionLoader &loader) {
+	LoadInternal(loader);
+}
+
+std::string AisqlExtension::Name() {
+	return "aisql";
+}
+
+std::string AisqlExtension::Version() const {
+#ifdef EXT_VERSION_AISQL
+	return EXT_VERSION_AISQL;
+#else
+	return "";
+#endif
+}
+
+} // namespace duckdb
+
+extern "C" {
+
+DUCKDB_CPP_EXTENSION_ENTRY(aisql, loader) {
+	duckdb::LoadInternal(loader);
+}
+}

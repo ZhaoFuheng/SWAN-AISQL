@@ -1,0 +1,265 @@
+# name: test/sql/semi_reduce/cte_boundary_design.test
+# description: The CTE-boundary transformation, hand-written in SQL, proving the DESIGN before any
+#              optimizer pass implements it:
+#
+#                  new_cte = relational body, reduced by the UNION of what the references demand,
+#                            MATERIALIZED once
+#                  cte     = the semantic predicate over new_cte, INLINED per reference
+#
+#              This is a design check, not a pass check: nothing here exercises the (unwired)
+#              semantic split. What it establishes is that the target shape reaches the same call
+#              count and the same rows as today's whole-body inlining, so an implementation that
+#              produces it is aiming at something known to be correct -- after four attempts that
+#              each aimed at something not yet verified.
+#
+#              THE NEGATIVE CONTROL IS THE POINT. Reducing by ONE reference's keys instead of the
+#              union looks like an optimisation (10 calls instead of 16) and silently loses 5 rows.
+#              The union is not a conservatism, it is the correctness condition: a row must survive
+#              if ANY reference could consume it.
+#
+#              TWO RULES FOR MULTI-CTE QUERIES, each measured below:
+#                * The union spans EVERY reference, wherever it lives -- including references
+#                  inside ANOTHER CTE's body, not just the main query. Collecting only the nested
+#                  one loses 4 rows here.
+#                * Each reference may contribute its IMMEDIATE join-key source; the union does not
+#                  have to be the tightest set. In a chain (a -> b -> tiny) the loose demand and
+#                  the transitively-tight one both reach 2 calls, because the semantic part is
+#                  still INLINED and the reducer prunes it further in its own scope. So the
+#                  implementation owes correctness (the union) but not global tightness.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE doc AS SELECT range AS id, 'doc '||range::VARCHAR AS body FROM range(200);
+
+# 10 ids
+statement ok
+CREATE TABLE hot AS SELECT range AS id FROM range(200) WHERE range % 20 = 0;
+
+# 8 ids, overlapping hot only at multiples of 100
+statement ok
+CREATE TABLE warm AS SELECT range AS id FROM range(200) WHERE range % 25 = 0;
+
+# --- today's behaviour: one CTE, two references, each joined to a different neighbour
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE base_c AS
+WITH c AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] keep? '||body))
+SELECT x.id FROM (SELECT c.id FROM c JOIN hot h ON h.id = c.id
+                  UNION ALL SELECT c.id FROM c JOIN warm w ON w.id = c.id) x;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+16
+
+# --- the TARGET shape: reduce by the union, materialize once, inline the predicate
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE union_c AS
+WITH new_c AS MATERIALIZED (
+       SELECT id, body FROM doc WHERE id IN (SELECT id FROM hot UNION ALL SELECT id FROM warm)
+     ),
+     c AS NOT MATERIALIZED (SELECT id, body FROM new_c WHERE ai_filter('[p=60] keep? '||body))
+SELECT x.id FROM (SELECT c.id FROM c JOIN hot h ON h.id = c.id
+                  UNION ALL SELECT c.id FROM c JOIN warm w ON w.id = c.id) x;
+
+# same number of prompts as inlining the whole body -- the transformation costs nothing in calls
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+16
+
+# and returns exactly the same rows
+query I
+SELECT count(*) FROM ((SELECT * FROM base_c EXCEPT SELECT * FROM union_c)
+                      UNION ALL (SELECT * FROM union_c EXCEPT SELECT * FROM base_c));
+----
+0
+
+# --- NEGATIVE CONTROL: reduce by only ONE reference's keys. Fewer calls, WRONG ANSWER.
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE one_demand_c AS
+WITH new_c AS MATERIALIZED (SELECT id, body FROM doc WHERE id IN (SELECT id FROM hot)),
+     c AS NOT MATERIALIZED (SELECT id, body FROM new_c WHERE ai_filter('[p=60] keep? '||body))
+SELECT x.id FROM (SELECT c.id FROM c JOIN hot h ON h.id = c.id
+                  UNION ALL SELECT c.id FROM c JOIN warm w ON w.id = c.id) x;
+
+# it loses rows: warm admits ids that hot does not, and those rows never reach the predicate
+query I
+SELECT count(*) > 0 FROM ((SELECT * FROM base_c EXCEPT SELECT * FROM one_demand_c)
+                          UNION ALL (SELECT * FROM one_demand_c EXCEPT SELECT * FROM base_c));
+----
+true
+
+# --- the same design on a SHARED CTE read by another CTE's body and by the main query (shape I)
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE base_i AS
+WITH a AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] a? '||body)),
+     b AS (SELECT id FROM hot),
+     bridge AS (SELECT a.id FROM a JOIN b ON b.id = a.id)
+SELECT br.id FROM bridge br JOIN a a2 ON a2.id = br.id;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+10
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE union_i AS
+WITH new_a AS MATERIALIZED (SELECT id, body FROM doc WHERE id IN (SELECT id FROM hot)),
+     a AS NOT MATERIALIZED (SELECT id, body FROM new_a WHERE ai_filter('[p=60] a? '||body)),
+     b AS (SELECT id FROM hot),
+     bridge AS (SELECT a.id FROM a JOIN b ON b.id = a.id)
+SELECT br.id FROM bridge br JOIN a a2 ON a2.id = br.id;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+10
+
+query I
+SELECT count(*) FROM ((SELECT * FROM base_i EXCEPT SELECT * FROM union_i))
+                      UNION ALL (SELECT * FROM union_i EXCEPT SELECT * FROM base_i);
+----
+0
+
+# ---------------------------------------------------------------------------------------------
+# MULTI-CTE RULE 1: the union spans references inside OTHER CTE bodies, not only the main query.
+# Here `a` is read from b's body (demanding hot) and from the main query (demanding warm).
+# ---------------------------------------------------------------------------------------------
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE n_base AS
+WITH a AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] n? '||body)),
+     b AS (SELECT a.id FROM a JOIN hot h ON h.id = a.id)
+SELECT id FROM b UNION ALL SELECT a2.id FROM a a2 JOIN warm w ON w.id = a2.id;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+16
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE n_union AS
+WITH new_a AS MATERIALIZED (
+       SELECT id, body FROM doc WHERE id IN (SELECT id FROM hot UNION ALL SELECT id FROM warm)),
+     a AS NOT MATERIALIZED (SELECT id, body FROM new_a WHERE ai_filter('[p=60] n? '||body)),
+     b AS (SELECT a.id FROM a JOIN hot h ON h.id = a.id)
+SELECT id FROM b UNION ALL SELECT a2.id FROM a a2 JOIN warm w ON w.id = a2.id;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+16
+
+query I
+SELECT count(*) FROM ((SELECT * FROM n_base EXCEPT SELECT * FROM n_union)
+                      UNION ALL (SELECT * FROM n_union EXCEPT SELECT * FROM n_base));
+----
+0
+
+# taking ONLY the nested reference's demand (hot) drops the rows warm would have admitted
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE n_nested_only AS
+WITH new_a AS MATERIALIZED (SELECT id, body FROM doc WHERE id IN (SELECT id FROM hot)),
+     a AS NOT MATERIALIZED (SELECT id, body FROM new_a WHERE ai_filter('[p=60] n? '||body)),
+     b AS (SELECT a.id FROM a JOIN hot h ON h.id = a.id)
+SELECT id FROM b UNION ALL SELECT a2.id FROM a a2 JOIN warm w ON w.id = a2.id;
+
+query I
+SELECT count(*) > 0 FROM ((SELECT * FROM n_base EXCEPT SELECT * FROM n_nested_only)
+                          UNION ALL (SELECT * FROM n_nested_only EXCEPT SELECT * FROM n_base));
+----
+true
+
+# ---------------------------------------------------------------------------------------------
+# MULTI-CTE RULE 2: a LOOSE demand is enough. In the chain a -> b -> tiny, demanding only b's
+# immediate keys (hot, 10 ids) reaches the same 2 calls as demanding the transitively tight set
+# (tiny, 2 ids) -- the inlined predicate is still reduced further downstream in its own scope.
+# ---------------------------------------------------------------------------------------------
+statement ok
+CREATE TABLE tiny AS SELECT range AS id FROM range(200) WHERE range % 100 = 0;
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE ch_base AS
+WITH a AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] ch? '||body)),
+     b AS (SELECT a.id FROM a JOIN hot h ON h.id = a.id),
+     c AS (SELECT b.id FROM b JOIN tiny t ON t.id = b.id)
+SELECT id FROM c;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+2
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE ch_loose AS
+WITH new_a AS MATERIALIZED (SELECT id, body FROM doc WHERE id IN (SELECT id FROM hot)),
+     a AS NOT MATERIALIZED (SELECT id, body FROM new_a WHERE ai_filter('[p=60] ch? '||body)),
+     b AS (SELECT a.id FROM a JOIN hot h ON h.id = a.id),
+     c AS (SELECT b.id FROM b JOIN tiny t ON t.id = b.id)
+SELECT id FROM c;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+2
+
+query I
+SELECT count(*) FROM ((SELECT * FROM ch_base EXCEPT SELECT * FROM ch_loose)
+                      UNION ALL (SELECT * FROM ch_loose EXCEPT SELECT * FROM ch_base));
+----
+0

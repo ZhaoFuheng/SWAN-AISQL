@@ -1,0 +1,110 @@
+# name: test/sql/semi_reduce/ai_projection_vs_runtime_filter.test
+# description: MMQA q1 shape -- an ai_complete PROJECTION under a plain-key join to a selective
+#              neighbour. On this shape DuckDB's runtime hash-join filter (join_filter_pushdown)
+#              ALSO prunes the scan at execution time, which used to be the only reason q1 cost
+#              1 call: the reducer's SEMI landed above the projection and pruned rows already paid
+#              for. The claim under test: the 1 call is now the REDUCER's doing. Disabling the
+#              runtime filter must leave it at 1; only with both off does it become 200.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE text_data AS SELECT 'movie '||range::VARCHAR AS title, 'plot '||range::VARCHAR AS text FROM range(200);
+
+statement ok
+CREATE TABLE cast_roles AS SELECT 'movie '||range::VARCHAR AS Title, CASE WHEN range = 17 THEN 'Bob Whitewood' ELSE 'extra' END AS Role FROM range(200);
+
+# --- 1. defaults: reducer on, runtime join filter on -> 1 call ---
+statement ok
+SELECT ai_usage_reset();
+
+query I
+WITH movie_with_director AS (SELECT title, ai_complete('Extract the director from: ' || text) AS director FROM text_data)
+SELECT count(t2.director) FROM cast_roles t1 JOIN movie_with_director t2 ON t1.Title = t2.title WHERE t1.Role = 'Bob Whitewood';
+----
+1
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+1
+
+# --- 2. reducer OFF, runtime filter ON -> still 1: the courtesy that used to mask the reducer ---
+statement ok
+SET ai_semi_reduce = false;
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+WITH movie_with_director AS (SELECT title, ai_complete('Extract the director from: ' || text) AS director FROM text_data)
+SELECT count(t2.director) FROM cast_roles t1 JOIN movie_with_director t2 ON t1.Title = t2.title WHERE t1.Role = 'Bob Whitewood';
+----
+1
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+1
+
+# --- 3. reducer OFF, runtime filter OFF -> every row is extracted: 200 calls ---
+statement ok
+SET disabled_optimizers = 'join_filter_pushdown';
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+WITH movie_with_director AS (SELECT title, ai_complete('Extract the director from: ' || text) AS director FROM text_data)
+SELECT count(t2.director) FROM cast_roles t1 JOIN movie_with_director t2 ON t1.Title = t2.title WHERE t1.Role = 'Bob Whitewood';
+----
+1
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+200
+
+# --- 4. reducer ON, runtime filter OFF -> 1 call: the SEMI below the AI projection is what does it ---
+statement ok
+SET ai_semi_reduce = true;
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+WITH movie_with_director AS (SELECT title, ai_complete('Extract the director from: ' || text) AS director FROM text_data)
+SELECT count(t2.director) FROM cast_roles t1 JOIN movie_with_director t2 ON t1.Title = t2.title WHERE t1.Role = 'Bob Whitewood';
+----
+1
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+1
+
+# the same answer in every cell (the mock is deterministic per prompt)
+query I
+WITH movie_with_director AS (SELECT title, ai_complete('Extract the director from: ' || text) AS director FROM text_data)
+SELECT t2.director = ai_complete('Extract the director from: plot 17') FROM cast_roles t1 JOIN movie_with_director t2 ON t1.Title = t2.title WHERE t1.Role = 'Bob Whitewood';
+----
+true
+
+statement ok
+SET disabled_optimizers = '';
+
+statement ok
+CALL ai_mock_stop();

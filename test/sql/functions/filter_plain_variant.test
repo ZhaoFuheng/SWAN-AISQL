@@ -1,0 +1,71 @@
+# name: test/sql/functions/filter_plain_variant.test
+# description: ai_debug_prompt_variant='plain' sends ai_filter's prompt BARE -- no system message,
+#              no json_schema response format, no prefix-cache block splitting -- and reads the
+#              verdict from the answer TEXT. It exists for cross-engine comparisons: PLOP carries
+#              its own "Return a single yes or no" instruction INSIDE the prompt and sends nothing
+#              else, so only a bare request keys the same recorded sample. Dropping PLOP's suffix
+#              from the translation is what made every ai_filter call resample instead of reusing
+#              that sample (agent_bench macro-F1 0.801 vs 0.972 on the ai_complete spelling).
+#              Default stays 'strict' -- every other bench keeps the envelope, which is what makes
+#              a verdict reliable.
+#              COVERAGE: the verdict-agreement query below fails if the text fallback is removed
+#              (a bare answer then parses as NULL and keeps 0 rows) and fails if plain forgets to
+#              drop the schema (the mock answers JSON, not 'yes'). The prose case guards the
+#              parser's refusal to guess.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE t AS SELECT range AS k, 'item '||range::VARCHAR AS nm FROM range(60);
+
+# the mock answers a bare "Return a single yes or no" prompt with yes/no, seeded exactly as its
+# boolean-schema path -- so the SAME prompt gets the SAME verdict either way, and the two
+# variants must select the SAME rows. That equality is the point: plain changes the envelope,
+# never the answer.
+statement ok
+CREATE TABLE strict_rows AS
+SELECT k FROM t WHERE ai_filter('[p=50] keep? '||nm||e'\n Return a single yes or no, do not contain any other words.');
+
+statement ok
+SET ai_debug_prompt_variant='plain';
+
+statement ok
+CREATE TABLE plain_rows AS
+SELECT k FROM t WHERE ai_filter('[p=50] keep? '||nm||e'\n Return a single yes or no, do not contain any other words.');
+
+# non-empty (a NULL verdict would silently keep nothing and still "match" an empty strict set)
+query I
+SELECT count(*) > 0 FROM plain_rows;
+----
+true
+
+query I
+SELECT count(*) FROM ((SELECT * FROM strict_rows EXCEPT SELECT * FROM plain_rows)
+                      UNION ALL (SELECT * FROM plain_rows EXCEPT SELECT * FROM strict_rows));
+----
+0
+
+# --- the parser must REFUSE to guess: a prose answer is unparseable, not a silent verdict.
+# Without the yes/no instruction the mock answers "ok", which is neither affirmative nor negative.
+query I
+SELECT ai_filter('[p=50] is this a thing? '||nm) IS NULL FROM t LIMIT 1;
+----
+true
+
+statement ok
+SET ai_debug_prompt_variant='strict';
+
+# --- default is unchanged: the schema envelope still parses, and still keeps the same rows
+statement ok
+CREATE TABLE back_to_strict AS
+SELECT k FROM t WHERE ai_filter('[p=50] keep? '||nm||e'\n Return a single yes or no, do not contain any other words.');
+
+query I
+SELECT count(*) FROM ((SELECT * FROM back_to_strict EXCEPT SELECT * FROM strict_rows)
+                      UNION ALL (SELECT * FROM strict_rows EXCEPT SELECT * FROM back_to_strict));
+----
+0

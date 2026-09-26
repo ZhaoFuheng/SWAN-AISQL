@@ -1,0 +1,244 @@
+[
+ {
+  "name": "filter_limit5",
+  "kind": "TARGET",
+  "off": {
+   "n": 5,
+   "ck": "dda12c7a08d2a6f3e6578f79131d187a",
+   "calls": 33,
+   "cost": 0.014952249999999995,
+   "lat": 17.298792881
+  },
+  "on": {
+   "n": 5,
+   "ck": "dda12c7a08d2a6f3e6578f79131d187a",
+   "calls": 32,
+   "cost": 0.014593249999999997,
+   "lat": 48.70761375599999,
+   "sound": 5,
+   "passing": 27
+  },
+  "exp": 5,
+  "verified": true
+ },
+ {
+  "name": "filter_limit25",
+  "kind": "TARGET",
+  "off": {
+   "n": 25,
+   "ck": "39a71cd87274b9e8872ca80eaf676df1",
+   "calls": 100,
+   "cost": 0.045616000000000004,
+   "lat": 23.082680379
+  },
+  "on": {
+   "n": 25,
+   "ck": "39a71cd87274b9e8872ca80eaf676df1",
+   "calls": 100,
+   "cost": 0.045616000000000004,
+   "lat": 55.71849090400001,
+   "sound": 25,
+   "passing": 27
+  },
+  "exp": 25,
+  "verified": true
+ },
+ {
+  "name": "two_filter_limit5",
+  "kind": "TARGET",
+  "off": {
+   "n": 1,
+   "ck": "0f141fee3f3ed187e416350152ae6e93",
+   "calls": 134,
+   "cost": 0.06017524999999999,
+   "lat": 32.73338360699998
+  },
+  "on": {
+   "n": 1,
+   "ck": "0f141fee3f3ed187e416350152ae6e93",
+   "calls": 134,
+   "cost": 0.06017524999999999,
+   "lat": 64.75007277499998,
+   "sound": 1,
+   "passing": 1
+  },
+  "exp": 1,
+  "verified": true
+ },
+ {
+  "name": "classify_proj_limit5",
+  "kind": "TARGET",
+  "off": {
+   "n": 5,
+   "ck": "7cf54ccf8f4644f91708b5fe601acaf2",
+   "calls": 5,
+   "cost": 0.00238225,
+   "lat": 6.6143705810000055
+  },
+  "on": {
+   "n": 5,
+   "ck": "7cf54ccf8f4644f91708b5fe601acaf2",
+   "calls": 5,
+   "cost": 0.00238225,
+   "lat": 5.594565401000014,
+   "sound": 5,
+   "passing": 100
+  },
+  "exp": 5,
+  "verified": true
+ },
+ {
+  "name": "orderby_score_limit5",
+  "kind": "CONTROL",
+  "off": {
+   "n": 5,
+   "ck": "231ecaf89b71a4ad51e92b3143c8dd8a",
+   "calls": 100,
+   "cost": 0.05497000000000001,
+   "lat": 23.484934135000007
+  },
+  "on": {
+   "n": 5,
+   "ck": "231ecaf89b71a4ad51e92b3143c8dd8a",
+   "calls": 100,
+   "cost": 0.05497000000000001,
+   "lat": 17.84806639700003,
+   "sound": 5,
+   "passing": 100
+  },
+  "exp": 5,
+  "verified": true
+ },
+ {
+  "name": "classify_limit5",
+  "kind": "TARGET",
+  "off": {
+   "n": 5,
+   "ck": "3fb56d8058c0019c3a2abdd6345c8a45",
+   "calls": 32,
+   "cost": 0.013570249999999996,
+   "lat": 9.857106750000018
+  },
+  "on": {
+   "n": 5,
+   "ck": "3fb56d8058c0019c3a2abdd6345c8a45",
+   "calls": 34,
+   "cost": 0.014282749999999997,
+   "lat": 43.796097411999995,
+   "sound": 5,
+   "passing": 27
+  },
+  "exp": 5,
+  "verified": true
+ },
+ {
+  "name": "score_limit5",
+  "kind": "TARGET",
+  "off": {
+   "n": 5,
+   "ck": "7cf54ccf8f4644f91708b5fe601acaf2",
+   "calls": 24,
+   "cost": 0.013007749999999998,
+   "lat": 9.05405917100001
+  },
+  "on": {
+   "n": 5,
+   "ck": "7cf54ccf8f4644f91708b5fe601acaf2",
+   "calls": 24,
+   "cost": 0.013007749999999998,
+   "lat": 44.87996928999996,
+   "sound": 5,
+   "passing": 100
+  },
+  "exp": 5,
+  "verified": true
+ },
+ {
+  "name": "complete_limit5",
+  "kind": "TARGET",
+  "off": {
+   "n": 0,
+   "ck": "",
+   "calls": 100,
+   "cost": 0.058609999999999975,
+   "lat": 41.37630202999998
+  },
+  "on": {
+   "n": 0,
+   "ck": "",
+   "calls": 100,
+   "cost": 0.058609999999999975,
+   "lat": 95.05971990699999,
+   "sound": 0,
+   "passing": 0
+  },
+  "exp": 0,
+  "verified": true
+ },
+ {
+  "name": "mixed_F_score_limit5",
+  "kind": "TARGET",
+  "off": {
+   "n": 5,
+   "ck": "dda12c7a08d2a6f3e6578f79131d187a",
+   "calls": 127,
+   "cost": 0.060561999999999984,
+   "lat": 28.33784071500003
+  },
+  "on": {
+   "n": 5,
+   "ck": "dda12c7a08d2a6f3e6578f79131d187a",
+   "calls": 126,
+   "cost": 0.060042,
+   "lat": 83.64600237300004,
+   "sound": 5,
+   "passing": 27
+  },
+  "exp": 5,
+  "verified": true
+ },
+ {
+  "name": "classify_in_limit5",
+  "kind": "TARGET",
+  "off": {
+   "n": 5,
+   "ck": "8fc70693c1c5f5245853063df0ee0560",
+   "calls": 26,
+   "cost": 0.011164499999999999,
+   "lat": 7.654370880999923
+  },
+  "on": {
+   "n": 5,
+   "ck": "8fc70693c1c5f5245853063df0ee0560",
+   "calls": 26,
+   "cost": 0.011164499999999997,
+   "lat": 38.44102127499997,
+   "sound": 5,
+   "passing": 63
+  },
+  "exp": 5,
+  "verified": true
+ },
+ {
+  "name": "score_gt0_limit200",
+  "kind": "TARGET",
+  "off": {
+   "n": 100,
+   "ck": "51769639787b367262898bffe67afd5d",
+   "calls": 100,
+   "cost": 0.05497000000000001,
+   "lat": 17.865076332000005
+  },
+  "on": {
+   "n": 100,
+   "ck": "51769639787b367262898bffe67afd5d",
+   "calls": 100,
+   "cost": 0.05497000000000001,
+   "lat": 53.469990827000004,
+   "sound": 100,
+   "passing": 100
+  },
+  "exp": 100,
+  "verified": true
+ }
+]

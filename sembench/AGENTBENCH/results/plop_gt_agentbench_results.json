@@ -1,0 +1,56 @@
+{
+ "per_query": {
+  "Q1": {
+   "latency_s": 14.4,
+   "llm_calls": 149,
+   "llm_calls_fresh": 55,
+   "tokens": 44280,
+   "cost_usd_est": 0.01913,
+   "rows": 2600,
+   "error": null,
+   "ran_at": "2026-09-22 23:50:42 MDT"
+  },
+  "Q2": {
+   "latency_s": 8.8,
+   "llm_calls": 100,
+   "llm_calls_fresh": 0,
+   "tokens": 13336,
+   "cost_usd_est": 0.01075,
+   "rows": 1000,
+   "error": null,
+   "ran_at": "2026-09-22 23:51:12 MDT"
+  },
+  "Q3": {
+   "latency_s": 14.7,
+   "llm_calls": 79,
+   "llm_calls_fresh": 0,
+   "tokens": 9565,
+   "cost_usd_est": 0.00728,
+   "rows": 1580,
+   "error": null,
+   "ran_at": "2026-09-22 23:51:12 MDT"
+  },
+  "Q29": {
+   "latency_s": 20.9,
+   "llm_calls": 23,
+   "llm_calls_fresh": 1,
+   "tokens": 659,
+   "cost_usd_est": 0.0003,
+   "rows": 28,
+   "error": null,
+   "ran_at": "2026-09-23 00:09:19 MDT"
+  }
+ },
+ "model": "gpt-5.6-luna",
+ "mode": "none",
+ "workers": "20",
+ "updated": "2026-09-23 00:09:19 MDT",
+ "total": {
+  "n_queries": 4,
+  "latency_s": 58.8,
+  "llm_calls": 351,
+  "cost_usd_est": 0.0375,
+  "tokens": 67840,
+  "errors": 0
+ }
+}

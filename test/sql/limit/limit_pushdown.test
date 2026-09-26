@@ -1,0 +1,59 @@
+# name: test/sql/limit/limit_pushdown.test
+# description: AILimitPushdown plants LIMIT k into AI evaluation; sound, complete, and call-saving
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE docs AS SELECT 'doc '||range::VARCHAR AS d FROM range(200);
+
+# exactly k rows come back (the mock passes ~half, far more than k)
+statement ok
+SELECT ai_local_cache_clear();
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM (SELECT d FROM docs WHERE ai_filter('is '||d||' fine?') LIMIT 5);
+----
+5
+
+# the early-stop saved calls: strictly fewer than the full 200 evaluations
+query I
+SELECT sum(llm_calls)::BIGINT < 200 FROM ai_usage();
+----
+true
+
+# soundness: every returned row is a true passer (re-check against the full evaluation)
+statement ok
+CREATE TABLE limited AS SELECT d FROM docs WHERE ai_filter('is '||d||' fine?') LIMIT 5;
+
+query I
+SELECT count(*) FROM limited l
+WHERE NOT ai_filter('is '||l.d||' fine?');
+----
+0
+
+# with the pass off, the same query still returns exactly 5 (baseline behavior)
+statement ok
+SET ai_limit = false;
+
+query I
+SELECT count(*) FROM (SELECT d FROM docs WHERE ai_filter('is '||d||' fine?') LIMIT 5);
+----
+5
+
+statement ok
+SET ai_limit = true;
+
+# ORDER BY ... LIMIT is NOT limit-pushed (top-K needs every row scored): full count preserved
+query I
+SELECT count(*) FROM (
+  SELECT d FROM docs WHERE ai_filter('is '||d||' fine?') ORDER BY d LIMIT 5);
+----
+5
+
+statement ok
+CALL ai_mock_stop();

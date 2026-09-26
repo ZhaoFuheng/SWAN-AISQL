@@ -1,0 +1,442 @@
+[
+ {
+  "kind": "filter",
+  "name": "conj_q0_2L",
+  "off": {
+   "n": 41,
+   "checksum": "b4be431cf1eccdae3510660febacdbbe",
+   "chat_calls": 1186,
+   "prompt_tokens": 900797,
+   "completion_tokens": 156196,
+   "cost_usd": 0.5375912499999997,
+   "latency_s": 122.06235208100406
+  },
+  "on": {
+   "n": 41,
+   "checksum": "b4be431cf1eccdae3510660febacdbbe",
+   "chat_calls": 1270,
+   "prompt_tokens": 953710,
+   "completion_tokens": 173003,
+   "cost_usd": 0.5844334999999996,
+   "latency_s": 127.8461869120074
+  }
+ },
+ {
+  "kind": "filter",
+  "name": "conj_q22_6L",
+  "off": {
+   "n": 2,
+   "checksum": "86f0239f371d4dae2d3c79b337b561d1",
+   "chat_calls": 1241,
+   "prompt_tokens": 947911,
+   "completion_tokens": 172738,
+   "cost_usd": 0.5824537499999995,
+   "latency_s": 140.04078667602153
+  },
+  "on": {
+   "n": 2,
+   "checksum": "86f0239f371d4dae2d3c79b337b561d1",
+   "chat_calls": 1159,
+   "prompt_tokens": 873242,
+   "completion_tokens": 155326,
+   "cost_usd": 0.5289624999999997,
+   "latency_s": 130.65492279900354
+  }
+ },
+ {
+  "kind": "filter",
+  "name": "conj_q44_10L",
+  "off": {
+   "n": 1,
+   "checksum": "cfcc0831884fec330ac0dbd07792bd8e",
+   "chat_calls": 2631,
+   "prompt_tokens": 1998214,
+   "completion_tokens": 401152,
+   "cost_usd": 1.3018574999999994,
+   "latency_s": 301.68475092199515
+  },
+  "on": {
+   "n": 1,
+   "checksum": "cfcc0831884fec330ac0dbd07792bd8e",
+   "chat_calls": 1195,
+   "prompt_tokens": 916458,
+   "completion_tokens": 165320,
+   "cost_usd": 0.5597545000000005,
+   "latency_s": 157.23645571400994
+  }
+ },
+ {
+  "kind": "filter",
+  "name": "disj_q0_2L",
+  "off": {
+   "n": 474,
+   "checksum": "e7b2842db30b0a276c1c8a6bcdd6ea35",
+   "chat_calls": 1724,
+   "prompt_tokens": 1300423,
+   "completion_tokens": 229431,
+   "cost_usd": 0.7839677500000024,
+   "latency_s": 170.85870844399324
+  },
+  "on": {
+   "n": 474,
+   "checksum": "e7b2842db30b0a276c1c8a6bcdd6ea35",
+   "chat_calls": 1702,
+   "prompt_tokens": 1283877,
+   "completion_tokens": 227563,
+   "cost_usd": 0.7760952500000021,
+   "latency_s": 170.3354667260137
+  }
+ },
+ {
+  "kind": "filter",
+  "name": "disj_q22_6L",
+  "off": {
+   "n": 969,
+   "checksum": "2083a43ef6b19c477c9cd60af2ac23bf",
+   "chat_calls": 2648,
+   "prompt_tokens": 1976459,
+   "completion_tokens": 398450,
+   "cost_usd": 1.2910147499999982,
+   "latency_s": 291.33563087301445
+  },
+  "on": {
+   "n": 969,
+   "checksum": "2083a43ef6b19c477c9cd60af2ac23bf",
+   "chat_calls": 1078,
+   "prompt_tokens": 806310,
+   "completion_tokens": 175502,
+   "cost_usd": 0.5525814999999996,
+   "latency_s": 138.19340198198915
+  }
+ },
+ {
+  "kind": "filter",
+  "name": "disj_q44_10L",
+  "off": {
+   "n": 962,
+   "checksum": "c7d6be3b50cdc2e76d853c2bad186e86",
+   "chat_calls": 1524,
+   "prompt_tokens": 1144877,
+   "completion_tokens": 224168,
+   "cost_usd": 0.7345552500000007,
+   "latency_s": 182.94229736202396
+  },
+  "on": {
+   "n": 962,
+   "checksum": "c7d6be3b50cdc2e76d853c2bad186e86",
+   "chat_calls": 1229,
+   "prompt_tokens": 907520,
+   "completion_tokens": 190700,
+   "cost_usd": 0.6082800000000004,
+   "latency_s": 151.02649682402262
+  }
+ },
+ {
+  "kind": "filter",
+  "name": "mix_q0_2L",
+  "off": {
+   "n": 474,
+   "checksum": "e7b2842db30b0a276c1c8a6bcdd6ea35",
+   "chat_calls": 1724,
+   "prompt_tokens": 1300423,
+   "completion_tokens": 229431,
+   "cost_usd": 0.7839677500000024,
+   "latency_s": 170.80903171302634
+  },
+  "on": {
+   "n": 474,
+   "checksum": "e7b2842db30b0a276c1c8a6bcdd6ea35",
+   "chat_calls": 1693,
+   "prompt_tokens": 1276707,
+   "completion_tokens": 226377,
+   "cost_usd": 0.7719307500000023,
+   "latency_s": 169.69376187198213
+  }
+ },
+ {
+  "kind": "filter",
+  "name": "mix_q22_6L",
+  "off": {
+   "n": 408,
+   "checksum": "1defb7799e92522825fa14c0f363c8ba",
+   "chat_calls": 3631,
+   "prompt_tokens": 2707540,
+   "completion_tokens": 499982,
+   "cost_usd": 1.6768489999999971,
+   "latency_s": 428.3516052199993
+  },
+  "on": {
+   "n": 408,
+   "checksum": "1defb7799e92522825fa14c0f363c8ba",
+   "chat_calls": 3276,
+   "prompt_tokens": 2452868,
+   "completion_tokens": 463898,
+   "cost_usd": 1.5410129999999953,
+   "latency_s": 396.43850518699037
+  }
+ },
+ {
+  "kind": "filter",
+  "name": "mix_q44_10L",
+  "off": {
+   "n": 568,
+   "checksum": "dac692b29f5a53ea7b15d936afd64602",
+   "chat_calls": 2792,
+   "prompt_tokens": 2136909,
+   "completion_tokens": 435922,
+   "cost_usd": 1.4060712499999994,
+   "latency_s": 330.9002071630093
+  },
+  "on": {
+   "n": 568,
+   "checksum": "dac692b29f5a53ea7b15d936afd64602",
+   "chat_calls": 2666,
+   "prompt_tokens": 2035879,
+   "completion_tokens": 414518,
+   "cost_usd": 1.3380057499999993,
+   "latency_s": 310.4373081520025
+  }
+ },
+ {
+  "kind": "mixed",
+  "name": "mix1_F_C",
+  "off": {
+   "n": 156,
+   "checksum": "93a05bc3aef757a9ab5a556e06471d44",
+   "chat_calls": 1128,
+   "prompt_tokens": 867671,
+   "completion_tokens": 147532,
+   "cost_usd": 0.5119817499999996,
+   "latency_s": 104.70996998000192
+  },
+  "on": {
+   "n": 156,
+   "checksum": "93a05bc3aef757a9ab5a556e06471d44",
+   "chat_calls": 1146,
+   "prompt_tokens": 875324,
+   "completion_tokens": 146110,
+   "cost_usd": 0.5110509999999996,
+   "latency_s": 104.78301116399234
+  }
+ },
+ {
+  "kind": "mixed",
+  "name": "mix2_C_S",
+  "off": {
+   "n": 201,
+   "checksum": "2f1fc1e8d51b1dbf947662bf36008b7b",
+   "chat_calls": 1174,
+   "prompt_tokens": 896856,
+   "completion_tokens": 175770,
+   "cost_usd": 0.5757539999999997,
+   "latency_s": 117.07573542100727
+  },
+  "on": {
+   "n": 201,
+   "checksum": "2f1fc1e8d51b1dbf947662bf36008b7b",
+   "chat_calls": 1191,
+   "prompt_tokens": 909371,
+   "completion_tokens": 190184,
+   "cost_usd": 0.6077107500000002,
+   "latency_s": 123.82585532401572
+  }
+ },
+ {
+  "kind": "mixed",
+  "name": "mix3_S_F",
+  "off": {
+   "n": 358,
+   "checksum": "a25ba06cb32977cff9193e703d6ca65b",
+   "chat_calls": 1830,
+   "prompt_tokens": 1388261,
+   "completion_tokens": 435403,
+   "cost_usd": 1.217871249999997,
+   "latency_s": 246.63491114700446
+  },
+  "on": {
+   "n": 358,
+   "checksum": "a25ba06cb32977cff9193e703d6ca65b",
+   "chat_calls": 1369,
+   "prompt_tokens": 1033483,
+   "completion_tokens": 280107,
+   "cost_usd": 0.8185847499999986,
+   "latency_s": 171.4932653910073
+  }
+ },
+ {
+  "kind": "mixed",
+  "name": "mix4_F_S",
+  "off": {
+   "n": 149,
+   "checksum": "5de9124b6e952cf40bf5b54c16498a38",
+   "chat_calls": 1330,
+   "prompt_tokens": 1024663,
+   "completion_tokens": 303384,
+   "cost_usd": 0.8629337500000006,
+   "latency_s": 190.64552574398112
+  },
+  "on": {
+   "n": 149,
+   "checksum": "5de9124b6e952cf40bf5b54c16498a38",
+   "chat_calls": 1352,
+   "prompt_tokens": 1037762,
+   "completion_tokens": 302638,
+   "cost_usd": 0.8647165000000004,
+   "latency_s": 186.18532345400308
+  }
+ },
+ {
+  "kind": "mixed",
+  "name": "mix5_C_F_S",
+  "off": {
+   "n": 94,
+   "checksum": "6010a8b48312789435b6971a22448663",
+   "chat_calls": 1286,
+   "prompt_tokens": 989680,
+   "completion_tokens": 193636,
+   "cost_usd": 0.6346920000000003,
+   "latency_s": 142.84604153802502
+  },
+  "on": {
+   "n": 94,
+   "checksum": "6010a8b48312789435b6971a22448663",
+   "chat_calls": 1242,
+   "prompt_tokens": 954274,
+   "completion_tokens": 185020,
+   "cost_usd": 0.6086085000000014,
+   "latency_s": 134.96383831999265
+  }
+ },
+ {
+  "kind": "mixed",
+  "name": "mix6_S_C",
+  "off": {
+   "n": 80,
+   "checksum": "cdb884a8a3577dcd17b7cd09b5c359bb",
+   "chat_calls": 1048,
+   "prompt_tokens": 815455,
+   "completion_tokens": 147848,
+   "cost_usd": 0.4995597499999998,
+   "latency_s": 106.56075651300489
+  },
+  "on": {
+   "n": 80,
+   "checksum": "cdb884a8a3577dcd17b7cd09b5c359bb",
+   "chat_calls": 1064,
+   "prompt_tokens": 827316,
+   "completion_tokens": 151816,
+   "cost_usd": 0.510461,
+   "latency_s": 110.32989163900493
+  }
+ },
+ {
+  "kind": "mixed",
+  "name": "mix7_F_C_S",
+  "off": {
+   "n": 184,
+   "checksum": "9157498822cb5e04021c28968d8d27ea",
+   "chat_calls": 1358,
+   "prompt_tokens": 1026090,
+   "completion_tokens": 204881,
+   "cost_usd": 0.666284500000001,
+   "latency_s": 157.2291501610307
+  },
+  "on": {
+   "n": 184,
+   "checksum": "9157498822cb5e04021c28968d8d27ea",
+   "chat_calls": 1379,
+   "prompt_tokens": 1041675,
+   "completion_tokens": 208927,
+   "cost_usd": 0.6782727500000012,
+   "latency_s": 158.23954817999038
+  }
+ },
+ {
+  "kind": "mixed",
+  "name": "mix8_C_or_F",
+  "off": {
+   "n": 116,
+   "checksum": "b49e7f4633ec40de95a6881c6b04a04f",
+   "chat_calls": 1893,
+   "prompt_tokens": 1435350,
+   "completion_tokens": 231318,
+   "cost_usd": 0.821473499999999,
+   "latency_s": 196.81100202701055
+  },
+  "on": {
+   "n": 116,
+   "checksum": "b49e7f4633ec40de95a6881c6b04a04f",
+   "chat_calls": 1832,
+   "prompt_tokens": 1384669,
+   "completion_tokens": 221185,
+   "cost_usd": 0.7885372499999994,
+   "latency_s": 191.80905784101924
+  }
+ },
+ {
+  "kind": "mixed",
+  "name": "mix9_M_F",
+  "off": {
+   "n": 0,
+   "checksum": "",
+   "chat_calls": 1221,
+   "prompt_tokens": 891991,
+   "completion_tokens": 171058,
+   "cost_usd": 0.56511375,
+   "latency_s": 154.89443372000824
+  },
+  "on": {
+   "n": 0,
+   "checksum": "",
+   "chat_calls": 981,
+   "prompt_tokens": 696868,
+   "completion_tokens": 198810,
+   "cost_usd": 0.5718370000000009,
+   "latency_s": 135.71303053101292
+  }
+ },
+ {
+  "kind": "mixed",
+  "name": "set1_Cin_F",
+  "off": {
+   "n": 361,
+   "checksum": "073aff35ff41ea5defd61baacb9378ea",
+   "chat_calls": 1924,
+   "prompt_tokens": 1459585,
+   "completion_tokens": 258158,
+   "cost_usd": 0.8812122499999983,
+   "latency_s": 183.78228017900256
+  },
+  "on": {
+   "n": 361,
+   "checksum": "073aff35ff41ea5defd61baacb9378ea",
+   "chat_calls": 1341,
+   "prompt_tokens": 1017463,
+   "completion_tokens": 181383,
+   "cost_usd": 0.6171317499999989,
+   "latency_s": 134.91902392500197
+  }
+ },
+ {
+  "kind": "mixed",
+  "name": "set2_Cnotin_S",
+  "off": {
+   "n": 802,
+   "checksum": "6ca9744c1acb053bbd3022aac5c23a2b",
+   "chat_calls": 1940,
+   "prompt_tokens": 1492857,
+   "completion_tokens": 344058,
+   "cost_usd": 1.0613302500000001,
+   "latency_s": 219.74749831698136
+  },
+  "on": {
+   "n": 802,
+   "checksum": "6ca9744c1acb053bbd3022aac5c23a2b",
+   "chat_calls": 1787,
+   "prompt_tokens": 1379134,
+   "completion_tokens": 309958,
+   "cost_usd": 0.9646995000000006,
+   "latency_s": 201.1755218640028
+  }
+ }
+]

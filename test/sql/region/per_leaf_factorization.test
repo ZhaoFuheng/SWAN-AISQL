@@ -1,0 +1,228 @@
+# name: test/sql/region/per_leaf_factorization.test
+# description: PER-LEAF FACTORIZATION. A region whose folded tree keys on >= 2 sides of the join below
+#              keeps one dictionary PER LEAF (each on that leaf's own columns) instead of one on the
+#              union of all leaf columns, and evaluates leaf batches in a global DP order, a later
+#              leaf only for reps some undecided row still needs. Observable as call counts equal to
+#              per-side distinct counts. Single-side trees keep per-row reordering (asserted through the
+#              calls short-circuiting saves), since losing it would cost calls there.
+#              Every shape is parity-checked against the BLOCKING path (ai_debug_region_blocking=true:
+#              one tuple-keyed global evaluation, an independent implementation); the mock's verdict is
+#              deterministic per prompt, so the two must agree row for row.
+# group: [aisql]
+
+require aisql
+
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET threads=1;
+
+# A: 300 distinct docs; B: 50 distinct docs; the cross product has 15,000 pair rows.
+statement ok
+CREATE TABLE a AS SELECT range AS ka, 'doc a'||range::VARCHAR AS ta FROM range(300);
+
+statement ok
+CREATE TABLE b AS SELECT range AS kb, 'doc b'||range::VARCHAR AS tb FROM range(50);
+
+# ---------- S1: both leaves needed (p=50 each): calls = |A| + |B|, never the pair domain ----------
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE s1_leaf AS SELECT ka, kb FROM a CROSS JOIN b WHERE ai_filter('[p=50] fine? '||ta) AND ai_filter('[p=50] fine? '||tb);
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+350
+
+statement ok
+SET ai_debug_region_blocking=true;
+
+statement ok
+CREATE TABLE s1_block AS SELECT ka, kb FROM a CROSS JOIN b WHERE ai_filter('[p=50] fine? '||ta) AND ai_filter('[p=50] fine? '||tb);
+
+statement ok
+SET ai_debug_region_blocking=false;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM s1_leaf EXCEPT ALL SELECT * FROM s1_block) UNION ALL (SELECT * FROM s1_block EXCEPT ALL SELECT * FROM s1_leaf));
+----
+0
+
+query I
+SELECT count(*) > 0 AND count(*) < 15000 FROM s1_leaf;
+----
+true
+
+# ---------- S2: one side fails everywhere (Q17's shape): the other leaf is never asked ----------
+# Per-leaf evaluates B (50 calls), finds every row decided FALSE, and fires nothing for A: exactly |B|
+# calls and an empty result. (Tuple mode gets this right on a shape this small too; at Q17's scale it
+# explores the big leaf while the MLP warms up -- see agentbench-latency notes. The assertion here is
+# that per-leaf is exact, not that tuple mode is worse.)
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM a CROSS JOIN b WHERE ai_filter('[p=50] fine? '||ta) AND ai_filter('[p=0] fine? '||tb);
+----
+0
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+50
+
+# ---------- S3: leaves on the two sides of a REDUCING inner join, short-circuit at rep granularity ----------
+# 120 a-rows and 10 b-rows survive the join. The DP evaluates the cheap b side first; an a-doc is asked
+# about only if it is paired with a PASSING b. So the exact call count is
+#   |b surviving| + |distinct a paired with a passing b|
+# which we derive from the mock's own (deterministic) b verdicts rather than guess.
+statement ok
+CREATE TABLE link AS SELECT range AS ka, (range % 10) AS kb FROM range(120);
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE b_pass AS SELECT kb FROM b WHERE kb < 10 AND ai_filter('[p=50] fine? '||tb);
+
+statement ok
+CREATE TABLE s3_expected AS SELECT 10 + count(DISTINCT l.ka) AS calls FROM link l WHERE l.kb IN (SELECT kb FROM b_pass);
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE s3_leaf AS SELECT a.ka, b.kb FROM a JOIN link l ON l.ka = a.ka JOIN b ON b.kb = l.kb
+                        WHERE ai_filter('[p=50] fine? '||ta) AND ai_filter('[p=50] fine? '||tb);
+
+query I
+SELECT (SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage()) = (SELECT calls FROM s3_expected);
+----
+true
+
+statement ok
+SET ai_debug_region_blocking=true;
+
+statement ok
+CREATE TABLE s3_block AS SELECT a.ka, b.kb FROM a JOIN link l ON l.ka = a.ka JOIN b ON b.kb = l.kb
+                         WHERE ai_filter('[p=50] fine? '||ta) AND ai_filter('[p=50] fine? '||tb);
+
+statement ok
+SET ai_debug_region_blocking=false;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM s3_leaf EXCEPT ALL SELECT * FROM s3_block) UNION ALL (SELECT * FROM s3_block EXCEPT ALL SELECT * FROM s3_leaf));
+----
+0
+
+query I
+SELECT count(*) > 0 FROM s3_leaf;
+----
+true
+
+# ---------- S4: a single-side two-leaf tree keeps per-row reordering: short-circuit still saves calls ----------
+# 300 docs, two leaves on the same doc. Asking both leaves of every doc would be 600 calls; ordering the
+# cheaper/likelier-false leaf first per row must save a substantial share. And the answer must match the
+# blocking path.
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE s4_leaf AS SELECT ka FROM a WHERE ai_filter('[p=50] fine? '||ta) AND ai_filter('[p=30] great? '||ta);
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT < 600 FROM ai_usage();
+----
+true
+
+statement ok
+SET ai_debug_region_blocking=true;
+
+statement ok
+CREATE TABLE s4_block AS SELECT ka FROM a WHERE ai_filter('[p=50] fine? '||ta) AND ai_filter('[p=30] great? '||ta);
+
+statement ok
+SET ai_debug_region_blocking=false;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM s4_leaf EXCEPT ALL SELECT * FROM s4_block) UNION ALL (SELECT * FROM s4_block EXCEPT ALL SELECT * FROM s4_leaf));
+----
+0
+
+# ---------- S5: NULL on one side: that leaf's verdict is NULL, the row is filtered, modes agree ----------
+statement ok
+CREATE TABLE bn AS SELECT range AS kb, CASE WHEN range % 5 = 0 THEN NULL ELSE 'doc b'||range::VARCHAR END AS tb FROM range(50);
+
+statement ok
+CREATE TABLE s5_leaf AS SELECT ka, kb FROM a CROSS JOIN bn WHERE ai_filter('[p=50] fine? '||ta) AND ai_filter('[p=50] fine? '||tb);
+
+statement ok
+SET ai_debug_region_blocking=true;
+
+statement ok
+CREATE TABLE s5_block AS SELECT ka, kb FROM a CROSS JOIN bn WHERE ai_filter('[p=50] fine? '||ta) AND ai_filter('[p=50] fine? '||tb);
+
+statement ok
+SET ai_debug_region_blocking=false;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM s5_leaf EXCEPT ALL SELECT * FROM s5_block) UNION ALL (SELECT * FROM s5_block EXCEPT ALL SELECT * FROM s5_leaf));
+----
+0
+
+query I
+SELECT count(*) FROM s5_leaf WHERE kb % 5 = 0;
+----
+0
+
+# ---------- S6: LIMIT pushed into a per-leaf region: exactly k rows, all sound ----------
+statement ok
+CREATE TABLE s6 AS SELECT ka, kb FROM a CROSS JOIN b WHERE ai_filter('[p=50] fine? '||ta) AND ai_filter('[p=50] fine? '||tb) LIMIT 7;
+
+query I
+SELECT count(*) FROM s6;
+----
+7
+
+query I
+SELECT count(*) FROM s6 s WHERE NOT EXISTS (SELECT 1 FROM s1_leaf t WHERE t.ka = s.ka AND t.kb = s.kb);
+----
+0
+
+# ---------- S7: many chunks + overlapping waves in per-leaf mode: same answer, same calls ----------
+statement ok
+RESET threads;
+
+statement ok
+CREATE TABLE big AS SELECT range AS ka, 'doc a'||(range % 3000)::VARCHAR AS ta FROM range(60000);
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE s7 AS SELECT count(*) AS n FROM big CROSS JOIN b WHERE ai_filter('[p=50] fine? '||ta) AND ai_filter('[p=50] fine? '||tb);
+
+# 3,000 distinct a-docs + 50 b-docs, regardless of the 3,000,000 pair rows
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3050

@@ -1,0 +1,88 @@
+# name: test/sql/functions/inflight_dedup.test
+# description: The same prompt must be SENT once, even when two batches start it at the same
+#              moment. The local cache alone cannot do this -- it is written when a response
+#              LANDS, so batches that begin the same prompt concurrently all miss and all pay.
+#              That is the normal case once a CTE carrying an AI filter is inlined: each
+#              reference becomes its own copy of the same scan, and sibling copies run as
+#              separate pipelines over the same rows. Measured on agent_bench Q23 (91 distinct
+#              prompts, 3 references): 131 calls before, 91 after, identical rows. Q24 96 -> 56,
+#              Q21 108 -> 91.
+#              COVERAGE: this file fails with the in-flight registry removed -- the UNION ALL
+#              shape below sends 180 calls for 60 distinct prompts (one full pass per reference)
+#              instead of 60. The exact count is asserted, not a bound, so BOTH a regression and
+#              an over-eager dedup that drops work are caught. The '[sleep=..]' knob holds each
+#              answer long enough for the copies to overlap; a join-shaped version of the same
+#              query does NOT reproduce it (the copies there do not run concurrently), which is
+#              why the shape is what it is.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE t AS SELECT range AS k, 'row '||range::VARCHAR AS nm FROM range(60);
+
+statement ok
+SELECT ai_usage_reset();
+
+# one AI filter, three references, each its own pipeline -> 60 distinct prompts, never 180
+statement ok
+CREATE TABLE fanned AS
+WITH sel AS (SELECT k, nm FROM t WHERE ai_filter('[p=50][sleep=200] keep? '||nm))
+SELECT k FROM sel UNION ALL SELECT k FROM sel UNION ALL SELECT k FROM sel;
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+60
+
+# the three copies must agree with each other: each contributes the SAME surviving rows, so
+# every kept k appears exactly three times. A copy that resampled would break this.
+query I
+SELECT count(*) FROM (SELECT k, count(*) AS c FROM fanned GROUP BY k HAVING count(*) <> 3);
+----
+0
+
+# and the predicate really ran (an all-NULL verdict would keep nothing and trivially satisfy both)
+query I
+SELECT count(*) > 0 FROM fanned;
+----
+true
+
+# --- the deduplicated result must equal the undeduplicated one, row for row
+statement ok
+SET ai_local_cache=false;
+
+statement ok
+CREATE TABLE fanned_nodedup AS
+WITH sel AS (SELECT k, nm FROM t WHERE ai_filter('[p=50][sleep=200] keep? '||nm))
+SELECT k FROM sel UNION ALL SELECT k FROM sel UNION ALL SELECT k FROM sel;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM fanned EXCEPT SELECT * FROM fanned_nodedup)
+                      UNION ALL (SELECT * FROM fanned_nodedup EXCEPT SELECT * FROM fanned));
+----
+0
+
+statement ok
+SET ai_local_cache=true;
+
+# --- a second query must not be served by the first query's entries: the registry is keyed by
+# the same query-scoped key as the cache, so scope still holds.
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) > 0 FROM t WHERE ai_filter('[p=100][sleep=10] fresh? '||nm);
+----
+true
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+60

@@ -1,0 +1,108 @@
+# name: test/sql/functions/ai_functions_mock.test
+# description: AI scalar/table functions end-to-end against the in-process deterministic mock
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE docs AS SELECT 'doc '||range::VARCHAR AS d FROM range(10);
+
+# deterministic mock: same prompt -> same answer on every run
+query I
+SELECT count(*) FROM docs WHERE ai_filter('is ' || d || ' good?');
+----
+7
+
+# repeat is served from the LOCAL cache (layer 1): no new calls, hits accounted
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter('is ' || d || ' good?');
+----
+7
+
+query II
+SELECT sum(llm_calls)::BIGINT, sum(cache_hits)::BIGINT FROM ai_usage();
+----
+0	10
+
+# local cache off -> the same repeat pays real calls again
+statement ok
+SET ai_local_cache = false;
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter('is ' || d || ' good?');
+----
+7
+
+query I
+SELECT sum(llm_calls)::BIGINT FROM ai_usage();
+----
+10
+
+statement ok
+SET ai_local_cache = true;
+
+# clearing the local cache forces a refetch (which repopulates it)
+statement ok
+SELECT ai_local_cache_clear();
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter('is ' || d || ' good?');
+----
+7
+
+query I
+SELECT sum(llm_calls)::BIGINT FROM ai_usage();
+----
+10
+
+# classify list overload: labels ride in the prompt, schema is an open string -> the mock's
+# deterministic fallback answer for every row (matches the python mock 1:1)
+query I
+SELECT count(DISTINCT ai_classify(d, ['a','b','c'])) FROM docs;
+----
+1
+
+# classify struct overload: enum-constrained schema -> stable per-row labels with diversity
+query I
+SELECT count(DISTINCT ai_classify(d, {'a': 'letter a', 'b': 'letter b', 'c': 'letter c'})) > 1 FROM docs;
+----
+true
+
+# score (unranged): the mock's number answer is hash % 100
+query I
+SELECT bool_and(s BETWEEN 0 AND 99) FROM (SELECT ai_score(d, 'quality') AS s FROM docs);
+----
+true
+
+# score with integer range -> BIGINT in [1,5]
+query II
+SELECT typeof(ai_score(d, 'quality', 1, 5)), bool_and(ai_score(d, 'quality', 1, 5) BETWEEN 1 AND 5)
+FROM docs GROUP BY 1;
+----
+BIGINT	true
+
+# complete returns non-empty text
+query I
+SELECT bool_and(length(ai_complete('summarize: ' || d)) > 0) FROM docs;
+----
+true
+
+# embed returns a fixed-width float list
+query I
+SELECT len(ai_embed('hello')) FROM range(1);
+----
+4
+
+statement ok
+CALL ai_mock_stop();

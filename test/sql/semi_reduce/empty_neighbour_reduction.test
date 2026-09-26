@@ -1,0 +1,96 @@
+# name: test/sql/semi_reduce/empty_neighbour_reduction.test
+# description: A join neighbour estimated at ZERO rows must still reduce. The reducer used to skip
+#              those as a "degenerate cardinality estimate", which inverts the guard's purpose: an
+#              empty neighbour is where reduction is worth MOST, because the semi-join eliminates
+#              everything downstream. Skipping it left the AI predicate running on rows the join
+#              could not admit.
+#
+#              Measured on agent_bench Q30: its supplier predicate evaluated all 50 suppliers while
+#              the join admitted NONE -- the key subquery estimated 0 rows, so the reduction was
+#              skipped. 54 calls -> 7, matching PLOP, with the same (empty) result.
+#
+#              Correct either way: a semi-join only drops rows that join nothing, so a wrong
+#              estimate costs a useless semi-join, never a wrong answer.
+#
+#              HONEST LIMIT: this file does NOT discriminate. With the guard restored it still
+#              passes -- in every small shape tried (empty CTE, DISTINCT+LIMIT over an empty join,
+#              GROUP BY/HAVING that matches nothing, LIMIT over a filtered CTE) the join is
+#              eliminated or pruned by some other means before the guard could matter. Q30 reaches
+#              a zero ESTIMATE the optimizer cannot act on statically, through a LIMIT over a CTE
+#              chain whose emptiness is only known at runtime, and nothing here reproduces that.
+#              So agent_bench Q30 (54 -> 7 calls) is the real guard; this file pins the BEHAVIOUR
+#              -- an empty neighbour admits nothing, a narrow one admits exactly its keys -- and
+#              the parity check against the disabled stack.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE supplier AS SELECT range AS id, 'sup '||range::VARCHAR AS nm FROM range(50);
+
+statement ok
+CREATE TABLE src AS SELECT range AS id FROM range(50);
+
+statement ok
+SELECT ai_usage_reset();
+
+# k is empty, so no supplier can survive the join and no prompt is worth sending
+statement ok
+CREATE TABLE reduced AS
+WITH k AS (SELECT id FROM src WHERE id > 100000)
+SELECT s.id FROM supplier s JOIN k ON k.id = s.id WHERE ai_filter('[p=60] ok? '||s.nm);
+
+# COALESCE: with zero calls ai_usage() has no rows at all, so the sums are NULL, not 0
+query I
+SELECT COALESCE(sum(llm_calls)-sum(embed_calls), 0)::BIGINT FROM ai_usage();
+----
+0
+
+query I
+SELECT count(*) FROM reduced;
+----
+0
+
+# --- the answer must match the fully disabled stack, which also returns nothing
+statement ok
+SET ai_pullup=false; SET ai_factorize='off'; SET ai_semi_reduce=false; SET ai_reorder=false;
+SET ai_join_factorize='off'; SET ai_limit=false;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE reference AS
+WITH k AS (SELECT id FROM src WHERE id > 100000)
+SELECT s.id FROM supplier s JOIN k ON k.id = s.id WHERE ai_filter('[p=60] ok? '||s.nm);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM reduced EXCEPT SELECT * FROM reference)
+                      UNION ALL (SELECT * FROM reference EXCEPT SELECT * FROM reduced));
+----
+0
+
+statement ok
+SET ai_pullup=true; SET ai_factorize='all'; SET ai_semi_reduce=true; SET ai_reorder=true;
+SET ai_join_factorize='factor'; SET ai_limit=true;
+
+# --- a NON-empty neighbour still reduces to exactly what it admits (3 of 50), so the change did
+# not simply disable the cardinality heuristic
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE narrow AS
+WITH k AS (SELECT id FROM src WHERE id < 3)
+SELECT s.id FROM supplier s JOIN k ON k.id = s.id WHERE ai_filter('[p=60] ok? '||s.nm);
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3

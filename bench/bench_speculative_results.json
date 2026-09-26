@@ -1,0 +1,296 @@
+{
+ "docs": 50,
+ "warm_cost": 0.27083775,
+ "use_cases": [
+  {
+   "name": "UC1_selective",
+   "shape": "single filter + selective join (keeps 10/50, arbitrary ids)",
+   "setup": "CREATE TABLE keep AS SELECT id FROM gov LIMIT 10;\n",
+   "query": "SELECT g.id FROM gov g JOIN keep k ON g.id=k.id WHERE ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || g.summary)"
+  },
+  {
+   "name": "UC2_one_to_one",
+   "shape": "single filter + 1:1 join (neutral)",
+   "setup": "CREATE TABLE allids AS SELECT id FROM gov;\n",
+   "query": "SELECT g.id FROM gov g JOIN allids k ON g.id=k.id WHERE ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || g.summary)"
+  },
+  {
+   "name": "UC3_expansive_same",
+   "shape": "two filters on ONE relation + expansive self-join (49x)",
+   "setup": "",
+   "query": "SELECT DISTINCT a.id FROM gov a JOIN gov b ON a.org=b.org AND a.id<>b.id WHERE ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || a.summary) AND ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || a.summary)"
+  },
+  {
+   "name": "UC4_split_cross",
+   "shape": "two filters SPLIT across an expansive (cross) join",
+   "setup": "",
+   "query": "SELECT DISTINCT a.id FROM gov a JOIN gov b ON a.id<>b.id WHERE ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || a.summary) AND ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || b.summary)"
+  },
+  {
+   "name": "UC4_split_sparse",
+   "shape": "two filters SPLIT across a SPARSE join (each a->one b)",
+   "setup": "",
+   "query": "SELECT DISTINCT a.id FROM gov a JOIN gov b ON a.rn=b.rn+1 WHERE ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || a.summary) AND ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || b.summary)"
+  },
+  {
+   "name": "UC5_classify_score_same",
+   "shape": "classify + score on ONE relation + expansive self-join (49x)",
+   "setup": "",
+   "query": "SELECT DISTINCT a.id FROM gov a JOIN gov b ON a.org=b.org AND a.id<>b.id WHERE ai_classify(a.summary, ['health','defense','economy','education','environment','technology','justice','other']) = 'health' AND ai_score(a.summary, 'public importance') > 0.5"
+  },
+  {
+   "name": "UC6_classify_score_split",
+   "shape": "classify(a) + score(b) SPLIT across an expansive (cross) join",
+   "setup": "",
+   "query": "SELECT DISTINCT a.id FROM gov a JOIN gov b ON a.id<>b.id WHERE ai_classify(a.summary, ['health','defense','economy','education','environment','technology','justice','other']) = 'defense' AND ai_score(b.summary, 'national security relevance') > 0.5"
+  },
+  {
+   "name": "UC7_complete_filter_same",
+   "shape": "complete + ai_filter on ONE relation + expansive self-join",
+   "setup": "",
+   "query": "SELECT DISTINCT a.id FROM gov a JOIN gov b ON a.org=b.org AND a.id<>b.id WHERE ai_complete('In one word the primary topic: ' || a.summary) = 'defense' AND ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || a.summary)"
+  }
+ ],
+ "results": {
+  "UC1_selective": {
+   "push_down": {
+    "n": 2,
+    "ck": "34446c33ea73c718f1415acfa8aed768",
+    "calls": 10,
+    "cost": 0.00450375,
+    "lat": 4.696065277967136
+   },
+   "pull_up": {
+    "n": 2,
+    "ck": "34446c33ea73c718f1415acfa8aed768",
+    "calls": 10,
+    "cost": 0.00450375,
+    "lat": 4.697244379960466
+   },
+   "ours": {
+    "n": 2,
+    "ck": "34446c33ea73c718f1415acfa8aed768",
+    "calls": 10,
+    "cost": 0.00450375,
+    "lat": 4.677397314982954
+   },
+   "ours_always": {
+    "n": 2,
+    "ck": "34446c33ea73c718f1415acfa8aed768",
+    "calls": 10,
+    "cost": 0.004503749999999999,
+    "lat": 5.470701981976163
+   }
+  },
+  "UC2_one_to_one": {
+   "push_down": {
+    "n": 16,
+    "ck": "539e4fd28c95fbc333cb6c93beea9d93",
+    "calls": 50,
+    "cost": 0.021786750000000007,
+    "lat": 8.521627802983858
+   },
+   "pull_up": {
+    "n": 16,
+    "ck": "539e4fd28c95fbc333cb6c93beea9d93",
+    "calls": 50,
+    "cost": 0.021786750000000007,
+    "lat": 8.52901587903034
+   },
+   "ours": {
+    "n": 16,
+    "ck": "539e4fd28c95fbc333cb6c93beea9d93",
+    "calls": 50,
+    "cost": 0.021786750000000007,
+    "lat": 8.526855287025683
+   },
+   "ours_always": {
+    "n": 16,
+    "ck": "539e4fd28c95fbc333cb6c93beea9d93",
+    "calls": 50,
+    "cost": 0.021786750000000004,
+    "lat": 9.526576030999422
+   }
+  },
+  "UC3_expansive_same": {
+   "push_down": {
+    "n": 1,
+    "ck": "0f141fee3f3ed187e416350152ae6e93",
+    "calls": 66,
+    "cost": 0.029630750000000008,
+    "lat": 11.909641286940314
+   },
+   "pull_up": {
+    "n": 1,
+    "ck": "0f141fee3f3ed187e416350152ae6e93",
+    "calls": 67,
+    "cost": 0.029399750000000006,
+    "lat": 15.23105050396407
+   },
+   "ours": {
+    "n": 1,
+    "ck": "0f141fee3f3ed187e416350152ae6e93",
+    "calls": 66,
+    "cost": 0.029630750000000008,
+    "lat": 12.21780007792404
+   },
+   "ours_always": {
+    "n": 1,
+    "ck": "0f141fee3f3ed187e416350152ae6e93",
+    "calls": 66,
+    "cost": 0.02963075000000001,
+    "lat": 12.007461982953828
+   }
+  },
+  "UC4_split_cross": {
+   "push_down": {
+    "n": 16,
+    "ck": "539e4fd28c95fbc333cb6c93beea9d93",
+    "calls": 100,
+    "cost": 0.044175999999999986,
+    "lat": 15.803387264022604
+   },
+   "pull_up": {
+    "n": 16,
+    "ck": "539e4fd28c95fbc333cb6c93beea9d93",
+    "calls": 100,
+    "cost": 0.04417599999999999,
+    "lat": 17.444419929059222
+   },
+   "ours": {
+    "n": 16,
+    "ck": "539e4fd28c95fbc333cb6c93beea9d93",
+    "calls": 100,
+    "cost": 0.04417599999999999,
+    "lat": 16.09894306701608
+   },
+   "ours_always": {
+    "n": 16,
+    "ck": "539e4fd28c95fbc333cb6c93beea9d93",
+    "calls": 100,
+    "cost": 0.04417599999999998,
+    "lat": 19.65662023902405
+   }
+  },
+  "UC4_split_sparse": {
+   "push_down": {
+    "n": 4,
+    "ck": "4981b97699631944c15e63a9747c8ca8",
+    "calls": 100,
+    "cost": 0.044175999999999986,
+    "lat": 15.805930100963451
+   },
+   "pull_up": {
+    "n": 4,
+    "ck": "4981b97699631944c15e63a9747c8ca8",
+    "calls": 66,
+    "cost": 0.029095750000000014,
+    "lat": 10.577512783987913
+   },
+   "ours": {
+    "n": 4,
+    "ck": "4981b97699631944c15e63a9747c8ca8",
+    "calls": 65,
+    "cost": 0.028738750000000014,
+    "lat": 10.650552982988302
+   },
+   "ours_always": {
+    "n": 4,
+    "ck": "4981b97699631944c15e63a9747c8ca8",
+    "calls": 97,
+    "cost": 0.04249824999999998,
+    "lat": 18.45013107394334
+   }
+  },
+  "UC5_classify_score_same": {
+   "push_down": {
+    "n": 15,
+    "ck": "1538eafd51cb4d55c0120f2536399e58",
+    "calls": 75,
+    "cost": 0.03760575,
+    "lat": 11.281301114999224
+   },
+   "pull_up": {
+    "n": 15,
+    "ck": "1538eafd51cb4d55c0120f2536399e58",
+    "calls": 80,
+    "cost": 0.040323000000000005,
+    "lat": 17.084163565014023
+   },
+   "ours": {
+    "n": 15,
+    "ck": "1538eafd51cb4d55c0120f2536399e58",
+    "calls": 75,
+    "cost": 0.03760574999999999,
+    "lat": 11.57327124796575
+   },
+   "ours_always": {
+    "n": 15,
+    "ck": "1538eafd51cb4d55c0120f2536399e58",
+    "calls": 75,
+    "cost": 0.03760574999999999,
+    "lat": 11.60398463101592
+   }
+  },
+  "UC6_classify_score_split": {
+   "push_down": {
+    "n": 10,
+    "ck": "1f4dfbb94006bdce866077f7934cebc4",
+    "calls": 100,
+    "cost": 0.058556499999999984,
+    "lat": 19.17516625794815
+   },
+   "pull_up": {
+    "n": 10,
+    "ck": "1f4dfbb94006bdce866077f7934cebc4",
+    "calls": 100,
+    "cost": 0.05855650000000002,
+    "lat": 20.49140910996357
+   },
+   "ours": {
+    "n": 10,
+    "ck": "1f4dfbb94006bdce866077f7934cebc4",
+    "calls": 100,
+    "cost": 0.05855650000000002,
+    "lat": 17.760442077938933
+   },
+   "ours_always": {
+    "n": 10,
+    "ck": "1f4dfbb94006bdce866077f7934cebc4",
+    "calls": 100,
+    "cost": 0.058556499999999984,
+    "lat": 21.80069880298106
+   }
+  },
+  "UC7_complete_filter_same": {
+   "push_down": {
+    "n": 0,
+    "ck": "",
+    "calls": 59,
+    "cost": 0.030402250000000006,
+    "lat": 11.060170007986017
+   },
+   "pull_up": {
+    "n": 0,
+    "ck": "",
+    "calls": 55,
+    "cost": 0.028431249999999998,
+    "lat": 15.825050432933494
+   },
+   "ours": {
+    "n": 0,
+    "ck": "",
+    "calls": 59,
+    "cost": 0.03040225000000001,
+    "lat": 11.025559964997228
+   },
+   "ours_always": {
+    "n": 0,
+    "ck": "",
+    "calls": 59,
+    "cost": 0.030402250000000006,
+    "lat": 11.244415054970887
+   }
+  }
+ }
+}

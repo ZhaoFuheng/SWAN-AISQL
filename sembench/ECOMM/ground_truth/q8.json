@@ -1,0 +1,6 @@
+{
+ "ground_truth": [
+  "40270-40270"
+ ],
+ "metric": "f1-score"
+}

@@ -1,0 +1,82 @@
+# name: test/sql/factor_join/prefix_cache.test
+# description: prefix-cache client lifecycle: operators declare (split + expected_reuse hint), the
+#              client decides writes/reads. Result- and call-neutral vs plain; breakpoints follow
+#              the policy exactly (hinted groups all ride the cache, singletons place no bet).
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+# left records ~4.5KB so system+prefix clears the client's calibrated ~1k-token gate
+statement ok
+CREATE TABLE docs AS SELECT 'left doc '||i::VARCHAR||': '||repeat('lorem ipsum dolor sit amet ', 170) AS d FROM range(5) r(i);
+
+statement ok
+CREATE TABLE items AS SELECT 'item '||i::VARCHAR AS it FROM range(7) r(i);
+
+# --- prefix ON (default): the 2-way sem_filter(a,b) routes to the graph and declares prefixes
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE r_on AS SELECT d, it FROM docs, items WHERE ai_filter('[p=40] compat? ' || d || ' :: ' || it);
+
+statement ok
+CREATE TABLE u_on AS SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT AS chat FROM ai_usage();
+
+# hinted policy: every member has 7 partners (>= 2), so ALL 35 pair calls carry the breakpoint
+# (per member: 1 write + 6 parked-then-released reads)
+query I
+SELECT breakpoint_requests FROM ai_mock_breakpoints();
+----
+35
+
+# --- prefix OFF: same routing, plain bodies
+statement ok
+SET ai_prefix_cache=false;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE r_off AS SELECT d, it FROM docs, items WHERE ai_filter('[p=40] compat? ' || d || ' :: ' || it);
+
+statement ok
+CREATE TABLE u_off AS SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT AS chat FROM ai_usage();
+
+# identical results (the split changes the wire form, never the visible tokens)
+query I
+SELECT count(*) FROM ((SELECT * FROM r_on EXCEPT SELECT * FROM r_off)
+                      UNION ALL (SELECT * FROM r_off EXCEPT SELECT * FROM r_on));
+----
+0
+
+# identical call counts (the lifecycle reorders dispatch, never adds or saves calls)
+query I
+SELECT (SELECT chat FROM u_on) = (SELECT chat FROM u_off);
+----
+true
+
+# --- singleton fan-out: hint < 2 degrades to adaptive; the first (only) arrival goes plain,
+# so a never-reused prefix costs exactly nothing (no 1.25x write bet)
+statement ok
+SET ai_prefix_cache=true;
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE one_item AS SELECT 'the only item' AS it;
+
+statement ok
+CREATE TABLE r_one AS SELECT d, it FROM docs, one_item WHERE ai_filter('[p=60] fit? ' || d || ' :: ' || it);
+
+query I
+SELECT breakpoint_requests FROM ai_mock_breakpoints();
+----
+0

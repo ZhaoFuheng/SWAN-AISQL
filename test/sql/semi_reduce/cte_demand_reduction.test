@@ -1,0 +1,169 @@
+# name: test/sql/semi_reduce/cte_demand_reduction.test
+# description: AIReduceCTEsByDemand imports the pruning that lives OUTSIDE a semantic CTE into its
+#              body. A CTE body is a bare relation carrying no join edges of its own, so Yannakakis
+#              has nothing to work with there; the joins that could prune it sit in the query that
+#              READS it. This pass carries those keys across: each reference contributes the key
+#              source it joins against, and the body is semi-joined against the UNION of them.
+#
+#              COVERAGE: asserted with INLINING OFF, which is what makes this discriminate. With
+#              inlining on, whole-body copying already reaches the optimal count, so the pass would
+#              be invisible. With inlining off the body is materialized and the demand union is the
+#              ONLY pruning available: 16 calls with the pass, 200 without it.
+#
+#              The union is the correctness condition, not conservatism -- see
+#              cte_boundary_design.test, where reducing by one reference's keys drops 5 rows.
+#
+#              KNOWN LIMIT, measured on agent_bench Q26: the union can only be as selective as the
+#              LEAST selective reference. Where two references demand very different key sets whose
+#              union is nearly everything, this prunes nothing (Q26: 1,439 calls with the body
+#              materialized vs 426 with it inlined). Sharing one materialized body and pruning per
+#              reference are mutually exclusive by construction -- so this pass helps exactly when
+#              the references are JOINTLY selective, which the cases below are and Q26 is not.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE doc AS SELECT range AS id, 'doc '||range::VARCHAR AS body FROM range(200);
+
+# 10 ids
+statement ok
+CREATE TABLE hot AS SELECT range AS id FROM range(200) WHERE range % 20 = 0;
+
+# 8 ids
+statement ok
+CREATE TABLE warm AS SELECT range AS id FROM range(200) WHERE range % 25 = 0;
+
+# --- reference behaviour: whole-body inlining, which is already call-optimal
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE inlined AS
+WITH c AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] keep? '||body))
+SELECT x.id FROM (SELECT c.id FROM c JOIN hot h ON h.id = c.id
+                  UNION ALL SELECT c.id FROM c JOIN warm w ON w.id = c.id) x;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+16
+
+# --- the same query with the body MATERIALIZED. Without the demand union the predicate would run
+# on all 200 rows, because nothing inside the body knows what its readers discard.
+statement ok
+SET ai_inline_ai_ctes=false;
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE materialized AS
+WITH c AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] keep? '||body))
+SELECT x.id FROM (SELECT c.id FROM c JOIN hot h ON h.id = c.id
+                  UNION ALL SELECT c.id FROM c JOIN warm w ON w.id = c.id) x;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+16
+
+# and it is the SAME answer -- the reduction removed only rows no reference could consume
+query I
+SELECT count(*) FROM ((SELECT * FROM inlined EXCEPT SELECT * FROM materialized)
+                      UNION ALL (SELECT * FROM materialized EXCEPT SELECT * FROM inlined));
+----
+0
+
+# not vacuous: the predicate keeps some rows and not all of them
+query I
+SELECT count(*) > 0 AND count(*) < 200 FROM materialized;
+----
+true
+
+# --- a reference that consumes the CTE UNRESTRICTED makes the union universal, and nothing may be
+# pruned. 200 calls is the correct answer; a pass that pruned here would drop rows.
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE unrestricted AS
+WITH c AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] keep? '||body))
+SELECT x.id FROM (SELECT c.id FROM c JOIN hot h ON h.id = c.id
+                  UNION ALL SELECT c.id FROM c) x;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+200
+
+statement ok
+SET ai_inline_ai_ctes=true;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE unrestricted_ref AS
+WITH c AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] keep? '||body))
+SELECT x.id FROM (SELECT c.id FROM c JOIN hot h ON h.id = c.id
+                  UNION ALL SELECT c.id FROM c) x;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM unrestricted EXCEPT SELECT * FROM unrestricted_ref)
+                      UNION ALL (SELECT * FROM unrestricted_ref EXCEPT SELECT * FROM unrestricted));
+----
+0
+
+# --- Q26's arrangement: the AI CTE is read from ANOTHER CTE's body and from the main query, and
+# the key source transitively reads the CTE being reduced. That is not circular once the AI
+# predicate is stripped -- what gets substituted is the relational scan -- and refusing it used to
+# decline the whole reduction.
+statement ok
+SET ai_inline_ai_ctes=false;
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE q26_shape AS
+WITH keys1 AS (SELECT id FROM hot WHERE id >= 0),
+     a AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] q? '||body)),
+     bridge AS (SELECT a.id FROM a JOIN keys1 k ON k.id = a.id)
+SELECT id FROM bridge UNION ALL SELECT a2.id FROM a a2 JOIN keys1 k2 ON k2.id = a2.id;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+10
+
+statement ok
+SET ai_inline_ai_ctes=true;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE q26_shape_ref AS
+WITH keys1 AS (SELECT id FROM hot WHERE id >= 0),
+     a AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] q? '||body)),
+     bridge AS (SELECT a.id FROM a JOIN keys1 k ON k.id = a.id)
+SELECT id FROM bridge UNION ALL SELECT a2.id FROM a a2 JOIN keys1 k2 ON k2.id = a2.id;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM q26_shape EXCEPT SELECT * FROM q26_shape_ref)
+                      UNION ALL (SELECT * FROM q26_shape_ref EXCEPT SELECT * FROM q26_shape));
+----
+0

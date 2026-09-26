@@ -1,0 +1,26 @@
+{
+ "per_query": {
+  "Q19": {
+   "latency_s": 987.9,
+   "llm_calls": 9770,
+   "local_hits": 3458076,
+   "tokens": 807946,
+   "cost_usd": 0.21344,
+   "hedged": 232,
+   "rows": 137634,
+   "error": null,
+   "ran_at": "2026-09-23 00:20:32 MDT"
+  }
+ },
+ "model": "gpt-5.6-luna",
+ "concurrency": "20",
+ "updated": "2026-09-23 00:20:32 MDT",
+ "total": {
+  "n_queries": 1,
+  "latency_s": 987.9,
+  "llm_calls": 9770,
+  "cost_usd": 0.2134,
+  "tokens": 807946,
+  "errors": 0
+ }
+}

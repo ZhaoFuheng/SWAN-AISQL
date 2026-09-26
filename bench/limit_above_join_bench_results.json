@@ -1,0 +1,222 @@
+[
+ {
+  "name": "below_inner",
+  "kind": "BELOW_INNER",
+  "k": 5,
+  "full": 135,
+  "base": {
+   "n": 5,
+   "calls": 100,
+   "cost": 0.04421899999999999,
+   "lat": 35.78049875295255,
+   "ok": true
+  },
+  "plus": {
+   "n": 5,
+   "calls": 98,
+   "cost": 0.04338599999999999,
+   "lat": 39.96299279498635,
+   "ok": true
+  }
+ },
+ {
+  "name": "below_left",
+  "kind": "BELOW_LEFT",
+  "k": 5,
+  "full": 27,
+  "base": {
+   "n": 5,
+   "calls": 100,
+   "cost": 0.044219000000000015,
+   "lat": 27.53220891195815,
+   "ok": true
+  },
+  "plus": {
+   "n": 5,
+   "calls": 36,
+   "cost": 0.01559225,
+   "lat": 20.88291484391084,
+   "ok": true
+  }
+ },
+ {
+  "name": "join_cond",
+  "kind": "JOIN_COND",
+  "k": 5,
+  "full": 16,
+  "base": {
+   "n": 5,
+   "calls": 200,
+   "cost": 0.09486499999999999,
+   "lat": 72.23979871091433,
+   "ok": true
+  },
+  "plus": {
+   "n": 5,
+   "calls": 66,
+   "cost": 0.030707250000000002,
+   "lat": 48.97324037691578,
+   "ok": true
+  }
+ },
+ {
+  "name": "proj_above",
+  "kind": "PROJ_ABOVE",
+  "k": 5,
+  "full": 50,
+  "base": {
+   "n": 5,
+   "calls": 5,
+   "cost": 0.00197825,
+   "lat": 8.930240016954485,
+   "ok": true
+  },
+  "plus": {
+   "n": 5,
+   "calls": 5,
+   "cost": 0.00197825,
+   "lat": 8.932218557980377,
+   "ok": true
+  }
+ },
+ {
+  "name": "below_inner_1to1",
+  "kind": "BELOW_INNER_1TO1",
+  "k": 5,
+  "full": 12,
+  "base": {
+   "n": 5,
+   "calls": 50,
+   "cost": 0.022854749999999993,
+   "lat": 16.340298634953797,
+   "ok": true
+  },
+  "plus": {
+   "n": 5,
+   "calls": 30,
+   "cost": 0.013757499999999999,
+   "lat": 15.339742562966421,
+   "ok": true
+  }
+ },
+ {
+  "name": "below_right",
+  "kind": "BELOW_RIGHT",
+  "k": 5,
+  "full": 27,
+  "base": {
+   "n": 5,
+   "calls": 100,
+   "cost": 0.044219000000000015,
+   "lat": 27.44088347692741,
+   "ok": true
+  },
+  "plus": {
+   "n": 5,
+   "calls": 30,
+   "cost": 0.013065249999999997,
+   "lat": 21.1796388059156,
+   "ok": true
+  }
+ },
+ {
+  "name": "mixed_below_left",
+  "kind": "BELOW_LEFT_MIXED",
+  "k": 5,
+  "full": 27,
+  "base": {
+   "n": 5,
+   "calls": 141,
+   "cost": 0.07054275,
+   "lat": 39.84512002998963,
+   "ok": true
+  },
+  "plus": {
+   "n": 5,
+   "calls": 133,
+   "cost": 0.06554825,
+   "lat": 39.909411199972965,
+   "ok": true
+  }
+ },
+ {
+  "name": "score_join_cond",
+  "kind": "JOIN_COND_SCORE",
+  "k": 5,
+  "full": 7,
+  "base": {
+   "n": 5,
+   "calls": 200,
+   "cost": 0.11476324999999996,
+   "lat": 62.43110844591865,
+   "ok": true
+  },
+  "plus": {
+   "n": 5,
+   "calls": 190,
+   "cost": 0.10810099999999992,
+   "lat": 62.2887960189837,
+   "ok": true
+  }
+ },
+ {
+  "name": "chain_below_inner",
+  "kind": "BELOW_INNER_CHAIN",
+  "k": 5,
+  "full": 8,
+  "base": {
+   "n": 5,
+   "calls": 25,
+   "cost": 0.01120725,
+   "lat": 9.237337122962344,
+   "ok": true
+  },
+  "plus": {
+   "n": 5,
+   "calls": 25,
+   "cost": 0.011207250000000002,
+   "lat": 11.193372390931472,
+   "ok": true
+  }
+ },
+ {
+  "name": "k_ge_passing",
+  "kind": "CONTROL_KGE",
+  "k": 1000,
+  "full": 27,
+  "base": {
+   "n": 27,
+   "calls": 100,
+   "cost": 0.044219000000000015,
+   "lat": 27.4573926529265,
+   "ok": true
+  },
+  "plus": {
+   "n": 27,
+   "calls": 100,
+   "cost": 0.044219000000000015,
+   "lat": 29.461620314919855,
+   "ok": true
+  }
+ },
+ {
+  "name": "orderby_topk",
+  "kind": "CONTROL_TOPK",
+  "k": 5,
+  "full": 100,
+  "base": {
+   "n": 5,
+   "calls": 100,
+   "cost": 0.06491299999999997,
+   "lat": 53.55973213794641,
+   "ok": true
+  },
+  "plus": {
+   "n": 5,
+   "calls": 100,
+   "cost": 0.06491299999999997,
+   "lat": 53.56456200691173,
+   "ok": true
+  }
+ }
+]

@@ -1,0 +1,339 @@
+review_time,rating,purchase_id,book_id,title
+2023-05-28 10:53:00,5,purchaseid_83,bookid_83,Bisous and Brioche: Classic French Recipes and Family Favorites from a Life in France
+2023-05-16 17:49:00,5,purchaseid_13,bookid_13,Girl Made of Glass
+2023-04-25 19:47:00,5,purchaseid_13,bookid_13,Girl Made of Glass
+2023-04-06 08:24:38,5,purchaseid_13,bookid_13,Girl Made of Glass
+2023-04-05 05:02:00,5,purchaseid_13,bookid_13,Girl Made of Glass
+2023-04-04 18:52:00,5,purchaseid_13,bookid_13,Girl Made of Glass
+2023-04-04 18:46:00,5,purchaseid_13,bookid_13,Girl Made of Glass
+2023-04-02 07:47:00,5,purchaseid_13,bookid_13,Girl Made of Glass
+2023-03-06 05:38:00,5,purchaseid_96,bookid_96,"Cheer Up, Ben Franklin! (Young Historians)"
+2023-02-24 12:46:00,5,purchaseid_12,bookid_12,Heart of Silk and Shadows: A Fae Fantasy Romance (Fae Isles)
+2023-02-22 10:01:49,5,purchaseid_13,bookid_13,Girl Made of Glass
+2023-02-14 07:36:00,5,purchaseid_152,bookid_152,Around the World Mazes
+2023-02-09 20:25:00,5,purchaseid_13,bookid_13,Girl Made of Glass
+2023-02-07 14:15:18,4,purchaseid_13,bookid_13,Girl Made of Glass
+2023-01-31 18:49:00,5,purchaseid_13,bookid_13,Girl Made of Glass
+2023-01-30 16:09:00,5,purchaseid_13,bookid_13,Girl Made of Glass
+2023-01-29 04:17:00,5,purchaseid_13,bookid_13,Girl Made of Glass
+2022-10-03 16:16:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2022-09-20 09:02:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2022-09-15 12:44:00,5,purchaseid_83,bookid_83,Bisous and Brioche: Classic French Recipes and Family Favorites from a Life in France
+2022-08-11 19:27:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2022-07-08 14:53:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2022-03-09 14:49:57,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2022-02-08 09:18:00,5,purchaseid_154,bookid_154,Jealousy
+2021-12-27 14:10:00,4,purchaseid_23,bookid_23,The Promise of Love (The Book of Love)
+2021-10-05 10:11:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2021-10-02 17:38:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2021-09-11 09:19:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2021-09-04 12:01:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2021-08-28 11:30:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2021-07-31 18:34:00,5,purchaseid_23,bookid_23,The Promise of Love (The Book of Love)
+2021-07-10 20:50:00,5,purchaseid_83,bookid_83,Bisous and Brioche: Classic French Recipes and Family Favorites from a Life in France
+2021-06-28 18:11:00,5,purchaseid_170,bookid_170,"Pokémon: Sun & Moon, Vol. 8 (8)"
+2021-06-22 12:04:00,5,purchaseid_83,bookid_83,Bisous and Brioche: Classic French Recipes and Family Favorites from a Life in France
+2021-06-19 16:05:00,4,purchaseid_72,bookid_72,Sunrise Highway (Lourdes Robles Novels Book 2)
+2021-05-31 09:19:00,5,purchaseid_161,bookid_161,"Time's Demon: BOOK II OF THE ISLEVALE CYCLE"
+2021-05-25 06:03:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2021-05-15 14:41:00,5,purchaseid_83,bookid_83,Bisous and Brioche: Classic French Recipes and Family Favorites from a Life in France
+2021-04-26 15:58:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2021-04-25 05:12:00,5,purchaseid_140,bookid_140,The Seep
+2021-04-22 12:17:00,5,purchaseid_154,bookid_154,Jealousy
+2021-04-20 10:19:00,5,purchaseid_83,bookid_83,Bisous and Brioche: Classic French Recipes and Family Favorites from a Life in France
+2021-04-18 11:39:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2021-03-30 06:13:00,5,purchaseid_83,bookid_83,Bisous and Brioche: Classic French Recipes and Family Favorites from a Life in France
+2021-03-17 20:45:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2021-03-06 23:26:00,5,purchaseid_140,bookid_140,The Seep
+2021-03-03 11:22:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2021-03-03 11:22:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2021-02-08 19:52:00,5,purchaseid_83,bookid_83,Bisous and Brioche: Classic French Recipes and Family Favorites from a Life in France
+2021-02-03 14:14:00,5,purchaseid_154,bookid_154,Jealousy
+2021-01-31 15:59:02,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2021-01-30 15:34:00,5,purchaseid_83,bookid_83,Bisous and Brioche: Classic French Recipes and Family Favorites from a Life in France
+2021-01-21 14:19:00,5,purchaseid_83,bookid_83,Bisous and Brioche: Classic French Recipes and Family Favorites from a Life in France
+2021-01-06 18:42:00,5,purchaseid_83,bookid_83,Bisous and Brioche: Classic French Recipes and Family Favorites from a Life in France
+2021-01-03 11:06:00,5,purchaseid_83,bookid_83,Bisous and Brioche: Classic French Recipes and Family Favorites from a Life in France
+2020-12-14 18:23:00,5,purchaseid_83,bookid_83,Bisous and Brioche: Classic French Recipes and Family Favorites from a Life in France
+2020-12-05 14:11:00,5,purchaseid_83,bookid_83,Bisous and Brioche: Classic French Recipes and Family Favorites from a Life in France
+2020-11-26 21:42:00,5,purchaseid_146,bookid_146,LunaLu the Llamacorn
+2020-11-07 13:31:00,5,purchaseid_146,bookid_146,LunaLu the Llamacorn
+2020-11-07 10:13:00,4,purchaseid_161,bookid_161,"Time's Demon: BOOK II OF THE ISLEVALE CYCLE"
+2020-10-31 12:23:00,5,purchaseid_146,bookid_146,LunaLu the Llamacorn
+2020-10-21 14:01:00,5,purchaseid_130,bookid_130,"Benny Goes To The Moon: The great new book from Top Children's entertainer Gerry Ogilvie (1)"
+2020-09-01 00:34:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2020-08-12 11:06:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2020-08-01 16:21:00,4,purchaseid_167,bookid_167,Dead Silence
+2020-07-09 10:22:00,5,purchaseid_167,bookid_167,Dead Silence
+2020-06-28 03:30:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2020-06-27 09:46:00,5,purchaseid_167,bookid_167,Dead Silence
+2020-06-26 20:33:41,5,purchaseid_167,bookid_167,Dead Silence
+2020-06-23 17:19:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2020-06-20 21:44:00,4,purchaseid_167,bookid_167,Dead Silence
+2020-06-16 22:25:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2020-06-14 11:52:00,4,purchaseid_167,bookid_167,Dead Silence
+2020-06-10 08:52:00,5,purchaseid_167,bookid_167,Dead Silence
+2020-06-07 14:06:00,4,purchaseid_167,bookid_167,Dead Silence
+2020-06-07 06:30:00,5,purchaseid_167,bookid_167,Dead Silence
+2020-06-04 16:53:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2020-05-30 11:18:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2020-03-14 09:35:28,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2020-03-07 18:25:00,5,purchaseid_185,bookid_185,Wasted Calories and Ruined Nights: A Journey Deeper into Dining Hell
+2020-02-27 12:32:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2020-02-22 11:21:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2020-02-09 09:08:00,5,purchaseid_72,bookid_72,Sunrise Highway (Lourdes Robles Novels Book 2)
+2020-01-30 21:02:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2020-01-29 04:55:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2020-01-27 16:54:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-12-27 02:08:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-12-24 14:21:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-12-04 08:02:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-11-16 15:38:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-11-12 01:00:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-11-02 22:18:00,5,purchaseid_154,bookid_154,Jealousy
+2019-10-18 20:13:00,5,purchaseid_154,bookid_154,Jealousy
+2019-10-06 13:32:00,5,purchaseid_152,bookid_152,Around the World Mazes
+2019-09-20 17:14:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2019-09-19 15:23:00,5,purchaseid_69,bookid_69,Out of Sheer Rage: Wrestling with D. H. Lawrence
+2019-09-11 03:24:00,5,purchaseid_72,bookid_72,Sunrise Highway (Lourdes Robles Novels Book 2)
+2019-09-02 17:25:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2019-08-21 21:22:00,4,purchaseid_185,bookid_185,Wasted Calories and Ruined Nights: A Journey Deeper into Dining Hell
+2019-08-09 15:54:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-08-02 11:45:00,5,purchaseid_96,bookid_96,"Cheer Up, Ben Franklin! (Young Historians)"
+2019-08-01 21:51:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-07-29 16:19:00,5,purchaseid_161,bookid_161,"Time's Demon: BOOK II OF THE ISLEVALE CYCLE"
+2019-07-29 16:08:00,4,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2019-07-13 18:41:00,5,purchaseid_161,bookid_161,"Time's Demon: BOOK II OF THE ISLEVALE CYCLE"
+2019-07-10 10:09:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-07-07 20:21:00,5,purchaseid_161,bookid_161,"Time's Demon: BOOK II OF THE ISLEVALE CYCLE"
+2019-06-13 17:18:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2019-05-12 11:13:49,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-05-03 10:56:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2019-05-01 16:46:48,5,purchaseid_96,bookid_96,"Cheer Up, Ben Franklin! (Young Historians)"
+2019-04-27 23:38:00,5,purchaseid_186,bookid_186,Meat Eater: Adventures from the Life of an American Hunter
+2019-04-27 18:20:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2019-04-23 15:52:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-04-09 14:36:00,5,purchaseid_152,bookid_152,Around the World Mazes
+2019-04-05 05:25:00,4,purchaseid_185,bookid_185,Wasted Calories and Ruined Nights: A Journey Deeper into Dining Hell
+2019-03-31 15:43:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-03-30 10:29:00,4,purchaseid_96,bookid_96,"Cheer Up, Ben Franklin! (Young Historians)"
+2019-03-28 08:17:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-03-27 13:46:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2019-03-25 23:48:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2019-03-20 16:30:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-03-18 16:55:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-03-17 22:51:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2019-02-22 17:56:00,5,purchaseid_72,bookid_72,Sunrise Highway (Lourdes Robles Novels Book 2)
+2019-02-19 14:58:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-02-14 19:49:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2019-01-28 16:29:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-01-28 12:03:00,5,purchaseid_154,bookid_154,Jealousy
+2019-01-25 05:14:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-01-24 08:06:00,4,purchaseid_72,bookid_72,Sunrise Highway (Lourdes Robles Novels Book 2)
+2019-01-17 09:15:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-01-11 12:40:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2019-01-10 10:22:00,5,purchaseid_154,bookid_154,Jealousy
+2019-01-09 11:45:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2018-12-22 04:31:00,5,purchaseid_96,bookid_96,"Cheer Up, Ben Franklin! (Young Historians)"
+2018-12-17 15:23:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2018-12-14 21:14:00,5,purchaseid_154,bookid_154,Jealousy
+2018-12-13 12:06:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-12-10 22:01:15,4,purchaseid_154,bookid_154,Jealousy
+2018-11-18 13:07:00,5,purchaseid_154,bookid_154,Jealousy
+2018-11-11 19:15:00,5,purchaseid_154,bookid_154,Jealousy
+2018-11-10 11:50:00,5,purchaseid_154,bookid_154,Jealousy
+2018-11-08 20:47:00,4,purchaseid_154,bookid_154,Jealousy
+2018-11-02 05:56:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-11-01 21:35:19,5,purchaseid_72,bookid_72,Sunrise Highway (Lourdes Robles Novels Book 2)
+2018-10-31 17:09:00,5,purchaseid_154,bookid_154,Jealousy
+2018-10-29 02:37:28,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-10-25 13:26:00,5,purchaseid_154,bookid_154,Jealousy
+2018-10-23 01:58:00,5,purchaseid_154,bookid_154,Jealousy
+2018-10-18 17:00:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-10-17 15:27:34,5,purchaseid_72,bookid_72,Sunrise Highway (Lourdes Robles Novels Book 2)
+2018-10-14 10:29:00,5,purchaseid_154,bookid_154,Jealousy
+2018-10-08 20:02:00,4,purchaseid_154,bookid_154,Jealousy
+2018-10-07 17:32:00,5,purchaseid_171,bookid_171,"Exits, Desires, & Slow Fires"
+2018-10-07 16:56:00,5,purchaseid_72,bookid_72,Sunrise Highway (Lourdes Robles Novels Book 2)
+2018-10-06 08:52:00,4,purchaseid_72,bookid_72,Sunrise Highway (Lourdes Robles Novels Book 2)
+2018-10-03 05:45:00,5,purchaseid_72,bookid_72,Sunrise Highway (Lourdes Robles Novels Book 2)
+2018-09-27 15:55:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2018-09-19 16:02:00,4,purchaseid_154,bookid_154,Jealousy
+2018-09-16 12:54:00,4,purchaseid_72,bookid_72,Sunrise Highway (Lourdes Robles Novels Book 2)
+2018-09-16 11:31:00,5,purchaseid_72,bookid_72,Sunrise Highway (Lourdes Robles Novels Book 2)
+2018-09-09 08:12:00,4,purchaseid_72,bookid_72,Sunrise Highway (Lourdes Robles Novels Book 2)
+2018-09-04 16:43:00,5,purchaseid_154,bookid_154,Jealousy
+2018-09-04 06:08:00,4,purchaseid_72,bookid_72,Sunrise Highway (Lourdes Robles Novels Book 2)
+2018-08-28 11:47:00,5,purchaseid_154,bookid_154,Jealousy
+2018-08-28 07:07:00,4,purchaseid_154,bookid_154,Jealousy
+2018-08-27 16:04:00,5,purchaseid_96,bookid_96,"Cheer Up, Ben Franklin! (Young Historians)"
+2018-08-19 18:04:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-08-17 15:35:00,4,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2018-08-07 20:44:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-08-02 12:25:00,4,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2018-07-29 19:58:47,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2018-07-29 17:22:00,5,purchaseid_42,bookid_42,Law and Legitimacy in the Supreme Court
+2018-07-20 10:18:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2018-07-02 04:44:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2018-06-22 05:19:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-06-21 19:29:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-06-06 13:35:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2018-05-26 06:51:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-05-21 03:13:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-05-19 07:03:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-04-30 10:08:00,5,purchaseid_159,bookid_159,"Capitalism, Hegemony and Violence in the Age of Drones"
+2018-04-22 14:13:00,5,purchaseid_194,bookid_194,"The ISIS Apocalypse: The History, Strategy, and Doomsday Vision of the Islamic State"
+2018-04-12 03:39:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-04-10 10:28:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2018-04-01 12:12:38,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-03-22 08:21:00,4,purchaseid_96,bookid_96,"Cheer Up, Ben Franklin! (Young Historians)"
+2018-03-18 14:59:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-03-18 10:51:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-03-15 23:30:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-03-12 17:39:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-03-07 19:49:23,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-03-07 09:55:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-03-05 09:29:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-02-28 06:31:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-02-26 19:39:21,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-02-26 10:28:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2018-02-15 13:02:00,5,purchaseid_186,bookid_186,Meat Eater: Adventures from the Life of an American Hunter
+2018-02-10 20:48:00,5,purchaseid_96,bookid_96,"Cheer Up, Ben Franklin! (Young Historians)"
+2018-02-09 20:05:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-01-29 20:42:00,5,purchaseid_96,bookid_96,"Cheer Up, Ben Franklin! (Young Historians)"
+2018-01-14 07:58:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2018-01-13 05:14:00,5,purchaseid_69,bookid_69,Out of Sheer Rage: Wrestling with D. H. Lawrence
+2018-01-04 11:42:01,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-12-29 23:58:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-12-26 16:46:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-12-06 11:17:00,5,purchaseid_96,bookid_96,"Cheer Up, Ben Franklin! (Young Historians)"
+2017-12-06 06:27:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2017-11-30 09:10:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-11-22 09:20:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-11-07 10:11:54,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-11-01 21:44:11,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-10-13 11:45:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-10-09 13:10:00,5,purchaseid_171,bookid_171,"Exits, Desires, & Slow Fires"
+2017-10-08 04:44:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-10-02 06:45:00,5,purchaseid_194,bookid_194,"The ISIS Apocalypse: The History, Strategy, and Doomsday Vision of the Islamic State"
+2017-09-28 23:26:00,5,purchaseid_171,bookid_171,"Exits, Desires, & Slow Fires"
+2017-09-26 16:53:55,5,purchaseid_96,bookid_96,"Cheer Up, Ben Franklin! (Young Historians)"
+2017-09-24 21:52:00,5,purchaseid_69,bookid_69,Out of Sheer Rage: Wrestling with D. H. Lawrence
+2017-09-24 21:52:00,5,purchaseid_69,bookid_69,Out of Sheer Rage: Wrestling with D. H. Lawrence
+2017-09-24 21:52:00,5,purchaseid_69,bookid_69,Out of Sheer Rage: Wrestling with D. H. Lawrence
+2017-09-22 05:38:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2017-09-13 21:45:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-09-11 19:42:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-09-02 16:22:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-09-02 11:41:00,4,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2017-08-27 16:53:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-08-24 14:29:00,4,purchaseid_194,bookid_194,"The ISIS Apocalypse: The History, Strategy, and Doomsday Vision of the Islamic State"
+2017-08-15 09:03:00,5,purchaseid_96,bookid_96,"Cheer Up, Ben Franklin! (Young Historians)"
+2017-08-10 14:28:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-07-27 19:24:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-07-23 09:07:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-07-11 02:55:00,4,purchaseid_194,bookid_194,"The ISIS Apocalypse: The History, Strategy, and Doomsday Vision of the Islamic State"
+2017-07-04 10:38:00,5,purchaseid_96,bookid_96,"Cheer Up, Ben Franklin! (Young Historians)"
+2017-06-29 11:48:00,5,purchaseid_194,bookid_194,"The ISIS Apocalypse: The History, Strategy, and Doomsday Vision of the Islamic State"
+2017-06-07 00:34:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-06-03 12:37:22,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-06-01 20:55:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-06-01 16:56:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-05-31 19:59:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-05-28 10:27:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-05-25 22:03:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-05-22 15:49:24,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-05-19 16:26:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-05-14 20:40:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2017-05-11 19:48:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-05-04 03:49:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-04-17 08:08:26,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2017-04-10 20:19:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-04-07 10:19:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-04-02 06:14:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2017-04-01 19:24:00,4,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2017-03-23 20:39:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-03-13 20:33:04,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-03-11 08:32:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-03-05 16:40:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-03-04 23:51:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-03-01 07:53:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-02-20 13:10:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-02-20 07:04:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-02-19 05:26:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-02-18 15:48:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-02-12 21:39:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-02-10 05:26:00,5,purchaseid_186,bookid_186,Meat Eater: Adventures from the Life of an American Hunter
+2017-02-08 17:16:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-02-08 09:44:00,4,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2017-01-23 07:21:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-01-10 10:21:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-01-08 09:59:00,5,purchaseid_194,bookid_194,"The ISIS Apocalypse: The History, Strategy, and Doomsday Vision of the Islamic State"
+2017-01-07 08:38:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2017-01-02 21:10:25,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-12-31 18:27:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-12-29 11:00:00,4,purchaseid_194,bookid_194,"The ISIS Apocalypse: The History, Strategy, and Doomsday Vision of the Islamic State"
+2016-12-28 18:16:07,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-12-26 07:16:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-12-25 10:12:00,5,purchaseid_194,bookid_194,"The ISIS Apocalypse: The History, Strategy, and Doomsday Vision of the Islamic State"
+2016-12-22 11:23:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-12-13 22:11:00,4,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2016-12-12 03:50:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2016-12-07 10:17:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-11-28 05:52:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-11-22 12:56:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-11-22 11:13:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2016-11-17 02:31:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-11-08 09:37:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-11-04 11:47:00,5,purchaseid_194,bookid_194,"The ISIS Apocalypse: The History, Strategy, and Doomsday Vision of the Islamic State"
+2016-11-01 10:45:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2016-10-18 20:40:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-10-09 10:31:48,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-10-05 12:58:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-09-29 21:37:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-09-21 10:24:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2016-09-18 06:07:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-09-06 04:59:20,5,purchaseid_194,bookid_194,"The ISIS Apocalypse: The History, Strategy, and Doomsday Vision of the Islamic State"
+2016-08-31 08:47:00,5,purchaseid_69,bookid_69,Out of Sheer Rage: Wrestling with D. H. Lawrence
+2016-08-26 14:39:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-08-25 21:40:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-08-12 03:18:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-08-11 18:59:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-08-07 16:04:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-07-23 15:17:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2016-07-16 20:32:06,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-07-06 13:08:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-07-02 09:29:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-06-30 02:24:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-06-21 20:20:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-06-21 09:58:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2016-06-05 17:27:58,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-06-03 10:02:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-05-21 15:28:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-05-19 17:46:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2016-05-18 19:22:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-05-05 13:57:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-04-09 18:31:06,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-04-07 00:37:08,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-03-29 16:36:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-03-29 16:36:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-03-16 13:57:00,4,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-03-15 17:12:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-03-13 08:55:00,5,purchaseid_69,bookid_69,Out of Sheer Rage: Wrestling with D. H. Lawrence
+2016-03-07 02:28:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-03-01 07:00:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-02-22 17:50:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-02-22 17:50:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-02-22 17:50:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-02-17 00:03:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-02-17 00:03:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-02-15 05:31:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2016-02-15 01:28:00,5,purchaseid_186,bookid_186,Meat Eater: Adventures from the Life of an American Hunter
+2016-02-14 06:37:00,5,purchaseid_196,bookid_196,"The Secret Thoughts of an Unlikely Convert : An English Professor's Journey into Christian Faith"
+2016-02-08 19:11:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-02-07 17:50:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-02-04 03:00:05,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-02-02 16:12:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-01-28 16:15:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-01-11 03:39:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery
+2016-01-07 10:34:00,5,purchaseid_8,bookid_8,Make: Electronics: Learning Through Discovery

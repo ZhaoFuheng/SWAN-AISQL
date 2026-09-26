@@ -1,0 +1,683 @@
+{
+ "conjunction": [
+  {
+   "q": 0,
+   "n_leaves": 2,
+   "sql": "(ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 1,
+   "n_leaves": 2,
+   "sql": "(ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 2,
+   "n_leaves": 2,
+   "sql": "(ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 3,
+   "n_leaves": 2,
+   "sql": "(ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 4,
+   "n_leaves": 2,
+   "sql": "(ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 5,
+   "n_leaves": 3,
+   "sql": "(ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 6,
+   "n_leaves": 3,
+   "sql": "((ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 7,
+   "n_leaves": 3,
+   "sql": "(ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 8,
+   "n_leaves": 3,
+   "sql": "((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 9,
+   "n_leaves": 3,
+   "sql": "(ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 10,
+   "n_leaves": 4,
+   "sql": "(ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 11,
+   "n_leaves": 4,
+   "sql": "((ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 12,
+   "n_leaves": 4,
+   "sql": "((ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary))) AND ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 13,
+   "n_leaves": 4,
+   "sql": "(((ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 14,
+   "n_leaves": 4,
+   "sql": "(ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 15,
+   "n_leaves": 5,
+   "sql": "((ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 16,
+   "n_leaves": 5,
+   "sql": "((ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary))) AND (ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 17,
+   "n_leaves": 5,
+   "sql": "(ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 18,
+   "n_leaves": 5,
+   "sql": "((ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary))) AND ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 19,
+   "n_leaves": 5,
+   "sql": "(ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 20,
+   "n_leaves": 6,
+   "sql": "((ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary)))) AND (ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 21,
+   "n_leaves": 6,
+   "sql": "(ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary)))))"
+  },
+  {
+   "q": 22,
+   "n_leaves": 6,
+   "sql": "((((ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary))) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 23,
+   "n_leaves": 6,
+   "sql": "(ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary))) AND (ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 24,
+   "n_leaves": 6,
+   "sql": "(ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary)))))"
+  },
+  {
+   "q": 25,
+   "n_leaves": 7,
+   "sql": "((ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary)) AND ((ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary)) AND ((ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 26,
+   "n_leaves": 7,
+   "sql": "((ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary)) AND (((ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary))) AND ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 27,
+   "n_leaves": 7,
+   "sql": "((ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary)) AND ((ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary)))))"
+  },
+  {
+   "q": 28,
+   "n_leaves": 7,
+   "sql": "(((ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary)))))"
+  },
+  {
+   "q": 29,
+   "n_leaves": 7,
+   "sql": "((((ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary))) AND (ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary))) AND ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 30,
+   "n_leaves": 8,
+   "sql": "((ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary)) AND ((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary)) AND (((ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 31,
+   "n_leaves": 8,
+   "sql": "(((ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) AND ((ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary))) AND (ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 32,
+   "n_leaves": 8,
+   "sql": "((ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary)) AND ((ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary)))) AND ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 33,
+   "n_leaves": 8,
+   "sql": "((ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary)))) AND (ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 34,
+   "n_leaves": 8,
+   "sql": "((ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary)))) AND ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary))) AND (ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 35,
+   "n_leaves": 9,
+   "sql": "((((ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary))) AND (ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))) AND (ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary))) AND ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 36,
+   "n_leaves": 9,
+   "sql": "((ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)))) AND ((ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary)) AND ((ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 37,
+   "n_leaves": 9,
+   "sql": "(((ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary)) AND ((ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary))) AND ((ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 38,
+   "n_leaves": 9,
+   "sql": "(((ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary))) AND ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary)) AND ((ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary)) AND ((ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 39,
+   "n_leaves": 9,
+   "sql": "((ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary)))) AND (ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary))) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 40,
+   "n_leaves": 10,
+   "sql": "(((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary))) AND ((ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary))))) AND (ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 41,
+   "n_leaves": 10,
+   "sql": "(((ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary)) AND ((ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) AND ((ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary))) AND ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary)))) AND (ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 42,
+   "n_leaves": 10,
+   "sql": "(ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary))) AND (((ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary)))) AND ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 43,
+   "n_leaves": 10,
+   "sql": "((((ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))) AND (ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary))) AND ((ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)))) AND ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 44,
+   "n_leaves": 10,
+   "sql": "((((ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)) AND ((ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))) AND (ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary))))"
+  }
+ ],
+ "disjunction": [
+  {
+   "q": 0,
+   "n_leaves": 2,
+   "sql": "(ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 1,
+   "n_leaves": 2,
+   "sql": "(ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 2,
+   "n_leaves": 2,
+   "sql": "(ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 3,
+   "n_leaves": 2,
+   "sql": "(ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 4,
+   "n_leaves": 2,
+   "sql": "(ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 5,
+   "n_leaves": 3,
+   "sql": "(ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 6,
+   "n_leaves": 3,
+   "sql": "((ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 7,
+   "n_leaves": 3,
+   "sql": "(ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 8,
+   "n_leaves": 3,
+   "sql": "((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 9,
+   "n_leaves": 3,
+   "sql": "(ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 10,
+   "n_leaves": 4,
+   "sql": "(ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 11,
+   "n_leaves": 4,
+   "sql": "((ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 12,
+   "n_leaves": 4,
+   "sql": "((ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary))) OR ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 13,
+   "n_leaves": 4,
+   "sql": "(((ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 14,
+   "n_leaves": 4,
+   "sql": "(ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 15,
+   "n_leaves": 5,
+   "sql": "((ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 16,
+   "n_leaves": 5,
+   "sql": "((ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary))) OR (ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 17,
+   "n_leaves": 5,
+   "sql": "(ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 18,
+   "n_leaves": 5,
+   "sql": "((ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary))) OR ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 19,
+   "n_leaves": 5,
+   "sql": "(ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 20,
+   "n_leaves": 6,
+   "sql": "((ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary)))) OR (ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 21,
+   "n_leaves": 6,
+   "sql": "(ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary)))))"
+  },
+  {
+   "q": 22,
+   "n_leaves": 6,
+   "sql": "((((ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary))) OR ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 23,
+   "n_leaves": 6,
+   "sql": "(ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary))) OR (ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 24,
+   "n_leaves": 6,
+   "sql": "(ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary)))))"
+  },
+  {
+   "q": 25,
+   "n_leaves": 7,
+   "sql": "((ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 26,
+   "n_leaves": 7,
+   "sql": "((ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary)) OR (((ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary))) OR ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 27,
+   "n_leaves": 7,
+   "sql": "((ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary)))))"
+  },
+  {
+   "q": 28,
+   "n_leaves": 7,
+   "sql": "(((ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary)))))"
+  },
+  {
+   "q": 29,
+   "n_leaves": 7,
+   "sql": "((((ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary))) OR (ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary))) OR ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 30,
+   "n_leaves": 8,
+   "sql": "((ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary)) OR (((ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 31,
+   "n_leaves": 8,
+   "sql": "(((ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary))) OR (ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 32,
+   "n_leaves": 8,
+   "sql": "((ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary)))) OR ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 33,
+   "n_leaves": 8,
+   "sql": "((ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary)))) OR (ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 34,
+   "n_leaves": 8,
+   "sql": "((ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary)))) OR ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary))) OR (ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 35,
+   "n_leaves": 9,
+   "sql": "((((ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary))) OR (ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))) OR (ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary))) OR ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 36,
+   "n_leaves": 9,
+   "sql": "((ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)))) OR ((ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 37,
+   "n_leaves": 9,
+   "sql": "(((ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary))) OR ((ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 38,
+   "n_leaves": 9,
+   "sql": "(((ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary))) OR ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 39,
+   "n_leaves": 9,
+   "sql": "((ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary)))) OR (ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary))) OR ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 40,
+   "n_leaves": 10,
+   "sql": "(((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary))) OR ((ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary))))) OR (ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 41,
+   "n_leaves": 10,
+   "sql": "(((ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary))) OR ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary)))) OR (ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 42,
+   "n_leaves": 10,
+   "sql": "(ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary))) OR (((ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary)))) OR ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 43,
+   "n_leaves": 10,
+   "sql": "((((ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))) OR (ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary))) OR ((ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)))) OR ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 44,
+   "n_leaves": 10,
+   "sql": "((((ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))) OR (ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary))))"
+  }
+ ],
+ "mix": [
+  {
+   "q": 0,
+   "n_leaves": 2,
+   "sql": "(ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 1,
+   "n_leaves": 2,
+   "sql": "(ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 2,
+   "n_leaves": 2,
+   "sql": "(ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 3,
+   "n_leaves": 2,
+   "sql": "(ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 4,
+   "n_leaves": 2,
+   "sql": "(ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 5,
+   "n_leaves": 3,
+   "sql": "((ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 6,
+   "n_leaves": 3,
+   "sql": "(ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 7,
+   "n_leaves": 3,
+   "sql": "((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 8,
+   "n_leaves": 3,
+   "sql": "(ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 9,
+   "n_leaves": 3,
+   "sql": "((ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 10,
+   "n_leaves": 4,
+   "sql": "((ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 11,
+   "n_leaves": 4,
+   "sql": "((ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 12,
+   "n_leaves": 4,
+   "sql": "(ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 13,
+   "n_leaves": 4,
+   "sql": "(ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 14,
+   "n_leaves": 4,
+   "sql": "((ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary))) AND ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 15,
+   "n_leaves": 5,
+   "sql": "(((ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 16,
+   "n_leaves": 5,
+   "sql": "(ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 17,
+   "n_leaves": 5,
+   "sql": "(ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 18,
+   "n_leaves": 5,
+   "sql": "((ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 19,
+   "n_leaves": 5,
+   "sql": "((ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 20,
+   "n_leaves": 6,
+   "sql": "(ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) OR (((ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 21,
+   "n_leaves": 6,
+   "sql": "(ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary) OR (((ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary))) AND ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 22,
+   "n_leaves": 6,
+   "sql": "((ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary))) OR (ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 23,
+   "n_leaves": 6,
+   "sql": "((ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary)) AND ((ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary))) OR ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 24,
+   "n_leaves": 6,
+   "sql": "(((ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 25,
+   "n_leaves": 7,
+   "sql": "((ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary)))))"
+  },
+  {
+   "q": 26,
+   "n_leaves": 7,
+   "sql": "(((ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 27,
+   "n_leaves": 7,
+   "sql": "((((ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary))) OR ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 28,
+   "n_leaves": 7,
+   "sql": "(((ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary))) AND (ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary))) AND (ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 29,
+   "n_leaves": 7,
+   "sql": "((((ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary))) OR ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary))) AND ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 30,
+   "n_leaves": 8,
+   "sql": "(((((ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))) AND ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 31,
+   "n_leaves": 8,
+   "sql": "((ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary))))) OR (ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 32,
+   "n_leaves": 8,
+   "sql": "(((ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary))) AND ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary)))))"
+  },
+  {
+   "q": 33,
+   "n_leaves": 8,
+   "sql": "((ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary)))))"
+  },
+  {
+   "q": 34,
+   "n_leaves": 8,
+   "sql": "((ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary))) OR ((ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 35,
+   "n_leaves": 9,
+   "sql": "((ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary))) AND ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))) AND ((ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary))) OR ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 36,
+   "n_leaves": 9,
+   "sql": "(((ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary))) AND (((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary))) OR (ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 37,
+   "n_leaves": 9,
+   "sql": "((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary))) AND ((ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary))) OR (ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 38,
+   "n_leaves": 9,
+   "sql": "(((ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on education? Answer yes or no for the following government report: ' || summary)) OR (((ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))) AND (ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary)))) OR ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 39,
+   "n_leaves": 9,
+   "sql": "((((ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary)))) OR (ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 40,
+   "n_leaves": 10,
+   "sql": "(((((ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on energy or resources? Answer yes or no for the following government report: ' || summary))) AND ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on offical statistics? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 41,
+   "n_leaves": 10,
+   "sql": "((((ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on enconomy? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary))) OR ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary))) OR (ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary) OR ((ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary))))"
+  },
+  {
+   "q": 42,
+   "n_leaves": 10,
+   "sql": "((((ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on status or situation of U.S. citizens? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary))) OR ((ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary))))) OR ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary))"
+  },
+  {
+   "q": 43,
+   "n_leaves": 10,
+   "sql": "(((ai_filter('Does the document claim to invest in certain projects? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on social welfare? Answer yes or no for the following government report: ' || summary)) AND (ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary) OR (ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)) OR (ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document claim support for certain issues? Answer yes or no for the following government report: ' || summary)))))) OR (ai_filter('Does the document report on certain policies? Answer yes or no for the following government report: ' || summary) OR ai_filter('Does the document report on military activities? Answer yes or no for the following government report: ' || summary)))"
+  },
+  {
+   "q": 44,
+   "n_leaves": 10,
+   "sql": "((((ai_filter('Does the document report on private companies, organizations, or businesses? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document express flaws or problems in certain areas? Answer yes or no for the following government report: ' || summary)) AND ai_filter('Does the document report on certain laws or regulations? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on national security? Answer yes or no for the following government report: ' || summary)) OR ((ai_filter('Does the document report on people''s health or medical services? Answer yes or no for the following government report: ' || summary) AND (ai_filter('Does the document report on international relations? Answer yes or no for the following government report: ' || summary) AND ((ai_filter('Does the document report on tax, budget, or public finance? Answer yes or no for the following government report: ' || summary) AND ai_filter('Does the document report on government income or expenditure? Answer yes or no for the following government report: ' || summary)) OR ai_filter('Does the document report on protection of the environment? Answer yes or no for the following government report: ' || summary)))) AND ai_filter('Does the document claim to have certain goals? Answer yes or no for the following government report: ' || summary)))"
+  }
+ ]
+}

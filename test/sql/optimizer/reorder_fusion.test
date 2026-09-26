@@ -1,0 +1,61 @@
+# name: test/sql/optimizer/reorder_fusion.test
+# description: AIPredicateRewrite folds AI boolean trees into ai_function_with_embed; results preserved
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE docs AS SELECT 'doc '||range::VARCHAR AS d FROM range(30);
+
+# conjunction of two ai_filters fuses into one node (tree A(L0,L1))
+query II
+EXPLAIN SELECT * FROM docs WHERE ai_filter('good? '||d) AND ai_filter('ok? '||d);
+----
+physical_plan	<REGEX>:.*ai_function_with_embed\('A\(L0,L1\)'.*
+
+# disjunction fuses too (tree O(L0,L1))
+query II
+EXPLAIN SELECT * FROM docs WHERE ai_filter('good? '||d) OR ai_filter('ok? '||d);
+----
+physical_plan	<REGEX>:.*ai_function_with_embed\('O\(L0,L1\)'.*
+
+# a single ai_filter is NOT fused (nothing to reorder)
+query II
+EXPLAIN SELECT * FROM docs WHERE ai_filter('good? '||d);
+----
+physical_plan	<REGEX>:.*ai_filter.*
+
+# reorder off -> no node in the plan
+statement ok
+SET ai_reorder = false;
+
+query II
+EXPLAIN SELECT * FROM docs WHERE ai_filter('good? '||d) AND ai_filter('ok? '||d);
+----
+physical_plan	<REGEX>:.*ai_filter.*
+
+# result preservation: same rows either way (deterministic mock)
+query I
+SELECT count(*) FROM docs WHERE ai_filter('good? '||d) AND ai_filter('ok? '||d);
+----
+3
+
+statement ok
+SET ai_reorder = true;
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter('good? '||d) AND ai_filter('ok? '||d);
+----
+3
+
+# CASE WHEN with an AI tree in the condition also folds into the node
+query II
+EXPLAIN SELECT CASE WHEN ai_filter('p? '||d) AND ai_filter('q? '||d) THEN 1 ELSE 0 END FROM docs;
+----
+physical_plan	<REGEX>:.*ai_function_with_embed.*
+
+statement ok
+CALL ai_mock_stop();

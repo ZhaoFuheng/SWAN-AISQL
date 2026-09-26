@@ -1,0 +1,179 @@
+# name: test/sql/factor_join/factor_graph.test
+# description: n-ary factor graph: multiway AI-condition joins evaluate member/pair domains with
+#              exact backward pruning; the cross product never materializes
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE ta AS SELECT 'a'||i::VARCHAR AS x FROM range(8) r(i);
+
+statement ok
+CREATE TABLE tb AS SELECT 'b'||i::VARCHAR AS y FROM range(6) r(i);
+
+statement ok
+CREATE TABLE tc AS SELECT 'c'||i::VARCHAR AS z FROM range(5) r(i);
+
+# the 3-way chain with a unary leaf plans as ONE factor graph (no cross product below it)
+query II
+EXPLAIN SELECT * FROM ta, tb, tc
+WHERE ai_filter('unary ok? ' || x)
+  AND ai_filter('edge1 ok? ' || x || ' ' || y)
+  AND ai_filter('edge2 ok? ' || y || ' ' || z);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+# result parity with the fully expanded evaluation
+statement ok
+CREATE TABLE graph_result AS SELECT * FROM ta, tb, tc
+WHERE ai_filter('unary ok? ' || x)
+  AND ai_filter('edge1 ok? ' || x || ' ' || y)
+  AND ai_filter('edge2 ok? ' || y || ' ' || z);
+
+statement ok
+SET ai_join_factorize='off';
+
+statement ok
+CREATE TABLE expand_result AS SELECT * FROM ta, tb, tc
+WHERE ai_filter('unary ok? ' || x)
+  AND ai_filter('edge1 ok? ' || x || ' ' || y)
+  AND ai_filter('edge2 ok? ' || y || ' ' || z);
+
+statement ok
+SET ai_join_factorize='factor';
+
+query I
+SELECT count(*) FROM (
+  (SELECT * FROM graph_result EXCEPT ALL SELECT * FROM expand_result)
+  UNION ALL
+  (SELECT * FROM expand_result EXCEPT ALL SELECT * FROM graph_result));
+----
+0
+
+# call accounting: the unary pre-pass prunes side A BEFORE the edge domains, so edge1 evaluates
+# only survivors x |B| pairs -- strictly fewer calls than the full pair domain |A|x|B| + |B|x|C|
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE fresh AS SELECT * FROM ta, tb, tc
+WHERE ai_filter('fresh unary? ' || x)
+  AND ai_filter('fresh edge1? ' || x || ' ' || y)
+  AND ai_filter('fresh edge2? ' || y || ' ' || z);
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT < 8 + 8*6 + 6*5 FROM ai_usage();
+----
+true
+
+# duplicate-heavy inputs: count products expand correctly (2x per duplicated member)
+statement ok
+CREATE TABLE ta2 AS SELECT * FROM ta UNION ALL SELECT * FROM ta;
+
+statement ok
+CREATE TABLE dup_result AS SELECT * FROM ta2 ta, tb, tc
+WHERE ai_filter('unary ok? ' || x)
+  AND ai_filter('edge1 ok? ' || x || ' ' || y)
+  AND ai_filter('edge2 ok? ' || y || ' ' || z);
+
+query I
+SELECT count(*) = 2 * (SELECT count(*) FROM graph_result) FROM dup_result;
+----
+true
+
+# lazy (need-driven streaming) evaluation: identical results, no cross product either
+statement ok
+SET ai_debug_graph_eval='lazy';
+
+statement ok
+CREATE TABLE lazy_result AS SELECT * FROM ta, tb, tc
+WHERE ai_filter('unary ok? ' || x)
+  AND ai_filter('edge1 ok? ' || x || ' ' || y)
+  AND ai_filter('edge2 ok? ' || y || ' ' || z);
+
+query I
+SELECT count(*) FROM (
+  (SELECT * FROM lazy_result EXCEPT ALL SELECT * FROM graph_result)
+  UNION ALL
+  (SELECT * FROM graph_result EXCEPT ALL SELECT * FROM lazy_result));
+----
+0
+
+statement ok
+SET ai_debug_graph_eval='staged';
+
+# 2-way folded shape (unary + edge over two sides) also routes through the graph
+query II
+EXPLAIN SELECT * FROM ta, tb
+WHERE ai_filter('unary ok? ' || x) AND ai_filter('edge1 ok? ' || x || ' ' || y);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+# LIMIT pushes into the graph: the scheduler stops once k output rows are confirmed
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE limited AS SELECT * FROM ta, tb, tc
+WHERE ai_filter('lim unary? ' || x)
+  AND ai_filter('lim edge1? ' || x || ' ' || y)
+  AND ai_filter('lim edge2? ' || y || ' ' || z)
+LIMIT 5;
+
+query I
+SELECT count(*) FROM limited;
+----
+5
+
+# far fewer calls than the full domains (8 unary + 8*6 + 6*5 = 86 upper bound; early-stop cuts deep)
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT < 86 FROM ai_usage();
+----
+true
+
+# soundness: every emitted row is a true passer of all three predicates
+query I
+SELECT count(*) FROM limited l
+WHERE NOT (ai_filter('lim unary? ' || l.x)
+  AND ai_filter('lim edge1? ' || l.x || ' ' || l.y)
+  AND ai_filter('lim edge2? ' || l.y || ' ' || l.z));
+----
+0
+
+# EXISTS: the decorrelated MARK join's delim side is consumed existentially -- each member
+# completes at its first confirmed tuple; results match the un-factorized plan exactly
+statement ok
+CREATE TABLE exist_graph AS SELECT * FROM ta WHERE ai_filter('eu? ' || x)
+  AND EXISTS (SELECT 1 FROM tb, tc
+              WHERE ai_filter('eab? ' || ta.x || ' ' || tb.y) AND ai_filter('ebc? ' || tb.y || ' ' || tc.z));
+
+statement ok
+SET ai_join_factorize='off';
+
+statement ok
+CREATE TABLE exist_off AS SELECT * FROM ta WHERE ai_filter('eu? ' || x)
+  AND EXISTS (SELECT 1 FROM tb, tc
+              WHERE ai_filter('eab? ' || ta.x || ' ' || tb.y) AND ai_filter('ebc? ' || tb.y || ' ' || tc.z));
+
+statement ok
+SET ai_join_factorize='factor';
+
+query I
+SELECT count(*) FROM (
+  (SELECT * FROM exist_graph EXCEPT SELECT * FROM exist_off)
+  UNION ALL
+  (SELECT * FROM exist_off EXCEPT SELECT * FROM exist_graph));
+----
+0
+
+statement ok
+CALL ai_mock_stop();

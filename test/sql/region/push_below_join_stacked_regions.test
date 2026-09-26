@@ -1,0 +1,72 @@
+# name: test/sql/region/push_below_join_stacked_regions.test
+# description: Two single-sided AI filters over a cross product, NOT folded into one node (ai_reorder=false),
+#              so they become two regions stacked above the join with the filter that tests both results on
+#              top. The join rewrite pushes each region below the join onto its side; that reshapes the join's
+#              output order, and the filter's positional projection_map -- two operators up, not on the
+#              join's direct parent -- must be remapped through the intervening region. Before the fix the
+#              remap stopped at the direct parent and the query died in the binding resolver:
+#              "Failed to bind column reference "bal" [20.2]" (always the LAST column of one side).
+#              The shape needs joins under the AI-filtered CTE (they give the filter its projection map) and
+#              an explicit final column list; SELECT * over a single join plans fine, which is why the
+#              existing ai_reorder=false tests never hit it.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE li AS SELECT range AS lk, range % 40 AS ok, range % 30 AS pk, 'ship '||(range%7)::VARCHAR AS mode,
+                          'c'||range::VARCHAR AS cmt, range*1.5 AS qty FROM range(400);
+
+statement ok
+CREATE TABLE ord AS SELECT range AS ok, 'o'||range::VARCHAR AS opri FROM range(40);
+
+statement ok
+CREATE TABLE ps AS SELECT range AS pk, 'p'||range::VARCHAR AS pname, range*2.0 AS sacct FROM range(30);
+
+statement ok
+CREATE TABLE cust AS SELECT range AS ck, 'name'||range::VARCHAR AS cname, 'seg'||(range%4)::VARCHAR AS seg, range*7.0 AS bal FROM range(20);
+
+# reference: folded into one node (default), the shape that always worked
+statement ok
+CREATE TABLE folded AS
+WITH lr AS (SELECT * FROM li WHERE ai_filter('[p=50] risky? '||mode||cmt)),
+     joined AS (SELECT lr.lk, lr.mode, lr.cmt, o.opri, p.pname, p.sacct FROM lr JOIN ord o ON o.ok = lr.ok JOIN ps p ON p.pk = lr.pk),
+     cc AS (SELECT * FROM cust WHERE ai_filter('[p=50] risky? '||cname||seg))
+SELECT j.lk, j.sacct, cc.bal FROM joined j CROSS JOIN cc;
+
+statement ok
+SET ai_reorder=false;
+
+# the failing shape: two unfolded regions, both pushed below the cross product
+query II
+EXPLAIN WITH lr AS (SELECT * FROM li WHERE ai_filter('[p=50] risky? '||mode||cmt)),
+     joined AS (SELECT lr.lk, lr.mode, lr.cmt, o.opri, p.pname, p.sacct FROM lr JOIN ord o ON o.ok = lr.ok JOIN ps p ON p.pk = lr.pk),
+     cc AS (SELECT * FROM cust WHERE ai_filter('[p=50] risky? '||cname||seg))
+SELECT j.lk, j.sacct, cc.bal FROM joined j CROSS JOIN cc;
+----
+physical_plan	<REGEX>:(?s).*Cross Product.*Ai Region.*Ai Region.*
+
+statement ok
+CREATE TABLE stacked AS
+WITH lr AS (SELECT * FROM li WHERE ai_filter('[p=50] risky? '||mode||cmt)),
+     joined AS (SELECT lr.lk, lr.mode, lr.cmt, o.opri, p.pname, p.sacct FROM lr JOIN ord o ON o.ok = lr.ok JOIN ps p ON p.pk = lr.pk),
+     cc AS (SELECT * FROM cust WHERE ai_filter('[p=50] risky? '||cname||seg))
+SELECT j.lk, j.sacct, cc.bal FROM joined j CROSS JOIN cc;
+
+# result-preserving: identical to the folded plan, column for column (bal is the column that used to vanish)
+query I
+SELECT count(*) FROM ((SELECT * FROM stacked EXCEPT ALL SELECT * FROM folded)
+                      UNION ALL (SELECT * FROM folded EXCEPT ALL SELECT * FROM stacked));
+----
+0
+
+query I
+SELECT count(*) > 0 AND count(DISTINCT bal) > 1 FROM stacked;
+----
+true
+
+statement ok
+SET ai_reorder=true;

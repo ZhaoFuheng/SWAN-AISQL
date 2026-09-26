@@ -1,0 +1,265 @@
+# name: test/sql/semi_reduce/cte_boundary_shapes.test
+# description: The CTE-boundary SPEC: for each shape a semantic CTE can take, what the AI predicate
+#              must be evaluated on. Written as the contract any future boundary implementation has
+#              to satisfy, after three attempts at one broke these numbers in ways only the
+#              agent_bench runs caught.
+#
+#              WHAT THESE NUMBERS SHOW, and it is the opposite of what was assumed: whole-body
+#              inlining plus the semi-join reducer ALREADY reaches the optimal call count on every
+#              shape here -- including the two-reference case (C), where the predicate ends up
+#              evaluated on the UNION of what the two references can consume without anything
+#              explicitly computing that union. So the CTE boundary is NOT a call-count problem.
+#              What it costs is duplicated RELATIONAL work: inlining copies the body per reference
+#              (agent_bench Q23: identical calls and rows, 10.7s vs 6.1s, 611 cache probes vs 8).
+#              Any change that shares that work must leave every count below untouched -- they are
+#              the thing that is already right.
+#
+#              Each shape asserts BOTH: the call count (cost) and row-parity against the fully
+#              disabled stack (correctness). A binding error shows up here as a parity failure on
+#              a two-table query, instead of as four unrelated files breaking at once.
+#
+#              COVERAGE: shape I discriminates -- with the (unwired) semantic split enabled it
+#              fails 18 -> 189 calls, rows unchanged. The single-CTE shapes A-G do NOT: they all
+#              pass under the split, which is why this file needed the MULTI-CTE shapes H-K. What
+#              breaks is a CTE shared between another CTE's body and the main query, with a second
+#              AI CTE alongside -- the agent_bench Q26 arrangement, and the smallest one found
+#              that reproduces it.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE doc AS SELECT range AS id, 'doc '||range::VARCHAR AS body, range % 10 AS bucket FROM range(200);
+
+# 10 ids
+statement ok
+CREATE TABLE hot AS SELECT range AS id FROM range(200) WHERE range % 20 = 0;
+
+# 8 ids
+statement ok
+CREATE TABLE warm AS SELECT range AS id FROM range(200) WHERE range % 25 = 0;
+
+statement ok
+CREATE TABLE tag AS SELECT 'k_'||range::VARCHAR AS key FROM range(200) WHERE range % 20 = 0;
+
+# ---------------------------------------------------------------------------------------------
+# A. plain join key, ONE reference. The reducer prunes doc to hot's 10 ids before the predicate.
+# ---------------------------------------------------------------------------------------------
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE a_on AS WITH c AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] keep? '||body))
+SELECT c.id FROM c JOIN hot h ON h.id = c.id;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+10
+
+# ---------------------------------------------------------------------------------------------
+# B. COMPUTED join key ('k_'||id), one reference. The reducer must translate the key down through
+#    the projection to the scan; this is the agent_bench Q6-Q9 shape.
+# ---------------------------------------------------------------------------------------------
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE b_on AS WITH c AS (SELECT 'k_'||id::VARCHAR AS k, body FROM doc WHERE ai_filter('[p=60] keep? '||body))
+SELECT c.k FROM c JOIN tag t ON t.key = c.k;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+10
+
+# ---------------------------------------------------------------------------------------------
+# C. TWO references, each joined to a DIFFERENT neighbour. The predicate must see the UNION of
+#    what the two can consume (hot's 10 ids together with warm's 8) -- never one reference's
+#    share, which would drop rows the other still needs, and never all 200.
+# ---------------------------------------------------------------------------------------------
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE c_on AS WITH c AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] keep? '||body))
+SELECT x.id FROM (SELECT c.id FROM c JOIN hot h ON h.id = c.id
+                  UNION ALL SELECT c.id FROM c JOIN warm w ON w.id = c.id) x;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+16
+
+# ---------------------------------------------------------------------------------------------
+# D. Two references, one of which consumes the CTE UNRESTRICTED. Nothing may be pruned: the union
+#    of demands is universal. 200 calls is the CORRECT answer here, not a missed optimisation.
+# ---------------------------------------------------------------------------------------------
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE d_on AS WITH c AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] keep? '||body))
+SELECT x.id FROM (SELECT c.id FROM c JOIN hot h ON h.id = c.id
+                  UNION ALL SELECT c.id FROM c) x;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+200
+
+# ---------------------------------------------------------------------------------------------
+# E. The join lives INSIDE the body. The predicate must run on the join's output (10), which means
+#    pushdown must not sink it below the join onto the base scan -- the agent_bench Q30 failure.
+# ---------------------------------------------------------------------------------------------
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE e_on AS WITH c AS (SELECT d.id, d.body FROM doc d JOIN hot h ON h.id = d.id
+                                WHERE ai_filter('[p=60] keep? '||d.body))
+SELECT c.id FROM c;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+10
+
+# ---------------------------------------------------------------------------------------------
+# F. A relational predicate sharing the WHERE with the AI predicate. The relational one must be
+#    applied first: 20 rows have bucket = 3, so the predicate sees 20 and not 200.
+# ---------------------------------------------------------------------------------------------
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE f_on AS WITH c AS (SELECT id, body FROM doc WHERE bucket = 3 AND ai_filter('[p=60] keep? '||body))
+SELECT a.id FROM c a JOIN c b ON b.id = a.id;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+20
+
+# ---------------------------------------------------------------------------------------------
+# G. Two references and NO pruning join between them. Nothing can be removed, so 200 is correct --
+#    but each prompt must still cost ONE call across both copies (the in-flight registry).
+# ---------------------------------------------------------------------------------------------
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE g_on AS WITH c AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] keep? '||body))
+SELECT a.id FROM c a JOIN c b ON b.id = a.id;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+200
+
+# ---------------------------------------------------------------------------------------------
+# CORRECTNESS: every shape must select exactly what the fully disabled stack selects. The mock is
+# deterministic per prompt, so any difference is the optimizer changing the answer.
+# ---------------------------------------------------------------------------------------------
+statement ok
+SET ai_pullup=false; SET ai_factorize='off'; SET ai_semi_reduce=false; SET ai_reorder=false;
+SET ai_join_factorize='off'; SET ai_limit=false; SET ai_inline_ai_ctes=false;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE a_off AS WITH c AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] keep? '||body))
+SELECT c.id FROM c JOIN hot h ON h.id = c.id;
+
+statement ok
+CREATE TABLE b_off AS WITH c AS (SELECT 'k_'||id::VARCHAR AS k, body FROM doc WHERE ai_filter('[p=60] keep? '||body))
+SELECT c.k FROM c JOIN tag t ON t.key = c.k;
+
+statement ok
+CREATE TABLE c_off AS WITH c AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] keep? '||body))
+SELECT x.id FROM (SELECT c.id FROM c JOIN hot h ON h.id = c.id
+                  UNION ALL SELECT c.id FROM c JOIN warm w ON w.id = c.id) x;
+
+statement ok
+CREATE TABLE d_off AS WITH c AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] keep? '||body))
+SELECT x.id FROM (SELECT c.id FROM c JOIN hot h ON h.id = c.id
+                  UNION ALL SELECT c.id FROM c) x;
+
+statement ok
+CREATE TABLE e_off AS WITH c AS (SELECT d.id, d.body FROM doc d JOIN hot h ON h.id = d.id
+                                 WHERE ai_filter('[p=60] keep? '||d.body))
+SELECT c.id FROM c;
+
+statement ok
+CREATE TABLE f_off AS WITH c AS (SELECT id, body FROM doc WHERE bucket = 3 AND ai_filter('[p=60] keep? '||body))
+SELECT a.id FROM c a JOIN c b ON b.id = a.id;
+
+statement ok
+CREATE TABLE g_off AS WITH c AS (SELECT id, body FROM doc WHERE ai_filter('[p=60] keep? '||body))
+SELECT a.id FROM c a JOIN c b ON b.id = a.id;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM a_on EXCEPT SELECT * FROM a_off) UNION ALL (SELECT * FROM a_off EXCEPT SELECT * FROM a_on));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM b_on EXCEPT SELECT * FROM b_off) UNION ALL (SELECT * FROM b_off EXCEPT SELECT * FROM b_on));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM c_on EXCEPT SELECT * FROM c_off) UNION ALL (SELECT * FROM c_off EXCEPT SELECT * FROM c_on));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM d_on EXCEPT SELECT * FROM d_off) UNION ALL (SELECT * FROM d_off EXCEPT SELECT * FROM d_on));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM e_on EXCEPT SELECT * FROM e_off) UNION ALL (SELECT * FROM e_off EXCEPT SELECT * FROM e_on));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM f_on EXCEPT SELECT * FROM f_off) UNION ALL (SELECT * FROM f_off EXCEPT SELECT * FROM f_on));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM g_on EXCEPT SELECT * FROM g_off) UNION ALL (SELECT * FROM g_off EXCEPT SELECT * FROM g_on));
+----
+0
+
+# each shape must actually keep SOME rows and not all of them -- an all-true or all-false
+# predicate would satisfy every parity check above trivially
+query I
+SELECT min(n) > 0 AND max(n) < 200 FROM (
+  SELECT count(*) AS n FROM a_on UNION ALL SELECT count(*) FROM b_on UNION ALL
+  SELECT count(*) FROM e_on UNION ALL SELECT count(*) FROM f_on);
+----
+true

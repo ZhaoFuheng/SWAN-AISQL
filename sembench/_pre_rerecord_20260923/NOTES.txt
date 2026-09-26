@@ -1,0 +1,1 @@
+19:53:18-19:54:29 MDT laptop sleep (71s) during MOVIE LOTUS q5: 0 recordings overlap the window (cache clean); q5 wall time inflated -> replay-rerun at end

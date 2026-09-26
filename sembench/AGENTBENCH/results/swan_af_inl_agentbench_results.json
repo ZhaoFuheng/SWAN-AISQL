@@ -1,0 +1,37 @@
+{
+ "per_query": {
+  "Q22": {
+   "latency_s": 4.6,
+   "llm_calls": 35,
+   "local_hits": 110,
+   "tokens": 16591,
+   "cost_usd": 0.00288,
+   "hedged": 0,
+   "rows": 270,
+   "error": null,
+   "ran_at": "2026-09-22 11:33:23 MDT"
+  },
+  "Q26": {
+   "latency_s": 57.3,
+   "llm_calls": 421,
+   "local_hits": 26417,
+   "tokens": 97273,
+   "cost_usd": 0.03173,
+   "hedged": 0,
+   "rows": 665,
+   "error": null,
+   "ran_at": "2026-09-22 11:33:23 MDT"
+  }
+ },
+ "model": "gpt-5.6-luna",
+ "concurrency": "20",
+ "updated": "2026-09-22 11:33:23 MDT",
+ "total": {
+  "n_queries": 2,
+  "latency_s": 61.9,
+  "llm_calls": 456,
+  "cost_usd": 0.0346,
+  "tokens": 113864,
+  "errors": 0
+ }
+}

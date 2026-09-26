@@ -6,3 +6,25 @@ duckdb_unittest_tempdir/
 testext
 test/python/__pycache__/
 .Rhistory
+
+# SWAN AI-SQL: local secrets, LLM caches, run logs, python caches
+.env
+serve/.llm_cache*
+serve/*.log
+sembench/**/*.log
+sembench/ECOMM/data/sf_500/images/
+sembench/MMQA/files/mmqa/source_data/
+sembench/MMQA/files/**/*.jpg
+sembench/MMQA/files/**/*.jpeg
+sembench/MMQA/files/**/*.png
+sembench/MMQA/files/**/*.JPG
+__pycache__/
+*.pyc
+duckdb_unittest_tempdir/
+
+# build artefacts / local caches
+.cache/
+build_*.log
+
+# private working notes (gaps / todo), not part of the published design
+docs/BACKLOG.md

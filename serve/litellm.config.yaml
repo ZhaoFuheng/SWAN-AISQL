@@ -1,0 +1,31 @@
+# litellm proxy configuration for the swan-ai-sql AI functions.
+#
+# Start the proxy (from the repo root):
+#   pip install litellm        # once
+#   export OPENAI_API_KEY=sk-...                     # your OpenAI key (used by the proxy)
+#   litellm --config serve/litellm.config.yaml --port 4000    (or: serve/start_stack.sh)
+#
+# DuckDB's AI functions then call http://localhost:4000/v1/chat/completions
+# with model "gpt-5.6-luna" by default (override via the AI_MODEL / AI_PROXY_URL env vars).
+
+model_list:
+  - model_name: gpt-5-mini
+    litellm_params:
+      model: openai/gpt-5-mini
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: gpt-5.6-luna
+    litellm_params:
+      model: openai/gpt-5.6-luna
+      api_key: os.environ/OPENAI_API_KEY
+      reasoning_effort: low
+
+litellm_settings:
+  drop_params: true        # drop provider-unsupported params instead of erroring
+  # set_verbose: true      # uncomment to log full requests/responses
+
+# No master_key is set, so the local proxy accepts requests without an
+# Authorization header -- matching the DuckDB client default (AI_API_KEY unset).
+# To require auth, add:
+#   general_settings:
+#     master_key: sk-local-1234
+# and `export AI_API_KEY=sk-local-1234` before launching DuckDB.

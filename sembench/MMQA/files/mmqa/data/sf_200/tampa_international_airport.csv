@@ -1,0 +1,201 @@
+row_id,Airlines,Destinations,Airport
+0,Nile Air,"Alexandria, Assiut, Cairo, Luxor, Sohag",King Abdulaziz International Airport
+1,Frontier Airlines,"Atlanta, Boston, Buffalo, Burlington (VT), Charlotte, Chicago–Midway, Chicago–O'Hare, Cincinnati, Cleveland, Dallas/Fort Worth, Denver, Hartford, Kansas City (begins October 11, 2025), Long Island/Islip, New York–JFK, Philadelphia, Portland (ME), Raleigh/Durham, San Juan, St. Louis (resumes October 11, 2025), Trenton, Washington–Dulles",
+2,Jetstar,"Melbourne, Perth, Sydney",Phuket International Airport
+3,Eastar Jet,Seoul–Incheon,Fukuoka Airport
+4,Sepehran Airlines,"Mashhad, Tehran–Imam Khomeini",Baghdad International Airport
+5,IndiGo,"Bengaluru, Bhubaneswar, Chennai, Delhi, Guwahati, Hyderabad, Mumbai, Siliguri",Kazi Nazrul Islam Airport
+6,Shandong Airlines,Jinan,Sanya Phoenix International Airport
+7,Korean Air,Seoul–Incheon,Chiang Mai International Airport
+8,HK Express,Hong Kong,Fukuoka Airport
+9,Jeju Air,"Busan, Jeju, Seoul–Incheon, Muan",Fukuoka Airport
+10,Colorful Guizhou Airlines,Guiyang,Sanya Phoenix International Airport
+11,Hebei Airlines,Shijiazhuang,Sanya Phoenix International Airport
+12,Frontier Airlines,"Austin, Chicago–O’Hare, Dallas/Fort Worth, Denver, Las Vegas, Phoenix–Sky Harbor, Sacramento, Salt Lake City, San Francisco",San Diego International Airport
+13,Delta Air Lines,Atlanta,Louisville International Airport
+14,Cathay Pacific,Hong Kong,Mactan–Cebu International Airport
+15,Thai Lion Air,Bangkok–Don Mueang,Soekarno–Hatta International Airport
+16,Garuda Indonesia,Jayapura,Mopah International Airport
+17,Viva,"Guadalajara, Mexico City, Monterrey",McCarran International Airport
+18,China Airlines,Taipei–Taoyuan,New Chitose Airport
+19,Egyptair,"Alexandria, Cairo, Sharm El Sheikh",Prince Mohammad bin Abdulaziz International Airport
+20,Hawaiian Airlines,Honolulu,Phoenix Sky Harbor International Airport
+21,JetBlue,"Boston, Cancún, Fort Lauderdale (begins December 4, 2025), Hartford, New York–JFK, New York–LaGuardia, Newark, Providence, San Juan, White Plains",
+22,Air North,"Whitehorse, Yellowknife",Ottawa Macdonald–Cartier International Airport
+23,Donghai Airlines,"Changsha, Nantong",Sanya Phoenix International Airport
+24,Spring Airlines,"Dalian, Guangzhou, Shanghai–Pudong",Fukuoka Airport
+25,S7 Airlines,Irkutsk,Phuket International Airport
+26,Shanghai Airlines,"Shanghai–Hongqiao, Shanghai–Pudong",Sanya Phoenix International Airport
+27,Serene Air,Peshawar,King Khalid International Airport
+28,WestJet,Calgary,Leonardo da Vinci–Fiumicino Airport
+29,Egyptair,Cairo,Baghdad International Airport
+30,British Airways,London–Gatwick,
+31,Southwest Airlines,"Albany, Atlanta, Austin, Baltimore, Birmingham (AL), Buffalo, Chicago–Midway, Columbus–Glenn, Dallas–Love, Denver, Fort Lauderdale, Hartford, Havana, Houston–Hobby, Indianapolis, Kansas City, Las Vegas, Long Island/Islip, Louisville, Milwaukee, Nashville, New Orleans, Philadelphia, Phoenix–Sky Harbor, Pittsburgh, Providence, Raleigh/Durham, Rochester (NY), San Antonio, San Juan, St. Louis, Washington–National",
+32,Air China,"Beijing–Capital, Chengdu–Tianfu",Jiuzhai Huanglong Airport
+33,LATAM Brasil,"Brasília, São Paulo–Guarulhos",Sinop Airport (Brazil)
+34,Thai VietJet Air,Bangkok–Suvarnabhumi,Fukuoka Airport
+35,Korean Air,Seoul–Incheon,Mactan–Cebu International Airport
+36,Nile Air,Cairo,Stockholm Arlanda Airport
+37,Shanghai Airlines,Shanghai–Pudong,Phuket International Airport
+38,Canadian North,"Iqaluit, Kuujjuaq, Rankin Inlet, Yellowknife",Ottawa Macdonald–Cartier International Airport
+39,flydubai,Dubai–International,Baghdad International Airport
+40,Susi Air,"Melongguane, Siau",Sam Ratulangi International Airport
+41,Trigana Air,"Agats, Tanah Merah",Mopah International Airport
+42,Sichuan Airlines,"Chengdu–Tianfu, Chongqing",Phuket International Airport
+43,American Airlines,"Charlotte, Chicago–O’Hare, Dallas/Fort Worth, Miami, Philadelphia, Phoenix–Sky Harbor",San Diego International Airport
+44,Iraqi Airways,Baghdad,King Khalid International Airport
+45,Cathay Pacific,Hong Kong,New Chitose Airport
+46,Rossiya Airlines,,Sheremetyevo International Airport
+47,Spirit Airlines,"Atlanta, Atlantic City, Charlotte, Chicago–O'Hare, Detroit, Fort Lauderdale, Houston–Intercontinental, Indianapolis, Kansas City, Las Vegas, Memphis, Milwaukee, Minneapolis/St. Paul, New Orleans, Pittsburgh",
+48,Thai AirAsia,"Chiang Mai, Taipei–Taoyuan",New Chitose Airport
+49,China Southern Airlines,"Guangzhou, Shenzhen",Chiang Mai International Airport
+50,VietJet Air,"Hanoi, Ho Chi Minh City",Phuket International Airport
+51,Aeroméxico,Mexico City,Heathrow Airport
+52,American Eagle,"Miami, Nashville",
+53,Hainan Airlines,Haikou,King Abdulaziz International Airport
+54,Tianjin Airlines,Chongqing,Sheremetyevo International Airport
+55,SalamAir,Muscat,Chaudhary Charan Singh Airport
+56,Middle East Airlines,Beirut,King Khalid International Airport
+57,IndiGo,"Ahmedabad, Bengaluru, Delhi, Hyderabad, Kozhikode, Mumbai",King Abdulaziz International Airport
+58,Fiji Link,"Cicia, Funafuti, Kadavu, Koro, Labasa, Lakeba, Nadi, Rotuma, Savusavu, Taveuni, Vanua Balavu, Vunisea",Nausori International Airport
+59,Airblue,"Islamabad, Lahore, Multan, Peshawar",King Abdulaziz International Airport
+60,Peach,"Fukuoka, Nagoya–Centrair, Naha, Osaka–Kansai, Sendai, Tokyo–Narita",New Chitose Airport
+61,JetBlue,"Boston, Fort Lauderdale, New York–JFK, Newark, Orlando",McCarran International Airport
+62,Garuda Indonesia,Jakarta–Soekarno-Hatta,Sam Ratulangi International Airport
+63,Delta Air Lines,"Amsterdam, Atlanta, Austin, Boston, Cincinnati, Detroit, Los Angeles, Minneapolis/St. Paul, New York–JFK, New York–LaGuardia, Raleigh/Durham, Salt Lake City, Seattle/Tacoma",
+64,Tigerair Taiwan,"Kaohsiung, Taipei–Taoyuan",New Chitose Airport
+65,Kalstar Aviation,"Balikpapan, Tanjungredeb, Tanjungselor, Kutai Barat, Tarakan, Nunukan",Temindung Airport
+66,Air Arabia,"Abu Dhabi, Alexandria, Assiut, Sharjah",Queen Alia International Airport
+67,VietJet Air,Nha Trang,Daegu International Airport
+68,Libyan Airlines,"Benghazi, Tripoli–Mitiga",King Abdulaziz International Airport
+69,Jeju Air,"Busan, Jeju, Seoul–Incheon, Muan",Fukuoka Airport
+70,Air Do,Sapporo–Chitose,Fukuoka Airport
+71,Thai VietJet Air,"Bangkok–Suvarnabhumi, Chiang Mai, Chiang Rai, Mumbai",Phuket International Airport
+72,flynas,"Jeddah, Medina",Al-Ahsa International Airport
+73,Qatar Airways,Doha,King Abdulaziz International Airport
+74,Emirates,Dubai–International,King Abdulaziz International Airport
+75,Ethiopian Airlines,Addis Ababa,Soekarno–Hatta International Airport
+76,Emirates,Dubai–International,Queen Alia International Airport
+77,WestJet,"Calgary, Edmonton, Vancouver, Kelowna, Regina, Saskatoon, Winnipeg",Phoenix Sky Harbor International Airport
+78,Thai AirAsia,"Bangkok–Don Mueang, Bangkok–Suvarnabhumi, Chennai, Chiang Mai, Khon Kaen, Kochi, Kolkata, Medan, Siem Reap, Udon Thani",Phuket International Airport
+79,Air India,"Delhi, Mumbai",King Abdulaziz International Airport
+80,Air Canada Rouge,Toronto–Pearson,
+81,Vietnam Airlines,"Hanoi, Ho Chi Minh City",Fukuoka Airport
+82,Ruili Airlines,"Kunming, Xishuangbanna",Chiang Mai International Airport
+83,Egyptair,"Alexandria, Cairo",King Khalid International Airport
+84,Royal Air Maroc,Casablanca,King Khalid International Airport
+85,Juneyao Air,"Harbin, Qingdao, Shanghai–Hongqiao, Shanghai–Pudong, Ulaanbaatar, Wuxi, Xi'an",Sanya Phoenix International Airport
+86,Breeze Airways,"Provo, Hartford, Norfolk, Richmond",Phoenix Sky Harbor International Airport
+87,VietJet Air,"Nha Trang, Phu Quoc",Chinggis Khaan International Airport
+88,Lion Air,"Banda Aceh, Jakarta–Soekarno-Hatta, Makassar, Medan, Surabaya",Prince Mohammad bin Abdulaziz International Airport
+89,Toki Air,"Kobe, Nagoya–Centrair, Sapporo–Okadama, Sendai",Niigata Airport
+90,Virgin Atlantic,London–Heathrow,
+91,Air Canada,"Montréal–Trudeau, Toronto–Pearson, Vancouver",McCarran International Airport
+92,SalamAir,Muscat,Sarajevo International Airport
+93,Biman Bangladesh Airlines,Dhaka,Shah Makhdum Airport
+94,Copa Airlines,Panama City–Tocumen,
+95,United Express,"Chicago–O’Hare, Denver, Houston–Intercontinental, Newark, Washington–Dulles",Louisville International Airport
+96,Air Algérie,Algiers,Queen Alia International Airport
+97,Avelo Airlines,"New Haven, Wilmington (DE), Wilmington (NC)",
+98,Air Senok,Colombo–Ratmalana,China Bay Airport
+99,Malaysia Airlines,Kuala Lumpur–International,Sardar Vallabhbhai Patel International Airport
+100,American Airlines,"Charlotte, Chicago–O'Hare, Dallas/Fort Worth, Miami, New York–LaGuardia, Philadelphia, Phoenix–Sky Harbor, Washington–National",
+101,CM Airlines,"La Ceiba, Roatán",Guanaja Airport
+102,Nepal Airlines,Kathmandu,King Khalid International Airport
+103,Thai Lion Air,"Bangkok–Don Mueang, Kaohsiung",New Chitose Airport
+104,Allegiant Air,"Las Vegas, Los Angeles, Phoenix/Mesa",Spokane International Airport
+105,Copa Airlines,Panama City–Tocumen,Grantley Adams International Airport
+106,Cayman Airways,Grand Cayman,
+107,Copa Airlines,Panama City–Tocumen,San Diego International Airport
+108,Avianca,"Bogotá, Medellín–JMC",El Edén International Airport
+109,9 Air,"Chengdu–Tianfu, Guangzhou",Sanya Phoenix International Airport
+110,VietJet Air,"Da Nang, Hanoi, Ho Chi Minh City, Nha Trang, Phu Quoc",Gimhae International Airport
+111,Aeroméxico,Mexico City,
+112,Beijing Capital Airlines,Beijing–Daxing,New Chitose Airport
+113,Lucky Air,Kunming,Sam Ratulangi International Airport
+114,Qatar Airways,Doha,Beirut–Rafic Hariri International Airport
+115,China Eastern Airlines,"Beijing–Daxing, Dalian, Kunming, Liuzhou, Nanjing, Shanghai–Pudong, Wuhan, Wuxi, Xi'an",Sanya Phoenix International Airport
+116,J-Air,"Aomori, Hanamaki, Hiroshima, Kagoshima, Memanbetsu, Osaka–Itami, Sendai",New Chitose Airport
+117,Air Transat,"Cancún, Puerto Plata, Punta Cana",Ottawa Macdonald–Cartier International Airport
+118,Malaysia Airlines,Kuala Lumpur–International,Phuket International Airport
+119,Thai Airways International,Bangkok–Suvarnabhumi,Phuket International Airport
+120,Fiji Airways,"Apia, Kiritimati, Nadi",Daniel K. Inouye International Airport
+121,Starlux Airlines,Taipei–Taoyuan,Chiang Mai International Airport
+122,Air Tahiti,"Papeete, Totegegie",Hao Airport
+123,Thai VietJet Air,"Bangkok–Suvarnabhumi, Taipei–Taoyuan",New Chitose Airport
+124,Breeze Airways,Providence,Denver International Airport
+125,WestJet,"Calgary, Toronto–Pearson",
+126,Lion Air,Jakarta–Soekarno-Hatta,Sanya Phoenix International Airport
+127,Akasa Air,"Abu Dhabi, Bengaluru, Delhi, Goa–Mopa, Gwalior, Jeddah, Kolkata, Mumbai, Pune, Siliguri",Sardar Vallabhbhai Patel International Airport
+128,Japan Air Commuter,"Izumo, Kagoshima, Tanegashima, Yakushima",Fukuoka Airport
+129,Qatar Airways,Doha,Prince Mohammad bin Abdulaziz International Airport
+130,Jin Air,"Busan, Seoul–Incheon",Fukuoka Airport
+131,Saudia,"Jeddah, Riyadh",Leonardo da Vinci–Fiumicino Airport
+132,Singapore Airlines,Singapore,New Chitose Airport
+133,Cathay Pacific,Hong Kong,Leonardo da Vinci–Fiumicino Airport
+134,Air China,Beijing–Capital,New Chitose Airport
+135,Thai VietJet Air,"Bangkok–Suvarnabhumi, Taipei–Taoyuan",New Chitose Airport
+136,Alaska Airlines,"San Diego, Seattle/Tacoma",
+137,China Southern Airlines,"Beijing–Daxing, Guangzhou, Shenzhen",King Khalid International Airport
+138,Air Canada Rouge,"Toronto–Pearson, Montréal–Trudeau",McCarran International Airport
+139,China Eastern Airlines,"Kunming, Shanghai–Pudong",Chiang Mai International Airport
+140,Air Do,Sapporo–Chitose,Fukuoka Airport
+141,Air Canada Express,Vancouver,San Diego International Airport
+142,Kuwait Airways,Kuwait City,King Abdulaziz International Airport
+143,Korean Air,Seoul–Incheon,New Chitose Airport
+144,Japan Air Commuter,"Amami Ōshima, Kagoshima",Kikai Airport
+145,Jeju Air,"Bangkok–Suvarnabhumi, Cebu, Da Nang, Fukuoka, Jeju, Kaohsiung, Osaka–Kansai, Sapporo–Chitose, Seoul–Gimpo, Shijiazhuang, Singapore, Tagbilaran, Taipei–Taoyuan, Tokyo–Narita, Ulaanbaatar, Zhangjiajie",Gimhae International Airport
+146,Avianca,Bogotá,
+147,Saudia,Jeddah,Al-Ahsa International Airport
+148,Tunisair,Tunis,Leonardo da Vinci–Fiumicino Airport
+149,Asiana Airlines,Seoul–Incheon,Asahikawa Airport
+150,Jin Air,"Busan, Seoul–Incheon",Fukuoka Airport
+151,Congo Airways,Kinshasa–N'Djili,Muanda Airport
+152,AirAsia,Kuala Lumpur–International,Chiang Mai International Airport
+153,Breeze Airways,"Akron/Canton, Bangor, Charleston (SC), Charleston (WV) (resumes October 3, 2025), Fayetteville/Bentonville, Greenville/Spartanburg, Gulfport/Biloxi, Hartford, Huntsville, Key West, Lansing (begins October 1, 2025), Madison, Memphis, Myrtle Beach, New Orleans, Norfolk, Pensacola, Portland (ME), Providence, Raleigh/Durham, Richmond, Rochester (NY) (begins October 1, 2025), Syracuse, Wilkes-Barre/Scranton Wilmington (NC) (begins October 2, 2025)",
+154,Discover Airlines,Frankfurt,
+155,Grand Canyon Airlines,Safford,Phoenix Sky Harbor International Airport
+156,Skymark Airlines,"Ibaraki, Naha, Sapporo–Chitose, Shimojishima, Tokyo–Haneda",Fukuoka Airport
+157,Philippines AirAsia,Manila,Mactan–Cebu International Airport
+158,Porter Airlines,,
+159,Flynas,,King Khalid International Airport
+160,Volaris,"Culiacán, Guadalajara",Phoenix Sky Harbor International Airport
+161,Emirates,Dubai–International,Heathrow Airport
+162,Avianca,"Bogotá, Medellín–JMC",El Edén International Airport
+163,Angara Airlines,Irkutsk,Chinggis Khaan International Airport
+164,United Airlines,"Houston–Intercontinental, Newark",Piarco International Airport
+165,American Airlines,"Charlotte, Dallas/Fort Worth, Miami",Louisville International Airport
+166,Cebu Pacific,Manila,New Chitose Airport
+167,TransNusa,"Denpasar, Guangzhou, Shanghai–Pudong, Shenzhen, Sorong",Sam Ratulangi International Airport
+168,Asiana Airlines,,Heathrow Airport
+169,Aero K,Cheongju,Chinggis Khaan International Airport
+170,Thai Airways International,Bangkok–Suvarnabhumi,Chiang Mai International Airport
+171,Oman Air,Muscat,King Khalid International Airport
+172,United Airlines,"Chicago–O'Hare, Denver, Houston–Intercontinental, Los Angeles, Newark, San Francisco, Washington–Dulles",
+173,Sichuan Airlines,Chengdu–Tianfu,Jiuzhai Huanglong Airport
+174,Volaris,"Culiacán, Guadalajara",Phoenix Sky Harbor International Airport
+175,NAM Air,"Batam, Denpasar, Muara Bungo, Pangkalan Bun, Pangkal Pinang, Pontianak, Sampit",Soekarno–Hatta International Airport
+176,Breeze Airways,"Provo, Hartford, Norfolk, Richmond",Phoenix Sky Harbor International Airport
+177,Volaris,"Guadalajara, Mexico City",McCarran International Airport
+178,Air China,"Beijing–Capital, Chengdu–Tianfu, Shanghai–Pudong, Shenzhen",Frankfurt Airport
+179,Air India,"Delhi, Mumbai",King Khalid International Airport
+180,Air Canada,"Montréal–Trudeau, Toronto–Pearson",
+181,ATA Airlines,"Mashhad, Tehran–Imam Khomeini",Baghdad International Airport
+182,SCAT Airlines,Almaty,Phuket International Airport
+183,Uzbekistan Airways,"Samarqand, Tashkent",Prince Mohammad bin Abdulaziz International Airport
+184,Eastar Jet,Seoul–Incheon,New Chitose Airport
+185,Loong Air,Zhangjiajie,Daegu International Airport
+186,China United Airlines,Ordos,Daegu International Airport
+187,EVA Air,"Kaohsiung, Taipei–Taoyuan",Fukuoka Airport
+188,Saudia,Jeddah,Birmingham Airport
+189,easyJet,,Glasgow Airport
+190,J-Air,Osaka–Itami,Misawa Airport
+191,Air Cairo,Sharm El Sheikh,Sheremetyevo International Airport
+192,Sun Country Airlines,Minneapolis/St. Paul,
+193,Uzbekistan Airways,Tashkent,King Abdulaziz International Airport
+194,Safarilink,"Kiwayu, Nairobi–Wilson",Manda Airport
+195,Kam Air,Kabul,Prince Mohammad bin Abdulaziz International Airport
+196,Edelweiss Air,Zürich,
+197,Tigerair Taiwan,Taipei–Taoyuan,Phuket International Airport
+198,Spring Airlines,"Guangzhou, Shanghai–Pudong",Phuket International Airport
+199,Pakistan International Airlines,"Faisalabad, Islamabad, Karachi, Lahore, Multan, Sialkot",Prince Mohammad bin Abdulaziz International Airport

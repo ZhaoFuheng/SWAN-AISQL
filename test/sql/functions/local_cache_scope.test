@@ -1,0 +1,69 @@
+# name: test/sql/functions/local_cache_scope.test
+# description: ai_local_cache_scope: query-level (default; Q1 never serves Q2) vs cross_query
+#              (process-lifetime, lotus-style)
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE d AS SELECT 'doc '||i::VARCHAR AS t FROM range(30) r(i);
+
+# default scope is query-level
+query I
+SELECT current_setting('ai_local_cache_scope');
+----
+query
+
+# two queries, identical prompts: each pays its own calls, zero cross-query hits
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE r1 AS SELECT t FROM d WHERE ai_filter('scope? '||t);
+
+statement ok
+CREATE TABLE r2 AS SELECT t FROM d WHERE ai_filter('scope? '||t) ORDER BY t;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT = 60 AND sum(cache_hits)::BIGINT = 0 FROM ai_usage();
+----
+true
+
+# cross_query scope: the second query is served entirely from the first's cache
+statement ok
+SET ai_local_cache_scope='cross_query';
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE r3 AS SELECT t FROM d WHERE ai_filter('scope? '||t);
+
+statement ok
+CREATE TABLE r4 AS SELECT t FROM d WHERE ai_filter('scope? '||t) ORDER BY t;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT = 30 AND sum(cache_hits)::BIGINT = 30 FROM ai_usage();
+----
+true
+
+# identical results under either scope
+query I
+SELECT count(*) FROM ((SELECT * FROM r3 EXCEPT SELECT * FROM r1) UNION ALL (SELECT * FROM r1 EXCEPT SELECT * FROM r3));
+----
+0
+
+statement ok
+SET ai_local_cache_scope='query';
+
+statement ok
+CALL ai_mock_stop();

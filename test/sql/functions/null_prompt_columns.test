@@ -1,0 +1,113 @@
+# name: test/sql/functions/null_prompt_columns.test
+# description: NULL handling for a prompt built from columns. A prompt made with `||` is NULL if
+#              ANY operand is, so ONE missing field erased the whole prompt and the predicate never
+#              saw the columns that DID have values -- the row was dropped with nothing judged.
+#
+#              AIKeyBind now wraps the prompt in its own guard:
+#                  CASE WHEN c1 IS NULL AND ... AND cn IS NULL THEN NULL
+#                       ELSE <prompt with each column coalesced to ''> END
+#              so a partly-populated row is judged on what it has, and only a row with NOTHING to
+#              judge yields NULL. Unknown is the honest answer there, and no call is made for it.
+#
+#              Expressed in the EXPRESSION rather than in each function, so every evaluation path
+#              inherits it -- the scalar functions and equally the folded reorder node, which
+#              rebuilds prompts from this expression.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE t AS
+SELECT 1 AS id, 'alpha' AS a, 'beta' AS b UNION ALL
+SELECT 2, 'gamma', NULL UNION ALL
+SELECT 3, NULL, 'delta' UNION ALL
+SELECT 4, NULL, NULL;
+
+statement ok
+SELECT ai_usage_reset();
+
+# rows 1-3 have SOMETHING to judge; row 4 has nothing
+query II
+SELECT id, ai_filter('[p=100] keep? '||a||' / '||b) AS verdict FROM t ORDER BY id;
+----
+1	true
+2	true
+3	true
+4	NULL
+
+# exactly three calls: the all-NULL row is never sent
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# in a WHERE the NULL row drops, as any NULL predicate does
+query I
+SELECT id FROM t WHERE ai_filter('[p=100] keep? '||a||' / '||b) ORDER BY id;
+----
+1
+2
+3
+
+# --- an EXPLICIT COALESCE is the user's own decision and is left alone: every row is judged,
+# including the one with no values at all.
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT id FROM t
+WHERE ai_filter('[p=100] keep? '||COALESCE(a,'')||' / '||COALESCE(b,'')) ORDER BY id;
+----
+1
+2
+3
+4
+
+# --- a constant prompt has no columns to be missing, so the guard never applies
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM t WHERE ai_filter('[p=100] always');
+----
+4
+
+# --- the guard must not change results where no column is nullable
+statement ok
+CREATE TABLE nn AS SELECT range AS k, 'row '||range::VARCHAR AS nm FROM range(20);
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE guarded AS SELECT k FROM nn WHERE ai_filter('[p=60] keep? '||nm);
+
+# one call per distinct prompt, exactly as before the guard existed
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+20
+
+statement ok
+SET ai_pullup=false; SET ai_factorize='off'; SET ai_reorder=false; SET ai_semi_reduce=false;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE plain AS SELECT k FROM nn WHERE ai_filter('[p=60] keep? '||nm);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM guarded EXCEPT SELECT * FROM plain)
+                      UNION ALL (SELECT * FROM plain EXCEPT SELECT * FROM guarded));
+----
+0
