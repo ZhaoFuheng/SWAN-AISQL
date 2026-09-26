@@ -31,7 +31,8 @@ if os.path.exists(_ENV_FILE):
         if _line and not _line.startswith("#") and "=" in _line:
             _k, _v = _line.split("=", 1)
             os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
-BIN = os.environ.get("DUCKDB_BIN", os.path.abspath(os.path.join(HERE, "../../build/release/duckdb")))
+_BUILDS = [os.path.abspath(os.path.join(HERE, "../../build", b, "duckdb")) for b in ("release", "reldebug")]
+BIN = os.environ.get("DUCKDB_BIN", next((p for p in _BUILDS if os.path.exists(p)), _BUILDS[0]))
 DB = os.path.join(HERE, "movie.db")
 PROXY = os.environ.get("AI_PROXY_URL", "http://localhost:4001")
 MODEL = os.environ.get("AI_MODEL", "gpt-5.6-luna")

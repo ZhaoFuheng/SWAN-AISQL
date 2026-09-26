@@ -8,7 +8,7 @@ neutral 2-line system prompt. This isolates placement/execution differences from
 engineering in the quality scores:
   SEMANTIC(p)        -> ai_filter(p)        (boolean predicate <-> boolean predicate)
   semantic_int(p)    -> COALESCE(TRY_CAST(regexp_extract(ai_complete(p || <int suffix>),
-                        '^\s*([-+]?[0-9]+)', 1) AS INTEGER), 0)                       [stoll]
+                        '^\\s*([-+]?[0-9]+)', 1) AS INTEGER), 0)                       [stoll]
   semantic_string(p) -> ai_complete(p || <string suffix>)
   semantic_double(p) -> COALESCE(TRY_CAST(regexp_extract(...double suffix...) AS DOUBLE), 0.0)
   LOAD tpch + dbgen(sf=0.005)   -> views over dataset/tpch/*.parquet (dbgen-exported, canonical)

@@ -13,7 +13,7 @@ So a limited query is scored on what the SQL actually promises:
   * COMPLETE -- exactly min(k, |ground truth|) rows are returned
 Both hold => 1.0. Unlimited queries keep exact row-multiset F1, which is the right measure there.
 
-  python3 eval_agentbench.py [systems...]      (default: swan_final plop)
+  python3 eval_agentbench.py [systems...]      (default: swan plop -- the runner's default tag)
   env: GT_TAG (default plop_gt)
 """
 import importlib.util
@@ -68,7 +68,7 @@ def score(system, q):
 
 
 def main():
-    systems = sys.argv[1:] or ["swan_final", "plop"]
+    systems = sys.argv[1:] or ["swan", "plop"]
     calls = {}
     for s in systems:
         path = os.path.join(HERE, "results", s + "_agentbench_results.json")

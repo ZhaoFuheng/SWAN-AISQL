@@ -40,5 +40,5 @@ Runners default to `../../build/release/duckdb`; set `DUCKDB_BIN` to use another
 
 Runners: `MOVIE/swan_movie.py --serial`, `ECOMM/swan_ecomm.py --serial`, `MMQA/swan_mmqa.py`;
 `*/lotus_*.py`; `AGENTBENCH/swan_agentbench.py` + `eval_agentbench.py` (deterministic GT). Each takes
-query ids as arguments. The 2026-09-23 re-record's driver, log, notes and pre-record backups are in
+query ids as arguments. The 2026-09-23 re-record's driver, log, notes and cache-merge script are in
 `_pre_rerecord_20260923/`.

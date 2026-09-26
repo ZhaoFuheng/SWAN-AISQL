@@ -1,6 +1,6 @@
 # Regression pass on the extension-template build (2026-09-25)
 
-Same DuckDB commit (a8e908a, v2.1.0-dev1) and identical engine source as the in-tree v2 build; results tagged _port vs the per-leaf baseline. Q1-Q30: macro 1.000 / 11,253 calls (identical per query) / 839s (vs 824s; PLOP 1,080s).
+Same DuckDB commit (a8e908a, v2.1.0-dev1) and identical engine source as the in-tree v2 build; results were tagged _port at run time; the tagged duplicates were not kept, the untagged per-leaf files are the canonical, identical numbers. Q1-Q30: macro 1.000 / 11,253 calls (identical per query) / 839s (vs 824s; PLOP 1,080s).
 
 
 ## MMQA  ('default' -> '_port')

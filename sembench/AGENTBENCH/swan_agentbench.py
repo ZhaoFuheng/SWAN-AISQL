@@ -25,8 +25,8 @@ if os.path.exists(_ENV_FILE):
         if _line and not _line.startswith("#") and "=" in _line:
             _k, _v = _line.split("=", 1)
             os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
-BIN = os.environ.get("DUCKDB_BIN",
-                     os.path.abspath(os.path.join(HERE, "../../build/release/duckdb")))
+_BUILDS = [os.path.abspath(os.path.join(HERE, "../../build", b, "duckdb")) for b in ("release", "reldebug")]
+BIN = os.environ.get("DUCKDB_BIN", next((p for p in _BUILDS if os.path.exists(p)), _BUILDS[0]))
 PROXY = os.environ.get("AI_PROXY_URL", "http://localhost:4001")
 MODEL = os.environ.get("AI_MODEL", "gpt-5.6-luna")
 CONC = os.environ.get("AI_MAX_CONCURRENCY", "20")
@@ -35,7 +35,7 @@ MARK = "===USAGE==="
 EXTRA_SET = os.environ.get("SWAN_EXTRA_SET", "")
 # results tag so an A/B run does not clobber the certified results
 TAG = os.environ.get("SWAN_TAG", "swan")
-# which translation to run (swan_queries = current; swan_queries_pi = prompt-identical to PLOP)
+# the SWAN translations of the 30 PLOP queries (SWAN_QUERY_DIR overrides for an A/B against a variant set)
 QUERY_DIR = os.environ.get("SWAN_QUERY_DIR", "swan_queries")
 
 ENV = {**os.environ, "AI_MODEL": MODEL, "AI_API_KEY": "sk-test", "AI_MAX_CONCURRENCY": CONC,
