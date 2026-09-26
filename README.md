@@ -53,11 +53,13 @@ TYPESAFE_API_KEY=...        # only for SET ai_typesafe='filter,classify' (ai_fil
 
 ## Python environment
 
-The serving stack and the benchmark harnesses are Python (≥ 3.11). Use a virtual environment; with
-[uv](https://docs.astral.sh/uv/):
+The serving stack and the benchmark harnesses are Python; `.python-version` pins **3.12** (any ≥ 3.11
+works). Use a virtual environment; with [uv](https://docs.astral.sh/uv/) the pin is honoured
+automatically and the interpreter is downloaded if missing:
 
 ```sh
-uv venv                                      # creates .venv (git-ignored); or: python3 -m venv .venv
+uv venv                                      # creates .venv on Python 3.12 (git-ignored)
+                                             # without uv: python3.12 -m venv .venv
 source .venv/bin/activate
 uv pip install -r requirements.txt           # litellm, duckdb, pandas
 uv pip install -r requirements-embed-mlx.txt # embedding server, Apple Silicon (text + image)  -- or:

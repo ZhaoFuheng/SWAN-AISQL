@@ -1,4 +1,4 @@
-# Python side of SWAN AI-SQL: the serving stack and the benchmark harnesses (python >= 3.11).
+# Python side of SWAN AI-SQL: the serving stack and the benchmark harnesses (python 3.12, see .python-version; >= 3.11 works).
 #   uv venv && source .venv/bin/activate && uv pip install -r requirements.txt
 litellm>=1.50          # serve/litellm.config.yaml: OpenAI-compatible proxy on :4000
 duckdb>=1.1            # serve/ai_cache_server.py store; harness result handling
