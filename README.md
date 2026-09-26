@@ -51,6 +51,31 @@ TYPESAFE_API_KEY=...        # only for SET ai_typesafe='filter,classify' (ai_fil
 
 `serve/start_stack.sh` and the bench harnesses read `.env`; nothing else in the repo carries a key.
 
+## Python environment
+
+The serving stack and the benchmark harnesses are Python (≥ 3.11). Use a virtual environment; with
+[uv](https://docs.astral.sh/uv/):
+
+```sh
+uv venv                                      # creates .venv (git-ignored); or: python3 -m venv .venv
+source .venv/bin/activate
+uv pip install -r requirements.txt           # litellm, duckdb, pandas
+uv pip install -r requirements-embed-mlx.txt # embedding server, Apple Silicon (text + image)  -- or:
+uv pip install -r requirements-embed-st.txt  # embedding server, any host (text only)
+uv pip install -r requirements-lotus.txt     # only to run the LOTUS baselines
+```
+
+(`pip install -r ...` works the same without uv.) Activate the environment in every shell that runs
+`serve/start_stack.sh` or a harness — they use whatever `python3` / `litellm` is on PATH.
+
+**Embedding model.** `serve/ai_embed_server.py` serves one dual-encoder model for text *and* images.
+On Apple Silicon it loads `mlx-community/clip-vit-base-patch32` through `mlx-embeddings`; elsewhere it
+falls back to `sentence-transformers/all-MiniLM-L6-v2` (text only — image leaves then get a neutral
+selectivity prior). Either model is downloaded from Hugging Face on the server's first start
+(~600 MB / ~90 MB, cached under `~/.cache/huggingface`); no manual install step. Override with
+`AI_EMBED_MODEL=<hf id>` (mlx) or `AI_EMBED_TEXT_FALLBACK=<hf id>` (sentence-transformers), and point
+the engine elsewhere with `SET ai_embed_endpoint`. `serve/embed.log` shows which backend came up.
+
 ## Serving stack
 
 The engine speaks plain http to an OpenAI-compatible endpoint. The default setup chains a cache proxy
@@ -58,8 +83,6 @@ The engine speaks plain http to an OpenAI-compatible endpoint. The default setup
 litellm (talks to OpenAI):
 
 ```sh
-pip install litellm duckdb                   # once; plus mlx-embeddings pillow (Apple Silicon) or
-                                             # sentence-transformers for the embedding server
 serve/start_stack.sh                         # litellm :4000, cache proxy :4001, embedding server :4002
 ```
 
@@ -84,7 +107,7 @@ ai_typesafe_threshold`; and an `ai_debug_*` expert namespace. `AI_MODEL`, `AI_PR
 
 ## Benchmarks
 
-All harnesses need python ≥ 3.8 and the serving stack above. Every call goes through the cache proxy, so a
+All harnesses need the Python environment and the serving stack above. Every call goes through the cache proxy, so a
 rerun replays recorded answers, latency and cost for free; a first run pays the provider.
 
 ### SemBench MOVIE

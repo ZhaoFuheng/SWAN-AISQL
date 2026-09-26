@@ -1,0 +1,4 @@
+# Embedding server, Apple Silicon (text + image in one CLIP space). First start downloads
+# mlx-community/clip-vit-base-patch32 (~600 MB) from Hugging Face into ~/.cache/huggingface.
+mlx-embeddings>=0.0.3
+pillow>=10
