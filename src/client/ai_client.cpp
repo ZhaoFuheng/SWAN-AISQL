@@ -130,12 +130,14 @@ const AIConfig &AIConfig::Get() {
 		const string typesafe = GetEnvOr("AI_TYPESAFE", "");
 		c.typesafe_filter = typesafe.find("filter") != string::npos;
 		c.typesafe_classify = typesafe.find("classify") != string::npos;
+		c.typesafe_score = typesafe.find("score") != string::npos;
 		// The client speaks plain http (no TLS in the bundled httplib): the cache proxy terminates
 		// TLS and forwards /v1/systemone to https://api.typesafe.ai, as it forwards chat to litellm.
 		c.typesafe_url = GetEnvOr("AI_TYPESAFE_URL", "http://localhost:4001");
 		c.typesafe_model = GetEnvOr("AI_TYPESAFE_MODEL", "jev-latest");
 		c.typesafe_api_key = GetEnvOr("TYPESAFE_API_KEY", "");
 		c.typesafe_threshold = std::atof(GetEnvOr("AI_TYPESAFE_THRESHOLD", "0.5").c_str());
+		c.typesafe_score_argmax = GetEnvOr("AI_TYPESAFE_SCORE_MODE", "expected") == "argmax";
 		c.typesafe_price_input = std::atof(GetEnvOr("AI_TYPESAFE_PRICE_INPUT", "0.042").c_str());
 		return c;
 	}();
@@ -153,6 +155,8 @@ bool AIUsesTypeSafe(const AIRequest &request) {
 		return config.typesafe_filter && !has_image;
 	case AIRequest::Question::CHOICE:
 		return config.typesafe_classify && !request.options.empty() && !has_image;
+	case AIRequest::Question::SCORE:
+		return config.typesafe_score && request.options.size() >= 2 && request.options.size() <= 10 && !has_image;
 	default:
 		return false;
 	}
@@ -602,6 +606,13 @@ static string BuildSystemOneBody(const AIConfig &config, const AIRequest &reques
 		body += "\"type\":\"noul\",\"instructions\":\"" + AIJsonEscape(request.instructions) +
 		        "\",\"criteria\":{\"true\":\"The claim holds for the context.\","
 		        "\"false\":\"The claim does not hold for the context.\"}";
+	} else if (request.question == AIRequest::Question::SCORE) {
+		// A Score takes its levels as an ORDERED array, low to high; the answer is the expected level.
+		body += "\"type\":\"score\",\"instructions\":\"" + AIJsonEscape(request.instructions) + "\",\"criteria\":[";
+		for (idx_t i = 0; i < request.options.size(); i++) {
+			body += (i ? ",\"" : "\"") + AIJsonEscape(request.options[i].second) + "\"";
+		}
+		body += "]";
 	} else {
 		body += "\"type\":\"choice\",\"instructions\":\"" + AIJsonEscape(request.instructions) + "\",\"criteria\":{";
 		for (idx_t i = 0; i < request.options.size(); i++) {
@@ -619,7 +630,8 @@ static string BuildSystemOneBody(const AIConfig &config, const AIRequest &reques
 }
 
 //! Fold the System One answer into chat-envelope content: {"result":true|false} for a Noul
-//! (probability >= threshold), {"result":"<choice>"} for a Choice. False on a malformed body.
+//! (probability >= threshold), {"result":"<choice>"} for a Choice, {"result":<number>} for a Score
+//! (the probability-weighted level, mapped back onto the function's scale). False on a malformed body.
 static bool ParseSystemOneAnswer(const string &text, const AIConfig &config, const AIRequest &request, string &out) {
 	yyjson_doc *doc = yyjson_read(text.c_str(), text.size(), 0);
 	if (!doc) {
@@ -634,6 +646,28 @@ static bool ParseSystemOneAnswer(const string &text, const AIConfig &config, con
 			yyjson_val *p = yyjson_obj_get(q, "noul");
 			if (p && yyjson_is_num(p)) {
 				out = yyjson_get_num(p) >= config.typesafe_threshold ? "{\"result\":true}" : "{\"result\":false}";
+				ok = true;
+			}
+		} else if (request.question == AIRequest::Question::SCORE) {
+			// `score` is the probability-weighted level; argmax mode takes the most probable level from
+			// `probabilities` instead. Level 0 is the function's `lo`; the scalar/leaf then clamp and round
+			// exactly as for a chat answer.
+			yyjson_val *s = yyjson_obj_get(q, "score");
+			double level = s && yyjson_is_num(s) ? yyjson_get_num(s) : -1;
+			yyjson_val *probs = yyjson_obj_get(q, "probabilities");
+			if (config.typesafe_score_argmax && probs && yyjson_is_obj(probs)) {
+				double best = -1;
+				size_t pi, pmax;
+				yyjson_val *pk, *pv;
+				yyjson_obj_foreach(probs, pi, pmax, pk, pv) {
+					if (yyjson_is_num(pv) && yyjson_get_num(pv) > best) {
+						best = yyjson_get_num(pv);
+						level = std::atof(yyjson_get_str(pk));
+					}
+				}
+			}
+			if (level >= 0) {
+				out = "{\"result\":" + std::to_string(request.score_lo + level) + "}";
 				ok = true;
 			}
 		} else {

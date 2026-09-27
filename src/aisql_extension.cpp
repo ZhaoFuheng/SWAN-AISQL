@@ -111,13 +111,20 @@ static void RegisterAISettings(DatabaseInstance &db) {
 		                          AIConfig::Mutable().warm_gate = BooleanValue::Get(v);
 	                          });
 	// TypeSafe System One (Jev) as an optional backend for ai_filter (Noul) / ai_classify (Choice)
-	config.AddExtensionOption("ai_typesafe", "Route these AI functions to TypeSafe System One (csv of filter,classify)",
+	config.AddExtensionOption("ai_typesafe", "Route these AI functions to TypeSafe System One (csv of filter,classify,score)",
 	                          LogicalType::VARCHAR,
-	                          Value(string(ai.typesafe_filter ? "filter," : "") + (ai.typesafe_classify ? "classify" : "")),
+	                          Value(string(ai.typesafe_filter ? "filter," : "") + (ai.typesafe_classify ? "classify," : "") +
+	                                (ai.typesafe_score ? "score" : "")),
 	                          [](ClientContext &, SetScope, Value &v) {
 		                          const string s = StringValue::Get(v);
 		                          AIConfig::Mutable().typesafe_filter = s.find("filter") != string::npos;
 		                          AIConfig::Mutable().typesafe_classify = s.find("classify") != string::npos;
+		                          AIConfig::Mutable().typesafe_score = s.find("score") != string::npos;
+	                          });
+	config.AddExtensionOption("ai_typesafe_score_mode", "Score answer: expected (probability-weighted level) or argmax (most probable level)",
+	                          LogicalType::VARCHAR, Value(ai.typesafe_score_argmax ? "argmax" : "expected"),
+	                          [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().typesafe_score_argmax = StringValue::Get(v) == "argmax";
 	                          });
 	config.AddExtensionOption("ai_typesafe_endpoint", "TypeSafe API base URL (http; the cache proxy terminates TLS)", LogicalType::VARCHAR,
 	                          Value(ai.typesafe_url), [](ClientContext &, SetScope, Value &v) {

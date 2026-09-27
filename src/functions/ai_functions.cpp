@@ -125,6 +125,68 @@ static void AIMarkClassifyQuestion(AIRequest &req, string input, vector<std::pai
 		req.instructions += " " + extra_instruction;
 	}
 }
+//! The description a rubric gives level `n`, when it lists levels as "n: text", "n. text", "n) text" or
+//! "n - text" lines (SemBench MOVIE writes its 1-5 rubric that way, inside the scored input); empty otherwise.
+static string AIScoreLevelDescription(const string &text, int64_t n) {
+	const string num = std::to_string(n);
+	size_t pos = 0;
+	while (pos < text.size()) {
+		size_t end = text.find('\n', pos);
+		if (end == string::npos) {
+			end = text.size();
+		}
+		size_t p = pos;
+		while (p < end && (text[p] == ' ' || text[p] == '\t')) {
+			p++;
+		}
+		if (text.compare(p, num.size(), num) == 0) {
+			size_t q = p + num.size();
+			const bool sep = q < end && (text[q] == ':' || text[q] == '.' || text[q] == ')' ||
+			                            (text[q] == ' ' && q + 1 < end && text[q + 1] == '-'));
+			if (sep) {
+				q += text[q] == ' ' ? 2 : 1;
+				while (q < end && text[q] == ' ') {
+					q++;
+				}
+				if (q < end) {
+					return text.substr(q, end - q);
+				}
+			}
+		}
+		pos = end + 1;
+	}
+	return string();
+}
+//! ai_score(input, criteria, lo, hi) with INTEGER bounds spanning 2..10 values -> a Score over the levels
+//! lo..hi, low to high, with the scored input as the state and the criteria as the instructions. A level's
+//! description is the rubric's own line for it when the criteria or the input list one, else its rank.
+//! Other ai_score forms (no bounds, double bounds, more than 10 levels) keep the chat model.
+static void AIMarkScoreQuestion(AIRequest &req, const string &input, const string &criteria, double lo, double hi,
+                                bool is_int) {
+	if (!is_int) {
+		return;
+	}
+	const int64_t l = std::llround(lo), h = std::llround(hi);
+	if (h < l + 1 || h - l + 1 > 10) {
+		return;
+	}
+	req.question = AIRequest::Question::SCORE;
+	req.state = input;
+	req.score_lo = static_cast<double>(l);
+	req.instructions = criteria.empty() ? string("Score the state on the listed scale.")
+	                                    : "Score the state on the listed scale: " + criteria;
+	for (int64_t n = l; n <= h; n++) {
+		string desc = AIScoreLevelDescription(criteria, n);
+		if (desc.empty()) {
+			desc = AIScoreLevelDescription(input, n);
+		}
+		if (desc.empty()) {
+			desc = "Score " + std::to_string(n) + " on a scale from " + std::to_string(l) + " (lowest) to " +
+			       std::to_string(h) + " (highest).";
+		}
+		req.options.emplace_back(std::to_string(n), desc);
+	}
+}
 static const char *const AI_COMPLETE_SYSTEM_PROMPT =
     "The user will provide an instruction and some relevant context.\n"
     "Your job is to answer the user's instruction given the context.";
@@ -732,6 +794,10 @@ static void AIScoreFunction(DataChunk &args, ExpressionState &state, Vector &res
 		requests[i].system_prompt = AI_SCORE_SYSTEM_PROMPT;
 		requests[i].json_schema = NUMBER_RESULT_SCHEMA;
 		requests[i].schema_name = "ai_score";
+		if (has_range) {
+			AIMarkScoreQuestion(requests[i], inputs[input_idx].GetString(), criteria_text, bind_data.lo, bind_data.hi,
+			                    bind_data.is_int);
+		}
 		if (history_on) {
 			GetRowKeys(args, bind_data, i, row_keys[i]);
 			requests[i].history = AIHistoryGather(row_keys[i]);
@@ -1600,6 +1666,16 @@ static AIRequest AILeafRequest(const AILeafMeta &m, const string &prompt, const 
 		req.system_prompt = AI_SCORE_SYSTEM_PROMPT;
 		req.json_schema = NUMBER_RESULT_SCHEMA;
 		req.schema_name = "ai_score";
+		// The baked ranged prompt is "Provide a score ...\n\nScoring criteria: <criteria>\n\nInput:\n<input>"
+		// (AIScoreUserPrompt); split it back so a Score can take the input as its state.
+		static const string kCrit = "\n\nScoring criteria: ", kIn = "\n\nInput:\n";
+		const auto crit_at = prompt.find(kCrit);
+		const auto in_at = crit_at == string::npos ? string::npos : prompt.find(kIn, crit_at + kCrit.size());
+		if (m.has_range && in_at != string::npos) {
+			AIMarkScoreQuestion(req, prompt.substr(in_at + kIn.size()),
+			                    prompt.substr(crit_at + kCrit.size(), in_at - crit_at - kCrit.size()), m.lo, m.hi,
+			                    m.is_int);
+		}
 	} else { // 'M' -> ai_complete: raw completion, no forced schema
 		req.system_prompt = AI_COMPLETE_SYSTEM_PROMPT;
 		req.schema_name = "ai_complete";

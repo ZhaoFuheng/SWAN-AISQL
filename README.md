@@ -48,7 +48,7 @@ Copy `.env.example` to `.env` (git-ignored) and fill in what you use:
 
 ```
 OPENAI_API_KEY=sk-...       # required: the chat model (default gpt-5.6-luna) via litellm
-TYPESAFE_API_KEY=...        # only for SET ai_typesafe='filter,classify' (ai_filter/ai_classify on TypeSafe Jev)
+TYPESAFE_API_KEY=...        # only for SET ai_typesafe='filter,classify,score' (ai_filter/ai_classify/ai_score on TypeSafe Jev)
 ```
 
 `serve/start_stack.sh` and the benchmark harnesses read `.env`; nothing else in the repo carries a key.
@@ -213,11 +213,12 @@ shows the live values.
 
 | setting | values | default | what it does |
 |---|---|---|---|
-| `ai_typesafe` | csv of `filter`, `classify` | *(empty = off)* | route `ai_filter` → Noul and/or `ai_classify` → Choice to TypeSafe; image-bearing prompts stay on the chat model (`AI_TYPESAFE`) |
+| `ai_typesafe` | csv of `filter`, `classify`, `score` | *(empty = off)* | route `ai_filter` → Noul, `ai_classify` → Choice and/or `ai_score` with integer bounds of at most 10 levels → Score to TypeSafe; other `ai_score` forms and image-bearing prompts stay on the chat model (`AI_TYPESAFE`) |
 | `ai_typesafe_endpoint` | URL (http) | `http://localhost:4001` | the cache proxy, which terminates TLS towards `https://api.typesafe.ai` (`AI_TYPESAFE_URL`) |
 | `ai_typesafe_model` | model id | `jev-latest` | (`AI_TYPESAFE_MODEL`) |
 | `ai_typesafe_api_key` | string | *(empty)* | (`TYPESAFE_API_KEY`) |
 | `ai_typesafe_threshold` | 0.0 – 1.0 | `0.5` | Noul probability at or above which `ai_filter` is true (`AI_TYPESAFE_THRESHOLD`) |
+| `ai_typesafe_score_mode` | `expected` / `argmax` | `expected` | what a Score answers: the probability-weighted level or the most probable one (`AI_TYPESAFE_SCORE_MODE`); MOVIE q9 scored 0.759 vs 0.720 with argmax |
 
 **Optimizer** — every stage is result-preserving; each can be switched off independently
 

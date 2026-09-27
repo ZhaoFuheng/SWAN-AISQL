@@ -71,7 +71,8 @@ struct AIConfig {
 	//! Off, or a server that cannot embed images (the client latches on its first refusal), keeps
 	//! the neutral prior + byte-based cost for image leaves.
 	bool embed_images = true;
-	//! TypeSafe System One (Jev) as an optional backend for ai_filter (-> Noul) and ai_classify
+	//! TypeSafe System One (Jev) as an optional backend for ai_filter (-> Noul), ai_classify
+	//! (-> Choice) and ai_score with integer bounds of at most 10 levels (-> Score)
 	//! (-> Choice): typed judgments instead of a chat completion. Routed per request by the
 	//! client (AIUsesTypeSafe): the function opts in via AIRequest::question, the setting enables
 	//! it per function, and image-bearing prompts always stay on the chat model (Jev is text-only).
@@ -79,11 +80,14 @@ struct AIConfig {
 	//! reorder/selectivity machinery are untouched. Settings: ai_typesafe='filter,classify'.
 	bool typesafe_filter = false;   // AI_TYPESAFE contains "filter"
 	bool typesafe_classify = false; // AI_TYPESAFE contains "classify"
+	bool typesafe_score = false;    // AI_TYPESAFE contains "score"
 	string typesafe_url;            // AI_TYPESAFE_URL   (default http://localhost:4001 = the cache proxy, which
 	                                //                    terminates TLS towards https://api.typesafe.ai)
 	string typesafe_model;          // AI_TYPESAFE_MODEL (default jev-latest)
 	string typesafe_api_key;        // TYPESAFE_API_KEY
 	double typesafe_threshold = 0.5;      // Noul probability >= threshold -> true
+	bool typesafe_score_argmax = false;   // AI_TYPESAFE_SCORE_MODE=argmax: a Score answers its most probable level
+	                                      // instead of the probability-weighted one (default 'expected')
 	double typesafe_price_input = 0.042; // USD per 1M input tokens (output tokens are free)
 	//! AI Region execution knobs (bridged from ai_debug_* settings): streaming sink on/off,
 	//! wave-size override (0 = derived floor of 5x concurrency), debug log channels (csv).
@@ -240,14 +244,18 @@ struct AIRequest {
 	//! History mode: prior (user input, assistant output) turns replayed before `prompt`.
 	vector<std::pair<string, string>> history;
 	//! TypeSafe System One shape of this request, set by the AI function that built it (NONE for
-	//! ai_complete/ai_score/ai_agg). Only consulted when the matching ai_typesafe function is on.
-	enum class Question : uint8_t { NONE, NOUL, CHOICE } question = Question::NONE;
+	//! ai_complete/ai_agg and for ai_score forms that do not fit a Score). Only consulted when the
+	//! matching ai_typesafe function is on.
+	enum class Question : uint8_t { NONE, NOUL, CHOICE, SCORE } question = Question::NONE;
 	//! System One `state` (the content judged) and `instructions` (the judgment). For a Noul the
 	//! state is the whole ai_filter prompt (claim + context, byte-identical to the chat prompt);
-	//! for a Choice it is the classified input, with `options` = (label, description) per category.
+	//! for a Choice it is the classified input, with `options` = (label, description) per category;
+	//! for a Score it is the scored input, with `options` = the ordered levels (label = the score
+	//! value, description = what that level means) and `score_lo` = the value of level 0.
 	string state;
 	string instructions;
 	vector<std::pair<string, string>> options;
+	double score_lo = 0;
 };
 
 //! True when this request will be sent to TypeSafe System One instead of the chat endpoint.

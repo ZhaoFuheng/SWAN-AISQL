@@ -247,6 +247,13 @@ void HandlePost(const duckdb_httplib::Request &req, duckdb_httplib::Response &re
 			                     : h.Mod(2) == 0;
 			body = string("{\"model\":\"mock\",\"answers\":{\"q\":{\"type\":\"noul\",\"noul\":") +
 			       (yes ? "0.9" : "0.1") + "}},\"usage\":{\"input_tokens\":8,\"output_tokens\":2}}";
+		} else if (qtype == "score" && criteria && yyjson_is_arr(criteria) && yyjson_arr_size(criteria) >= 2) {
+			// a Score answers the expected level in [0, levels-1]: seeded by the state, two decimals
+			MockHash h(seed + "result");
+			const uint64_t levels = yyjson_arr_size(criteria);
+			const double score = static_cast<double>(h.Mod(levels * 100 - 99)) / 100.0;
+			body = "{\"model\":\"mock\",\"answers\":{\"q\":{\"type\":\"score\",\"score\":" + std::to_string(score) +
+			       ",\"confidence\":0.5}},\"usage\":{\"input_tokens\":8,\"output_tokens\":2}}";
 		} else if (qtype == "choice" && criteria && yyjson_is_obj(criteria) && yyjson_obj_size(criteria) > 0) {
 			vector<string> keys;
 			size_t kidx, kmax;

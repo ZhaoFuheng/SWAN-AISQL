@@ -145,8 +145,10 @@ answer-format instruction the other engine appends. `ai_debug_prompt_variant='pl
 matching engine side; every other bench keeps the full envelope, which is what makes a verdict
 reliable.
 
-**TypeSafe System One backend (optional).** `ai_filter` and `ai_classify` can be answered by a
-TypeSafe Noul / Choice instead of a chat completion. The function only annotates its request; the
+**TypeSafe System One backend (optional).** `ai_filter`, `ai_classify` and a bounded integer
+`ai_score` can be answered by a TypeSafe Noul / Choice / Score instead of a chat completion (a Score
+takes the rubric's levels, low to high, and answers the probability-weighted level, mapped back onto
+the function's scale). The function only annotates its request; the
 client decides the route per request, re-encodes the typed answer as the chat envelope, and keys the
 cache with a distinct marker, so parsers, the reorder node and the selectivity model are untouched.
 
@@ -159,11 +161,12 @@ work can never subsidise the next.
 ## 6. Measured state (2026-09-26)
 
 All numbers are from the recorded runs in `sembench/` (replayed answers, latency and cost; chat
-model `gpt-5.6-luna`; SWAN and LOTUS recorded back-to-back).
+model `gpt-5.6-luna`; SWAN and LOTUS recorded back-to-back; the Jev column routes ai_filter, ai_classify
+and, on MOVIE, the bounded ai_score of q9/q10 to System One).
 
 | benchmark | SWAN | SWAN + Jev (ai_filter/ai_classify on TypeSafe) | LOTUS / PLOP |
 |---|---|---|---|
-| SemBench MOVIE (10q) | **0.818**, 18.8k calls, $1.53, 1,139s | 0.797, 18.8k, **$0.53**, 585s | LOTUS 0.780, 201k, $14.45, 10,654s |
+| SemBench MOVIE (10q) | **0.818**, 18.8k calls, $1.53, 1,139s | 0.795, 18.8k, **$0.39**, 511s | LOTUS 0.780, 201k, $14.45, 10,654s |
 | SemBench ECOMM (14q) | **0.699**, 16.6k, $8.02, 1,036s | 0.688, 16.6k, $7.39, 826s | LOTUS 0.637, 17.8k, $6.40, 1,990s |
 | SemBench MMQA (11q) | **0.636**, 16.1k, $1.84, 1,058s | 0.603, 14.1k, $1.53, 884s | LOTUS 0.449, 19.0k, $2.43, 1,720s |
 | agent_bench Q1–Q30 | **1.000**, 11,172 calls, $0.29, 811s | — | PLOP-DP 1.000, 13,602, $0.53, 1,080s; LOTUS 0.620*, 25,738, $2.84, 3,297s |

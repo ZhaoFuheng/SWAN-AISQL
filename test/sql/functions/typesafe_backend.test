@@ -7,6 +7,10 @@ require aisql
 statement ok
 CALL ai_mock_start();
 
+# the response cache is process-wide: a second run of this file in one unittest process must refetch
+statement ok
+SELECT ai_local_cache_clear();
+
 statement ok
 SELECT ai_usage_reset();
 
@@ -140,6 +144,61 @@ SELECT count(*) FROM docs WHERE ai_filter('is ' || d || ' good?') AND ai_classif
 7
 
 # off again: back to the chat path, its cached entries still valid
+statement ok
+SET ai_typesafe = '';
+
+# ---- ai_score -> Score --------------------------------------------------------------------------
+statement ok
+SET ai_typesafe = 'score';
+
+statement ok
+SELECT ai_usage_reset();
+
+# integer bounds spanning <= 10 values -> a Score over the levels; the expected level maps back onto
+# [lo, hi] and rounds to the BIGINT scale, so every answer is a valid score and none is NULL
+query II
+SELECT count(*) FILTER (WHERE s BETWEEN 1 AND 5), count(*) FILTER (WHERE s IS NULL)
+FROM (SELECT ai_score(d, 'how good is it?\n1: terrible\n2: bad\n3: fine\n4: good\n5: great', 1, 5) AS s FROM docs);
+----
+10	0
+
+query I
+SELECT sum(llm_calls)::BIGINT FROM ai_usage();
+----
+10
+
+# the reorder node's score LEAF asks the same Score as the scalar: reorder on/off agree
+statement ok
+CREATE TABLE sc AS SELECT d, ai_score(d, 'how good is it?', 1, 5) AS s FROM docs;
+
+statement ok
+SET ai_reorder = false;
+
+query I
+SELECT (SELECT count(*) FROM docs WHERE ai_score(d, 'how good is it?', 1, 5) >= 3 AND ai_filter('is ' || d || ' good?'))
+     = (SELECT count(*) FROM sc WHERE s >= 3 AND ai_filter('is ' || d || ' good?'));
+----
+true
+
+statement ok
+SET ai_reorder = true;
+
+query I
+SELECT (SELECT count(*) FROM docs WHERE ai_score(d, 'how good is it?', 1, 5) >= 3 AND ai_filter('is ' || d || ' good?'))
+     = (SELECT count(*) FROM sc WHERE s >= 3 AND ai_filter('is ' || d || ' good?'));
+----
+true
+
+# forms that do not fit a Score stay on the chat model and still answer: double bounds, no bounds,
+# more than 10 levels
+query I
+SELECT count(*) FILTER (WHERE s IS NOT NULL)
+FROM (SELECT ai_score(d, 'how good is it?', 0.0, 1.0) AS s FROM docs
+      UNION ALL SELECT ai_score(d, 'how good is it?') FROM docs
+      UNION ALL SELECT ai_score(d, 'how good is it?', 1, 100) FROM docs);
+----
+30
+
 statement ok
 SET ai_typesafe = '';
 
