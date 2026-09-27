@@ -116,7 +116,7 @@ public:
 
 class AIRegionLocalSinkState : public LocalSinkState {
 public:
-	AIRegionLocalSinkState(ClientContext &context, const PhysicalAIRegion &op, vector<LogicalType> child_types)
+	AIRegionLocalSinkState(ClientContext &context, const PhysicalAIRegion &op, const vector<LogicalType> &child_types)
 	    : buffer(BufferAllocator::Get(context), child_types) {
 		buffer.InitializeAppend(append_state);
 		if (AIRegionStreamingEnabled()) {

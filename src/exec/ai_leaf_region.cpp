@@ -232,7 +232,7 @@ void AILeafRegionState::DecideRow(uint32_t row) {
 	}
 	const AITriState v = AIFilterTreeEval(*tree, values);
 	if (v != AITriState::TRI_UNKNOWN || !any_open) {
-		row_result[row] = v == AITriState::TRI_TRUE ? 1 : (v == AITriState::TRI_FALSE ? 0 : -1);
+		row_result[row] = static_cast<int8_t>(v == AITriState::TRI_TRUE ? 1 : (v == AITriState::TRI_FALSE ? 0 : -1));
 		if (v == AITriState::TRI_TRUE) {
 			passed++;
 		}

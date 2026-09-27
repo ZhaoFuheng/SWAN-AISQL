@@ -572,7 +572,8 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 			useful[s].assign(sink.sides[s].reps.size(), 0);
 		}
 		for (idx_t m = 0; m < satisfied.size(); m++) {
-			useful[es][m] = live[es][m] && !satisfied[m] && (op.unary_leaves[es].empty() || uval[es][m] == 1);
+			useful[es][m] =
+			    static_cast<char>(live[es][m] && !satisfied[m] && (op.unary_leaves[es].empty() || uval[es][m] == 1));
 		}
 		// sides in increasing level order inherit usefulness across their parent edge
 		vector<idx_t> order(k1);
@@ -595,7 +596,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 				const idx_t nother = sink.sides[ps].reps.size();
 				for (idx_t q = 0; q < nother && !useful[s][m]; q++) {
 					const idx_t key = s_is_s ? pkey(pe, m, q) : pkey(pe, q, m);
-					useful[s][m] = useful[ps][q] && pval[pe][key] == 1;
+					useful[s][m] = static_cast<char>(useful[ps][q] && pval[pe][key] == 1);
 				}
 			}
 		}
@@ -898,7 +899,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 			cache_enabled[e] = 1;
 			cache_ops[e] = std::move(ops);
 			cache_split[e] = split;
-			cache_group_s[e] = group_side == 1;
+			cache_group_s[e] = static_cast<char>(group_side == 1);
 		}
 	}
 	auto cache_group_member = [&](idx_t e, idx_t a, idx_t b) {
@@ -1031,11 +1032,11 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 	};
 	auto apply_value = [&](bool is_unary, idx_t domain, idx_t a, idx_t b, bool value) {
 		if (is_unary) {
-			uval[domain][a] = value ? 1 : 2;
+			uval[domain][a] = static_cast<char>(value ? 1 : 2);
 			un_evals[domain]++;
 			un_passes[domain] += value ? 1 : 0;
 		} else {
-			pval[domain][pkey(domain, a, b)] = value ? 1 : 2;
+			pval[domain][pkey(domain, a, b)] = static_cast<char>(value ? 1 : 2);
 			ed_evals[domain]++;
 			ed_passes[domain] += value ? 1 : 0;
 			me_evals_s[domain][a]++;

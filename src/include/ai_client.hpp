@@ -172,6 +172,11 @@ struct AIConfig {
 	//! Mutable view of the singleton for the extension's SET-callback bridge (settings are the
 	//! runtime surface; env vars only seed the initial values above).
 	static AIConfig &Mutable();
+	//! Rebuild the process-global config from the environment defaults and clear the client's
+	//! process-wide latches. A SET writes the global through its callback, so a value left by one
+	//! sqllogictest file would leak into the next file run in the same unittest process; the mock
+	//! calls this at ai_mock_start() so every test starts from the same state.
+	static void ResetToDefaults();
 };
 
 //! Per-query LLM usage/cost record. One entry per distinct query text.

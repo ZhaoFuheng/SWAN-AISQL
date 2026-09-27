@@ -76,8 +76,8 @@ static string GetEnvOr(const char *name, const string &fallback) {
 	return (value && value[0]) ? string(value) : fallback;
 }
 
-static AIConfig &ConfigInstance() {
-	static AIConfig config = []() {
+static AIConfig BuildDefaultConfig() {
+	return []() {
 		AIConfig c;
 		c.base_url = GetEnvOr("AI_PROXY_URL", "http://localhost:4000");
 		c.model = GetEnvOr("AI_MODEL", "gpt-5.6-luna");
@@ -150,7 +150,18 @@ static AIConfig &ConfigInstance() {
 		c.typesafe_price_input = std::atof(GetEnvOr("AI_TYPESAFE_PRICE_INPUT", "0.042").c_str());
 		return c;
 	}();
+}
+
+static AIConfig &ConfigInstance() {
+	static AIConfig config = BuildDefaultConfig();
 	return config;
+}
+
+static std::atomic<bool> &EmbedImagesUnsupportedLatch();
+
+void AIConfig::ResetToDefaults() {
+	ConfigInstance() = BuildDefaultConfig();
+	EmbedImagesUnsupportedLatch().store(false);
 }
 
 const AIConfig &AIConfig::Get() {
@@ -804,8 +815,8 @@ struct ConnLease {
 		if (!client) {
 			client = NewConn(url, config);
 		}
-		const time_t sec = config.timeout_ms / 1000;
-		const time_t usec = (config.timeout_ms % 1000) * 1000;
+		const time_t sec = static_cast<time_t>(config.timeout_ms / 1000);
+		const time_t usec = static_cast<time_t>(config.timeout_ms % 1000) * 1000;
 		client->set_connection_timeout(sec, usec);
 		client->set_read_timeout(sec, usec);
 		client->set_write_timeout(sec, usec);
@@ -813,8 +824,8 @@ struct ConnLease {
 	//! Replace a stale reused socket with a fresh connection (in-place single retry).
 	void Refresh() {
 		client = NewConn(url, config);
-		const time_t sec = config.timeout_ms / 1000;
-		const time_t usec = (config.timeout_ms % 1000) * 1000;
+		const time_t sec = static_cast<time_t>(config.timeout_ms / 1000);
+		const time_t usec = static_cast<time_t>(config.timeout_ms % 1000) * 1000;
 		client->set_connection_timeout(sec, usec);
 		client->set_read_timeout(sec, usec);
 		client->set_write_timeout(sec, usec);
@@ -1622,13 +1633,13 @@ static string BuildEmbedBody(const string &model, const vector<string> &inputs) 
 
 // Latched the first time the embeddings server answers an image item without an embedding (text-only
 // model): from then on image leaves keep their neutral prior and no request carries image items.
-static std::atomic<bool> &EmbedImagesUnsupported() {
+static std::atomic<bool> &EmbedImagesUnsupportedLatch() {
 	static std::atomic<bool> value {false};
 	return value;
 }
 
 bool AIEmbedImagesSupported() {
-	return AIConfig::Get().embed_images && !EmbedImagesUnsupported().load();
+	return AIConfig::Get().embed_images && !EmbedImagesUnsupportedLatch().load();
 }
 
 //! POST one embeddings request for `inputs`; fill `out[i]` with the i-th embedding. Returns false on
@@ -1687,7 +1698,7 @@ static bool DoEmbedBatchRequest(const AIConfig &config, const vector<string> &in
 			yyjson_val *emb = yyjson_obj_get(item, "embedding");
 			if (!emb || !yyjson_is_arr(emb)) {
 				if (IsImageEmbedInput(inputs[pos])) {
-					EmbedImagesUnsupported().store(true);
+					EmbedImagesUnsupportedLatch().store(true);
 				}
 				continue; // error entry: this item stays empty, the rest of the batch is fine
 			}

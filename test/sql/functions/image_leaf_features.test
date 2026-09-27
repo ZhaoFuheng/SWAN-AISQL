@@ -58,9 +58,15 @@ SELECT count(*) FROM (SELECT id FROM r_on EXCEPT SELECT id FROM r_off) UNION ALL
 0
 0
 
-# the image leaf was embedded only when enabled; both runs answered with LLM calls
+# both runs answered with LLM calls
+query II
+SELECT (SELECT calls FROM u_on) > 0, (SELECT calls FROM u_off) > 0;
+----
+true	true
+
+# the image leaf was embedded only when enabled
 query I
-SELECT (SELECT embeds FROM u_on) > (SELECT embeds FROM u_off) AND (SELECT calls FROM u_on) > 0 AND (SELECT calls FROM u_off) > 0;
+SELECT (SELECT embeds FROM u_on) > (SELECT embeds FROM u_off);
 ----
 true
 

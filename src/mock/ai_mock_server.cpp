@@ -5,11 +5,16 @@
 // /v1/chat/completions and /v1/embeddings with answers that are a stable md5 hash of the prompt
 // (semantics ported 1:1 from the fork's test/ai-sql/mock_backend.py, including python's
 // json.dumps(sort_keys=True) seed for multimodal content), and points the live AIConfig at it.
-// CALL ai_mock_stop() shuts it down and restores the previous endpoints.
+// CALL ai_mock_stop() shuts it down and restores the previous endpoints. Starting the mock also resets
+// the process-global AI config to its environment defaults, clears the in-process response/embedding
+// caches and the selectivity model: a SET writes a process-wide value through its callback, so without
+// this a setting, a cached answer or a trained model left by one test file leaked into the next file
+// run in the same unittest process (CI batches ten files per process).
 //===----------------------------------------------------------------------===//
 #include "ai_mock_server.hpp"
 
 #include "ai_client.hpp"
+#include "ai_selectivity_model.hpp"
 #include "duckdb/common/crypto/md5.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "yyjson.hpp"
@@ -438,6 +443,10 @@ int AIMockStart() {
 	if (Mock().server) {
 		return Mock().port; // already running
 	}
+	// A clean slate per test file (see the header comment).
+	AIConfig::ResetToDefaults();
+	AILocalCacheClear();
+	AISelectivityModel::Global().Reset();
 	auto server = std::make_unique<duckdb_httplib::Server>();
 	// Keep-alive clients hold one server thread per persistent connection; the default pool
 	// (~hardware threads) starves under 20+ pooled engine connections, so size it explicitly.
@@ -512,7 +521,7 @@ static void AIMockStartFunction(ClientContext &, TableFunctionInput &data, DataC
 	}
 	bind.done = true;
 	output.SetChildCardinality(1);
-	output.SetValue(0, 0, Value::INTEGER(AIMockStart()));
+	output.data[0].SetValue(0, Value::INTEGER(AIMockStart()));
 }
 
 static void AIMockStopFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
@@ -522,7 +531,7 @@ static void AIMockStopFunction(ClientContext &, TableFunctionInput &data, DataCh
 	}
 	bind.done = true;
 	output.SetChildCardinality(1);
-	output.SetValue(0, 0, Value::INTEGER(AIMockStop() ? 1 : 0));
+	output.data[0].SetValue(0, Value::INTEGER(AIMockStop() ? 1 : 0));
 }
 
 static unique_ptr<FunctionData> AIMockBreakpointsBind(ClientContext &, TableFunctionBindInput &,
@@ -539,7 +548,7 @@ static void AIMockBreakpointsFunction(ClientContext &, TableFunctionInput &data,
 	}
 	bind.done = true;
 	output.SetChildCardinality(1);
-	output.SetValue(0, 0, Value::BIGINT(MockBreakpointRequests().load()));
+	output.data[0].SetValue(0, Value::BIGINT(MockBreakpointRequests().load()));
 }
 
 void RegisterAIMockFunctions(ExtensionLoader &loader) {

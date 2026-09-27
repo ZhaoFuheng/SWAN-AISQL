@@ -101,7 +101,7 @@ void AIEmbedFilter::RewriteFilter(LogicalOperator &root, unique_ptr<LogicalOpera
 	filter.children[0] = std::move(projection);
 	if (!filter.HasProjectionMap()) {
 		for (idx_t i = 0; i < child_bindings.size(); i++) {
-			filter.projection_map.emplace_back(ProjectionIndex(i));
+			filter.projection_map.emplace_back(i);
 		}
 	}
 	filter_slot->ResolveOperatorTypes();

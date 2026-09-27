@@ -424,7 +424,7 @@ static void AIFilterFunction(DataChunk &args, ExpressionState &state, Vector &re
 	const bool history_on = AIHistoryEnabled() && bind_data.key_count > 0;
 
 	UnifiedVectorFormat prompt_format;
-	args.data[0].ToUnifiedFormat(count, prompt_format);
+	args.data[0].ToUnifiedFormat(prompt_format);
 	auto prompts = UnifiedVectorFormat::GetData<string_t>(prompt_format);
 
 	vector<AIRequest> requests(count);
@@ -474,23 +474,23 @@ static void AIClassifyFunction(DataChunk &args, ExpressionState &state, Vector &
 	const bool has_instruction = bind_data.key_start >= 3;
 
 	UnifiedVectorFormat input_format;
-	args.data[0].ToUnifiedFormat(count, input_format);
+	args.data[0].ToUnifiedFormat(input_format);
 	auto inputs = UnifiedVectorFormat::GetData<string_t>(input_format);
 
 	auto &cats_vec = args.data[1];
 	UnifiedVectorFormat cats_format;
-	cats_vec.ToUnifiedFormat(count, cats_format);
+	cats_vec.ToUnifiedFormat(cats_format);
 	auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(cats_format);
-	auto &cats_child = ListVector::GetEntry(cats_vec);
+	auto &cats_child = ListVector::GetChild(cats_vec);
 	const idx_t child_count = ListVector::GetListSize(cats_vec);
 	UnifiedVectorFormat cats_child_format;
-	cats_child.ToUnifiedFormat(child_count, cats_child_format);
+	cats_child.ToUnifiedFormat(cats_child_format);
 	auto cats_child_data = UnifiedVectorFormat::GetData<string_t>(cats_child_format);
 
 	UnifiedVectorFormat instruction_format;
 	const string_t *instructions = nullptr;
 	if (has_instruction) {
-		args.data[2].ToUnifiedFormat(count, instruction_format);
+		args.data[2].ToUnifiedFormat(instruction_format);
 		instructions = UnifiedVectorFormat::GetData<string_t>(instruction_format);
 	}
 
@@ -605,7 +605,7 @@ static void AIClassifyStructFunction(DataChunk &args, ExpressionState &state, Ve
 	                      "}},\"required\":[\"result\"],\"additionalProperties\":false}";
 
 	UnifiedVectorFormat input_format;
-	args.data[0].ToUnifiedFormat(count, input_format);
+	args.data[0].ToUnifiedFormat(input_format);
 	auto inputs = UnifiedVectorFormat::GetData<string_t>(input_format);
 
 	vector<AIRequest> requests(count);
@@ -762,13 +762,13 @@ static void AIScoreFunction(DataChunk &args, ExpressionState &state, Vector &res
 	const bool has_range = bind_data.has_range;
 
 	UnifiedVectorFormat input_format;
-	args.data[0].ToUnifiedFormat(count, input_format);
+	args.data[0].ToUnifiedFormat(input_format);
 	auto inputs = UnifiedVectorFormat::GetData<string_t>(input_format);
 
 	UnifiedVectorFormat criteria_format;
 	const string_t *criteria = nullptr;
 	if (has_criteria) {
-		args.data[1].ToUnifiedFormat(count, criteria_format);
+		args.data[1].ToUnifiedFormat(criteria_format);
 		criteria = UnifiedVectorFormat::GetData<string_t>(criteria_format);
 	}
 
@@ -889,16 +889,16 @@ static void AIAggFunction(DataChunk &args, ExpressionState &state, Vector &resul
 
 	auto &list_vec = args.data[0];
 	UnifiedVectorFormat list_format;
-	list_vec.ToUnifiedFormat(count, list_format);
+	list_vec.ToUnifiedFormat(list_format);
 	auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(list_format);
-	auto &list_child = ListVector::GetEntry(list_vec);
+	auto &list_child = ListVector::GetChild(list_vec);
 	const idx_t child_count = ListVector::GetListSize(list_vec);
 	UnifiedVectorFormat list_child_format;
-	list_child.ToUnifiedFormat(child_count, list_child_format);
+	list_child.ToUnifiedFormat(list_child_format);
 	auto list_child_data = UnifiedVectorFormat::GetData<string_t>(list_child_format);
 
 	UnifiedVectorFormat task_format;
-	args.data[1].ToUnifiedFormat(count, task_format);
+	args.data[1].ToUnifiedFormat(task_format);
 	auto tasks = UnifiedVectorFormat::GetData<string_t>(task_format);
 
 	// Seed per-row state with the raw items.
@@ -1005,13 +1005,13 @@ static void AIPromptFunction(DataChunk &args, ExpressionState &state, Vector &re
 	const bool has_schema = bind_data.key_start >= 2; // 2nd user arg is the JSON schema
 
 	UnifiedVectorFormat prompt_format;
-	args.data[0].ToUnifiedFormat(count, prompt_format);
+	args.data[0].ToUnifiedFormat(prompt_format);
 	auto prompts = UnifiedVectorFormat::GetData<string_t>(prompt_format);
 
 	UnifiedVectorFormat schema_format;
 	const string_t *schemas = nullptr;
 	if (has_schema) {
-		args.data[1].ToUnifiedFormat(count, schema_format);
+		args.data[1].ToUnifiedFormat(schema_format);
 		schemas = UnifiedVectorFormat::GetData<string_t>(schema_format);
 	}
 
@@ -1094,20 +1094,20 @@ static void AIUsageFunction(ClientContext &context, TableFunctionInput &data_p, 
 	}
 	for (idx_t row = 0; row < this_count; row++) {
 		const auto &u = data.usage[data.offset + row];
-		output.SetValue(0, row, Value::UBIGINT(u.query_id));
-		output.SetValue(1, row, Value(u.query_text));
-		output.SetValue(2, row, Value::UBIGINT(u.llm_calls));
-		output.SetValue(3, row, Value::UBIGINT(u.cache_hits));
-		output.SetValue(4, row, Value::UBIGINT(u.input_tokens));
-		output.SetValue(5, row, Value::UBIGINT(u.cached_tokens));
-		output.SetValue(6, row, Value::UBIGINT(u.output_tokens));
-		output.SetValue(7, row, Value::UBIGINT(u.reasoning_tokens));
-		output.SetValue(8, row, Value::UBIGINT(u.total_tokens));
-		output.SetValue(9, row, Value::DOUBLE(u.cost_usd));
-		output.SetValue(10, row, Value::UBIGINT(u.embed_calls));
-		output.SetValue(11, row, Value::UBIGINT(u.embed_tokens));
-		output.SetValue(12, row, Value::UBIGINT(u.hedged_calls));
-		output.SetValue(13, row, Value::UBIGINT(u.failed_calls));
+		output.data[0].SetValue(row, Value::UBIGINT(u.query_id));
+		output.data[1].SetValue(row, Value(u.query_text));
+		output.data[2].SetValue(row, Value::UBIGINT(u.llm_calls));
+		output.data[3].SetValue(row, Value::UBIGINT(u.cache_hits));
+		output.data[4].SetValue(row, Value::UBIGINT(u.input_tokens));
+		output.data[5].SetValue(row, Value::UBIGINT(u.cached_tokens));
+		output.data[6].SetValue(row, Value::UBIGINT(u.output_tokens));
+		output.data[7].SetValue(row, Value::UBIGINT(u.reasoning_tokens));
+		output.data[8].SetValue(row, Value::UBIGINT(u.total_tokens));
+		output.data[9].SetValue(row, Value::DOUBLE(u.cost_usd));
+		output.data[10].SetValue(row, Value::UBIGINT(u.embed_calls));
+		output.data[11].SetValue(row, Value::UBIGINT(u.embed_tokens));
+		output.data[12].SetValue(row, Value::UBIGINT(u.hedged_calls));
+		output.data[13].SetValue(row, Value::UBIGINT(u.failed_calls));
 	}
 	data.offset += this_count;
 }
@@ -1146,14 +1146,14 @@ static void AITrainingFunction(ClientContext &context, TableFunctionInput &data_
 	}
 	for (idx_t row = 0; row < this_count; row++) {
 		const auto &ex = data.data[data.offset + row];
-		output.SetValue(0, row, Value(ex.prompt));
+		output.data[0].SetValue(row, Value(ex.prompt));
 		vector<Value> floats;
 		floats.reserve(ex.embedding.size());
 		for (float f : ex.embedding) {
 			floats.push_back(Value::FLOAT(f));
 		}
-		output.SetValue(1, row, Value::LIST(LogicalType::FLOAT, std::move(floats)));
-		output.SetValue(2, row, Value::BOOLEAN(ex.label));
+		output.data[1].SetValue(row, Value::LIST(LogicalType::FLOAT, std::move(floats)));
+		output.data[2].SetValue(row, Value::BOOLEAN(ex.label));
 	}
 	data.offset += this_count;
 }
@@ -1192,7 +1192,7 @@ static void AIHistoryResetFunction(DataChunk &args, ExpressionState &state, Vect
 static void AIHistoryModeFunction(DataChunk &args, ExpressionState &state, Vector &result) {
 	const idx_t count = args.size();
 	UnifiedVectorFormat format;
-	args.data[0].ToUnifiedFormat(count, format);
+	args.data[0].ToUnifiedFormat(format);
 	auto enabled = UnifiedVectorFormat::GetData<bool>(format);
 	result.SetVectorType(VectorType::FLAT_VECTOR);
 	auto out = FlatVector::GetDataMutable<bool>(result);
@@ -1212,7 +1212,7 @@ static void AIHistoryModeFunction(DataChunk &args, ExpressionState &state, Vecto
 static void AITurboModeFunction(DataChunk &args, ExpressionState &state, Vector &result) {
 	const idx_t count = args.size();
 	UnifiedVectorFormat format;
-	args.data[0].ToUnifiedFormat(count, format);
+	args.data[0].ToUnifiedFormat(format);
 	auto enabled = UnifiedVectorFormat::GetData<bool>(format);
 	result.SetVectorType(VectorType::FLAT_VECTOR);
 	auto out = FlatVector::GetDataMutable<bool>(result);
@@ -1235,7 +1235,7 @@ static void AITurboModeFunction(DataChunk &args, ExpressionState &state, Vector 
 static void AIImageFunction(DataChunk &args, ExpressionState &state, Vector &result) {
 	const idx_t count = args.size();
 	UnifiedVectorFormat format;
-	args.data[0].ToUnifiedFormat(count, format);
+	args.data[0].ToUnifiedFormat(format);
 	auto in = UnifiedVectorFormat::GetData<string_t>(format);
 	result.SetVectorType(VectorType::FLAT_VECTOR);
 	auto out = FlatVector::GetDataMutable<string_t>(result);
@@ -1277,7 +1277,7 @@ static void AISpeculativeFilterFunction(DataChunk &args, ExpressionState &state,
 static void AIEmbedFunction(DataChunk &args, ExpressionState &state, Vector &result) {
 	const idx_t count = args.size();
 	UnifiedVectorFormat fmt;
-	args.data[0].ToUnifiedFormat(count, fmt);
+	args.data[0].ToUnifiedFormat(fmt);
 	auto texts = UnifiedVectorFormat::GetData<string_t>(fmt);
 
 	vector<string> inputs(count);
@@ -1301,7 +1301,7 @@ static void AIEmbedFunction(DataChunk &args, ExpressionState &state, Vector &res
 	}
 	ListVector::Reserve(result, total);
 	auto list_data = FlatVector::GetDataMutable<list_entry_t>(result);
-	auto child_data = FlatVector::GetDataMutable<float>(ListVector::GetEntry(result));
+	auto child_data = FlatVector::GetDataMutable<float>(ListVector::GetChildMutable(result));
 	auto &validity = FlatVector::ValidityMutable(result);
 	idx_t offset = 0;
 	for (idx_t i = 0; i < count; i++) {
@@ -1697,7 +1697,7 @@ static bool AILeafOutcome(const AILeafMeta &m, const string &content, bool &ok) 
 		if (m.has_range) { // clamp to [lo,hi] then round -- matches the ranged ai_score scalar before comparing
 			d = d < m.lo ? m.lo : (d > m.hi ? m.hi : d);
 			if (m.is_int) {
-				d = std::llround(d);
+				d = static_cast<double>(std::llround(d));
 			}
 		}
 		const double v = std::atof(m.val.c_str());
@@ -2799,7 +2799,7 @@ static vector<Value> AIDedupEvalFilterNode(ClientContext &context, const BoundFu
 void AIDedupFireWaveScalar(ClientContext &context, const BoundFunctionExpression &eval_call,
                            ColumnDataCollection &wave_reps, vector<Value> &out_values) {
 	ExpressionExecutor executor(context, eval_call);
-	const LogicalType result_type = eval_call.GetReturnType();
+	const LogicalType &result_type = eval_call.GetReturnType();
 	DataChunk rep_chunk;
 	rep_chunk.Initialize(BufferAllocator::Get(context), wave_reps.Types());
 	ColumnDataScanState scan;
@@ -3006,12 +3006,12 @@ static void AISelectivityStatsFunction(ClientContext &context, TableFunctionInpu
 	}
 	const auto &s = data.stats;
 	output.SetChildCardinality(1);
-	output.SetValue(0, 0, Value::UBIGINT(s.input_dim));
-	output.SetValue(1, 0, Value::UBIGINT(s.buffered));
-	output.SetValue(2, 0, Value::UBIGINT(s.examples_seen));
-	output.SetValue(3, 0, Value::UBIGINT(s.train_steps));
-	output.SetValue(4, 0, Value::DOUBLE(s.first_loss));
-	output.SetValue(5, 0, Value::DOUBLE(s.last_loss));
+	output.data[0].SetValue(0, Value::UBIGINT(s.input_dim));
+	output.data[1].SetValue(0, Value::UBIGINT(s.buffered));
+	output.data[2].SetValue(0, Value::UBIGINT(s.examples_seen));
+	output.data[3].SetValue(0, Value::UBIGINT(s.train_steps));
+	output.data[4].SetValue(0, Value::DOUBLE(s.first_loss));
+	output.data[5].SetValue(0, Value::DOUBLE(s.last_loss));
 	data.emitted = true;
 }
 
