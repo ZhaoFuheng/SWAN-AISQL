@@ -4,8 +4,9 @@
 optimizer and executor built around **factorized ("two-currency") execution**: every LLM call runs once per
 *distinct* input, joins over AI predicates evaluate the distinct *pair domain* without materializing the
 cross product, and learned predicate ordering, Yannakakis semi-join reduction and LIMIT early-stop minimize
-calls. Benchmarked against LOTUS on SemBench (MOVIE / ECOMM / MMQA) and against PLOP on the hybrid bench
-(agent_bench Q1–Q30). The design is in [docs/DESIGN.md](docs/DESIGN.md).
+calls. Benchmarked against LOTUS on SemBench (MOVIE / ECOMM / MMQA) and, on the 30-query hybrid bench the
+PLOP authors shared with us, against PLOP's recorded runs and LOTUS. The design is in
+[docs/DESIGN.md](docs/DESIGN.md).
 
 This repository is a DuckDB **extension** built on the
 [extension template](https://github.com/duckdb/extension-template): the engine is the `aisql` extension,
@@ -260,21 +261,43 @@ Embedding-server environment (`serve/ai_embed_server.py`): `AI_EMBED_MODEL` (tex
 (CLIP model; empty = text only), `AI_EMBED_DEVICE` (default `cpu`), `AI_EMBED_PORT`, `AI_EMBED_BACKEND` (`st` / `mlx`).
 `GET http://localhost:4002/` reports what it loaded.
 
-## Hybrid bench (agent_bench Q1–Q30, vs PLOP)
+## Hybrid bench (agent_bench Q1–Q30): SWAN vs LOTUS, with PLOP as the reference
+
+The 30 hybrid queries (relational plans with semantic operators over DataAgentBench and TPC-H data) are
+the benchmark introduced by the PLOP paper. PLOP itself is not publicly released, so it cannot be rerun
+here; its authors shared the queries and their execution results with us, and both are committed:
+`plop_queries/` (their SQL), `results/plop` (PLOP's optimized runs), `results/plop_gt` (the un-rewritten
+execution with the output-truncating `LIMIT`s removed, used as the deterministic ground truth) and
+`results/plop_none`. What you can run is SWAN and LOTUS on the same queries and compare all three:
 
 ```sh
-CACHE_ALIAS_CHAT=1 serve/start_stack.sh        # agent_bench replays need the proxy's shared-verdict alias (see sembench/README.md)
 cd sembench/AGENTBENCH
-python3 swan_agentbench.py                     # Q1..Q30, ~14 min replayed (Q19 is 10 of them)
+python3 swan_agentbench.py                     # SWAN Q1..Q30 (~14 min; a first run pays ~$0.30 to the provider)
 python3 swan_agentbench.py Q16 Q17             # a subset
-python3 eval_agentbench.py swan plop           # quality vs the LIMIT-free PLOP ground truth (results/plop_gt)
+python3 lotus_agentbench.py                    # LOTUS Q1..Q30 (our translations, lotus_queries/; ~1 h, ~$3)
+python3 eval_agentbench.py swan lotus plop     # quality of each vs the LIMIT-free ground truth
 SWAN_TAG=swan python3 report_three_way.py      # per-query SWAN / PLOP / LOTUS table -> results/agentbench_comparison_three_way.md
 ```
 
-The SWAN translations are `swan_queries/Q*.sql`, PLOP's originals `plop_queries/`, and the PLOP-side runs
-(`results/plop`, `results/plop_gt`, `results/plop_none`) are committed so scoring needs no PLOP install.
-Runs are tagged (`SWAN_TAG=my_run` → `results/my_run/` + `results/my_run_agentbench_results.json`) and
-scored by tag: `python3 eval_agentbench.py my_run plop`.
+The SWAN translations are `swan_queries/Q*.sql` (`translate_to_swan.py` documents the mapping). Runs are
+tagged (`SWAN_TAG=my_run` → `results/my_run/` + `results/my_run_agentbench_results.json`) and scored by
+tag: `python3 eval_agentbench.py my_run plop`.
+
+Read the quality column with the sampling in mind. The published SWAN row (1.000) consumed the *same*
+recorded model verdict as PLOP for every shared prompt (the proxy's shared-verdict alias over PLOP's
+recorded samples, `sembench/README.md` rule 7); a fresh run samples the model anew, so its agreement
+with PLOP's ground truth also measures verdict variance, exactly as LOTUS's column does. Calls, cost
+and latency are comparable either way, and the committed `results/` hold the runs behind the numbers
+in `docs/DESIGN.md`.
+
+## Acknowledgements
+
+- The hybrid benchmark and PLOP's execution results were shared by the PLOP authors — Qiuyang Mang,
+  Yufan Xiang, Hangrui Zhou, Runyuan He, Jiaxiang Yu, Hanchen Li, Aditya Parameswaran and Alvin Cheung,
+  *PLOP: Cost-Based Placement of Semantic Operators in Hybrid Query Plans* (arXiv:2604.09944, 2026).
+  Thank you for making the comparison possible.
+- SemBench's MOVIE / ECOMM / MMQA suites and its official LOTUS runners are used as published; the
+  LOTUS baselines run on [LOTUS](https://github.com/lotus-data/lotus) unmodified.
 
 ## Layout
 
