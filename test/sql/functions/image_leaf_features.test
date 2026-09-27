@@ -58,6 +58,12 @@ SELECT count(*) FROM (SELECT id FROM r_on EXCEPT SELECT id FROM r_off) UNION ALL
 0
 0
 
+# no request failed (a nonzero count here means the mock could not be reached: the CLI's stderr has the reason)
+query I
+SELECT sum(failed_calls)::BIGINT FROM ai_usage();
+----
+0
+
 # both runs answered with LLM calls
 query II
 SELECT (SELECT calls FROM u_on) > 0, (SELECT calls FROM u_off) > 0;

@@ -33,3 +33,5 @@ docs/ENGINEERING_NOTES.md
 # python virtual environments
 .venv/
 venv/
+docker_env.txt
+.ccache/

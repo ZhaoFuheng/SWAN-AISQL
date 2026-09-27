@@ -440,13 +440,20 @@ void HandlePost(const duckdb_httplib::Request &req, duckdb_httplib::Response &re
 int AIMockStart() {
 	MockBreakpointRequests().store(0);
 	std::lock_guard<std::mutex> lock(MockMutex());
-	if (Mock().server) {
-		return Mock().port; // already running
-	}
-	// A clean slate per test file (see the header comment).
+	// A clean slate per test file (see the header comment) -- also when the previous file left the
+	// server running, which is the common case: the reset must not depend on a matching ai_mock_stop().
 	AIConfig::ResetToDefaults();
 	AILocalCacheClear();
 	AISelectivityModel::Global().Reset();
+	if (Mock().server) {
+		auto &cfg = AIConfig::Mutable();
+		const string url = "http://127.0.0.1:" + std::to_string(Mock().port);
+		cfg.base_url = url;
+		cfg.embed_url = url;
+		cfg.typesafe_url = url;
+		cfg.model = "mock";
+		return Mock().port; // already running: re-point the freshly reset config at it
+	}
 	auto server = std::make_unique<duckdb_httplib::Server>();
 	// Keep-alive clients hold one server thread per persistent connection; the default pool
 	// (~hardware threads) starves under 20+ pooled engine connections, so size it explicitly.
