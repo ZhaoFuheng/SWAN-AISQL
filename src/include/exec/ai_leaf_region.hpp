@@ -43,9 +43,13 @@ public:
 	AILeafRegionState(ClientContext &context, const BoundFunctionExpression &eval_call,
 	                  const vector<LogicalType> &child_types, int64_t limit);
 
-	//! Fold a child chunk: per-leaf dedup, texts + predictions for the new reps, and each new row's first
-	//! leaf choice. Returns true once the LIMIT is met (the caller stops feeding).
-	bool Append(DataChunk &chunk);
+	//! Fold a child chunk in slices of ai_debug_embed_slice rows: each slice is deduped, its new reps get
+	//! texts + predictions (one batched embed per leaf), each new row picks its first leaf and, when
+	//! fire_floor > 0, ready waves are fired before the next slice is touched -- so the first wave launches
+	//! after the first slice's features, the remaining embeds overlap the in-flight waves, and later slices
+	//! are decided by a model already trained on earlier verdicts. Returns true once the LIMIT is met (the
+	//! caller stops feeding).
+	bool Append(DataChunk &chunk, idx_t fire_floor = 0, idx_t fire_overlap = 1);
 	//! Fire a wave for every leaf whose pending reps reach `floor`, keeping up to `overlap` waves in flight
 	//! (inline under a LIMIT). Returns true once the LIMIT is met.
 	bool Fire(idx_t floor, idx_t overlap);
@@ -92,6 +96,7 @@ private:
 		vector<uint32_t> stage_reps;
 	};
 
+	bool AppendSlice(DataChunk &chunk, idx_t begin, idx_t end);
 	void FlushStage(idx_t leaf);
 	//! Re-predict a rep's P(true) if the model has trained since it was predicted: a forward pass over the
 	//! rep's stored feature, never a request; bounded by reps x training steps, never rows. (Before the
@@ -125,8 +130,13 @@ private:
 	idx_t waves = 0;
 	vector<unique_ptr<AILeafWave>> inflight;
 	idx_t overlap = 1; //! waves kept in flight (set by Fire/Finish; 1 = inline under a LIMIT)
+	//! Whether a leaf embeds images (decided from the node's expression at construction). With
+	//! ai_debug_embed_slice_text off, only such regions ingest slice-wise: their embeds are the slow part
+	//! (~0.1 s per image), a text chunk embeds in milliseconds.
+	bool has_image_leaf = false;
+	vector<idx_t> landed; //! verdicts landed per leaf (the warm gate waits for a batch on every leaf)
 	//! Sink-thread time accounting (seconds), see TimingSummary.
-	double t_embed = 0, t_refresh = 0, t_decide = 0, t_drain = 0;
+	double t_embed = 0, t_refresh = 0, t_decide = 0, t_drain = 0, t_warm_gate = 0;
 	idx_t refreshes = 0, drains_blocked = 0;
 	std::chrono::steady_clock::time_point t_start = std::chrono::steady_clock::now();
 	double t_first_wave = -1; //! seconds from construction to the first wave launch

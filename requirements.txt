@@ -1,9 +1,9 @@
 # Python side of SWAN AI-SQL: the serving stack and the benchmark harnesses (python 3.12, see .python-version; >= 3.11 works).
 #   uv venv && source .venv/bin/activate && uv pip install -r requirements.txt
-litellm>=1.50          # serve/litellm.config.yaml: OpenAI-compatible proxy on :4000
+litellm[proxy]>=1.50   # the `litellm` SERVER (serve/litellm.config.yaml, :4000) needs the [proxy] extra; bare litellm is SDK-only
 duckdb>=1.1            # serve/ai_cache_server.py store; harness result handling
 pandas>=2.0            # sembench scorers / result tables
 # Embedding server (serve/ai_embed_server.py) -- pick ONE:
-#   requirements-embed-mlx.txt  Apple Silicon: text + image (CLIP dual encoder)      [recommended]
-#   requirements-embed-st.txt   any host:      text only (sentence-transformers)
+#   requirements-embed-st.txt   any host: CLIP clip-ViT-B-32 via sentence-transformers (text + image)  [default]
+#   requirements-embed-mlx.txt  Apple Silicon only: the same CLIP model via mlx-embeddings (AI_EMBED_BACKEND=mlx) [optional]
 # LOTUS baselines (sembench/*/lotus_*.py): requirements-lotus.txt

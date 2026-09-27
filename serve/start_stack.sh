@@ -23,7 +23,9 @@ else
 	echo "litellm      :4000  already running"
 fi
 if ! curl -sf -m 2 http://127.0.0.1:4001/cache/stats >/dev/null 2>&1; then
-	( cd "$HERE" && nohup "$PY" ai_cache_server.py > "$HERE/cache_proxy.log" 2>&1 & echo "cache proxy  :4001  (pid $!, log serve/cache_proxy.log)" )
+	# CACHE_ALIAS_CHAT=1 is the agent_bench shared-verdict mode (SWAN replays PLOP's recorded samples keyed on
+	# the user text alone). Off by default: for ordinary use every request must key on its full body.
+	( cd "$HERE" && nohup "$PY" ai_cache_server.py > "$HERE/cache_proxy.log" 2>&1 & echo "cache proxy  :4001  (pid $!, log serve/cache_proxy.log, alias=${CACHE_ALIAS_CHAT:-0})" )
 else
 	echo "cache proxy  :4001  already running"
 fi

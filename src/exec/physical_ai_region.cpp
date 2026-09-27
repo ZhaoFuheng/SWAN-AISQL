@@ -223,7 +223,7 @@ SinkResultType PhysicalAIRegion::Sink(ExecutionContext &context, DataChunk &chun
 	// Buffer every row for emission, then fold it.
 	lstate.buffer.Append(lstate.append_state, chunk);
 	if (st.leaf) {
-		if (st.leaf->Append(chunk)) {
+		if (st.leaf->Append(chunk, AIRegionWaveSize(), limit >= 0 ? 1 : AIRegionWaveOverlap())) {
 			return SinkResultType::FINISHED; // LIMIT met while folding (rows landing on decided-TRUE reps)
 		}
 		if (st.leaf->Fire(AIRegionWaveSize(), limit >= 0 ? 1 : AIRegionWaveOverlap())) {

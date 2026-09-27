@@ -4,16 +4,33 @@
 #include "duckdb/main/client_context.hpp"
 #include "filter_tree_order.hpp"
 #include "ai_client.hpp"
+#include "duckdb/planner/expression_iterator.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <thread>
 
 namespace duckdb {
+
+// Does the node's expression evaluate ai_image() anywhere? (The call sits inside the region's own leaf
+// expressions, so the child chunk carries plain paths, never the sentinel.)
+static bool ExpressionHasAIImage(const Expression &expr) {
+	if (expr.GetExpressionClass() == ExpressionClass::BOUND_FUNCTION &&
+	    expr.Cast<BoundFunctionExpression>().Function().GetName() == "ai_image") {
+		return true;
+	}
+	bool found = false;
+	ExpressionIterator::EnumerateChildren(expr, [&](const Expression &child) {
+		found = found || ExpressionHasAIImage(child);
+	});
+	return found;
+}
 
 AILeafRegionState::AILeafRegionState(ClientContext &context, const BoundFunctionExpression &eval_call,
                                      const vector<LogicalType> &child_types_p, int64_t limit)
     : context(context), call(eval_call), tree(AILeafTree(eval_call)), n(AILeafCount(eval_call)), limit(limit),
-      query_text(context.GetCurrentQuery()), child_types(child_types_p), leaves(n) {
+      query_text(context.GetCurrentQuery()), child_types(child_types_p), leaves(n),
+      has_image_leaf(ExpressionHasAIImage(eval_call)), landed(n, 0) {
 	for (idx_t l = 0; l < n; l++) {
 		leaves[l].key_cols = AILeafKeyCols(eval_call, l);
 		leaves[l].stage.Initialize(Allocator::Get(context), child_types);
@@ -67,15 +84,63 @@ void AILeafRegionState::FlushStage(idx_t l) {
 	leaf.stage_reps.clear();
 }
 
-bool AILeafRegionState::Append(DataChunk &chunk) {
+bool AILeafRegionState::Append(DataChunk &chunk, idx_t fire_floor, idx_t fire_overlap) {
 	const idx_t count = chunk.size();
+	const auto &cfg = AIConfig::Get();
+	const idx_t configured = cfg.embed_slice;
+	constexpr idx_t kGateLabels = 20; // one trainer batch per leaf
+	for (idx_t begin = 0; begin < count;) {
+		// Slice regions with an image leaf (slow embeds; and the slices let this query's own verdicts order
+		// the later rows), or any region when asked; otherwise a text-only region takes the rest of the
+		// chunk in one go (one batched embed per leaf, one fire).
+		const bool slicing = configured > 0 && (has_image_leaf || cfg.embed_slice_text);
+		const idx_t slice = slicing ? MinValue<idx_t>(configured, count - begin) : count - begin;
+		if (begin > 0 && n >= 2 && cfg.warm_gate && fire_floor > 0) {
+			// Warm gate: the first slice was decided cold and fired; before deciding more rows, wait until
+			// every leaf has a batch of verdicts (the rows that survived the first leaf have visited the
+			// second) and the model has trained on them. Waits only while a wave is in flight -- verdicts
+			// are coming -- so it is bounded by the first waves, and it costs nothing when they landed
+			// before the next slice was embedded.
+			auto warm = [&]() {
+				if (AISelectivityTrainSteps() == 0) {
+					return false;
+				}
+				for (idx_t l = 0; l < n; l++) {
+					if (landed[l] < kGateLabels) {
+						return false;
+					}
+				}
+				return true;
+			};
+			const auto t0 = std::chrono::steady_clock::now();
+			while (!warm() && !inflight.empty()) {
+				ReapLanded();
+				if (!warm() && !inflight.empty()) {
+					std::this_thread::sleep_for(std::chrono::milliseconds(20));
+				}
+			}
+			t_warm_gate += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+		}
+		if (AppendSlice(chunk, begin, begin + slice)) {
+			return true;
+		}
+		begin += slice;
+		if (fire_floor > 0 && begin < count && Fire(fire_floor, fire_overlap)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool AILeafRegionState::AppendSlice(DataChunk &chunk, idx_t begin, idx_t end) {
+	const idx_t count = end - begin;
 	const uint32_t first_row = NumericCast<uint32_t>(row_result.size());
 	row_reps.resize(row_reps.size() + count * n);
 	row_result.resize(row_result.size() + count, -2);
 	// 1. Per-leaf dedup of every row; new reps are staged so their texts can be built in one pass.
 	for (idx_t l = 0; l < n; l++) {
 		auto &leaf = leaves[l];
-		for (idx_t row = 0; row < count; row++) {
+		for (idx_t row = begin; row < end; row++) {
 			string key;
 			for (const idx_t kc : leaf.key_cols) {
 				const Value v = chunk.data[kc].GetValue(row);
@@ -104,10 +169,10 @@ bool AILeafRegionState::Append(DataChunk &chunk) {
 				}
 				leaf.stage_reps.push_back(rep);
 			}
-			row_reps[(first_row + row) * n + l] = rep;
+			row_reps[(first_row + row - begin) * n + l] = rep;
 		}
 	}
-	// 2. Texts + predictions for this chunk's new reps (one batched embed per leaf).
+	// 2. Texts + predictions for this slice's new reps (one batched embed per leaf).
 	for (idx_t l = 0; l < n; l++) {
 		FlushStage(l);
 	}
@@ -222,6 +287,7 @@ void AILeafRegionState::RunWave(AILeafWave &wave) {
 
 void AILeafRegionState::ApplyWave(AILeafWave &wave) {
 	auto &leaf = leaves[wave.leaf];
+	landed[wave.leaf] += wave.reps.size();
 	vector<uint32_t> waiters;
 	for (idx_t i = 0; i < wave.reps.size(); i++) {
 		auto &rep = leaf.reps[wave.reps[i]];
@@ -349,9 +415,11 @@ void AILeafRegionState::Finish(idx_t overlap_p) {
 string AILeafRegionState::TimingSummary() const {
 	char buf[256];
 	snprintf(buf, sizeof(buf),
-	         "embed=%.1fs refresh=%.1fs(%llu) decide=%.1fs drain_wait=%.1fs(blocked %llu/%llu) first_wave=%.1fs@%llu rows",
-	         t_embed, t_refresh, (unsigned long long)refreshes, t_decide, t_drain, (unsigned long long)drains_blocked,
-	         (unsigned long long)waves, t_first_wave, (unsigned long long)rows_at_first_wave);
+	         "embed=%.1fs refresh=%.1fs(%llu) decide=%.1fs warm_gate=%.1fs drain_wait=%.1fs(blocked %llu/%llu) "
+	         "first_wave=%.1fs@%llu rows",
+	         t_embed, t_refresh, (unsigned long long)refreshes, t_decide, t_warm_gate, t_drain,
+	         (unsigned long long)drains_blocked, (unsigned long long)waves, t_first_wave,
+	         (unsigned long long)rows_at_first_wave);
 	return string(buf);
 }
 

@@ -1,3 +1,9 @@
-# Embedding server fallback for non-Apple hosts (text only; image leaves get a neutral prior).
-# First start downloads sentence-transformers/all-MiniLM-L6-v2 (~90 MB) into ~/.cache/huggingface.
-sentence-transformers>=3.0
+# Embedding server (default backend, every platform): all-MiniLM-L6-v2 for text predicates (~90 MB) plus
+# the CLIP dual encoder clip-ViT-B-32 for image predicates (~1.1 GB), downloaded into ~/.cache/huggingface
+# on first start. AI_EMBED_IMAGE_MODEL= (empty) runs text only, as the earlier recorded runs did.
+sentence-transformers>=3.0,<4
+# transformers 4.50+ needs torch >= 2.3; Intel macOS is stuck on torch 2.2.2 (PyTorch dropped x86 mac
+# wheels after it), where newer transformers fails to import ("name 'nn' is not defined"). This pin
+# works on every platform; loosen it on Linux / Apple Silicon if you want newer transformers.
+transformers>=4.40,<4.50
+numpy<2                 # torch 2.2.x wheels are built against NumPy 1.x (NumPy 2 makes torch fail to import)

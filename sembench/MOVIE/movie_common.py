@@ -106,6 +106,19 @@ def _rank_corr(sys_rows, gold_rows):
     return round(spearman, 3), round(tau, 3)
 
 
+# q3/q4/q8 are single-value / count queries: score() returns (value, rel_err, quality) for them, not
+# (precision, recall, f1). Name the fields accordingly so a results file never says "precision": 9.0.
+SCALAR_QUERIES = {"q3", "q4", "q8"}
+
+
+def metric_fields(name, a, b):
+    return {"value": a, "rel_err": b} if name in SCALAR_QUERIES else {"precision": a, "recall": b}
+
+
+def metric_tag(name, a, b):
+    return f"value={a} rel_err={b}" if name in SCALAR_QUERIES else f"P={a} R={b}"
+
+
 def score(name, sys_rows, gold_rows):
     """-> (precision, recall, quality) exactly like ecomm_common.score; quality is the headline metric."""
     if name in RANK_QUERIES:

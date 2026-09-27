@@ -33,7 +33,38 @@ unique_ptr<Expression> AIPredicateRewrite::BuildPredicateCall(vector<unique_ptr<
 	return function_binder.BindScalarFunction(entry, std::move(args), error);
 }
 
-bool AIPredicateRewrite::RewriteMixedFilter(LogicalFilter &filter) {
+//! The folded node must never share a conjunction with the relational remainder: DuckDB's filter
+//! evaluates a conjunction through an AdaptiveFilter that permutes conjunct order (and explores
+//! randomly), so `ai_node AND id IN (...)` can run the LLM node FIRST over every row of the chunk when
+//! the IN-list is only an "optional" scan filter -- 2,200 calls for a 10-row answer on MOVIE. A filter
+//! of its own above the relational filter makes the order structural, and it is exactly the all-AI
+//! filter the region placement wants.
+void AIPredicateRewrite::InstallAINode(unique_ptr<LogicalOperator> &filter_slot, unique_ptr<Expression> node,
+                                       vector<unique_ptr<Expression>> keep_exprs) {
+	auto &filter = filter_slot->Cast<LogicalFilter>();
+	filter.expressions.clear();
+	if (keep_exprs.empty()) {
+		filter.expressions.push_back(std::move(node));
+		filter.ResolveOperatorTypes();
+		return;
+	}
+	for (auto &expr : keep_exprs) {
+		filter.expressions.push_back(std::move(expr)); // the relational remainder stays here, below
+	}
+	auto ai_filter = make_uniq<LogicalFilter>();
+	ai_filter->expressions.push_back(std::move(node));
+	// A filter never changes bindings, so the node's column references resolve through the lower
+	// filter unchanged; the original projection map (child positions) moves up with the output.
+	ai_filter->projection_map = std::move(filter.projection_map);
+	filter.projection_map.clear();
+	filter.ResolveOperatorTypes();
+	ai_filter->children.push_back(std::move(filter_slot));
+	ai_filter->ResolveOperatorTypes();
+	filter_slot = std::move(ai_filter);
+}
+
+bool AIPredicateRewrite::RewriteMixedFilter(unique_ptr<LogicalOperator> &filter_slot) {
+	auto &filter = filter_slot->Cast<LogicalFilter>();
 	auto &context = optimizer.context;
 
 	// Fire only for a boolean tree over >=2 AI leaves with >=1 non-ai_filter leaf. All-ai_filter falls
@@ -103,12 +134,7 @@ bool AIPredicateRewrite::RewriteMixedFilter(LogicalFilter &filter) {
 		return false; // bind failed: leave the plan untouched
 	}
 
-	filter.expressions.clear();
-	filter.expressions.push_back(std::move(node));
-	for (auto &expr : keep_exprs) {
-		filter.expressions.push_back(std::move(expr));
-	}
-	filter.ResolveOperatorTypes();
+	InstallAINode(filter_slot, std::move(node), std::move(keep_exprs));
 	return true;
 }
 
@@ -117,7 +143,7 @@ void AIPredicateRewrite::RewriteFilter(unique_ptr<LogicalOperator> &filter_slot)
 
 	// Mixed AI-comparison tree (>=2 leaves, >=1 non-ai_filter) -> generalized node; else fall through to
 	// the pure-ai_filter path below.
-	if (RewriteMixedFilter(filter)) {
+	if (RewriteMixedFilter(filter_slot)) {
 		return;
 	}
 
@@ -187,13 +213,8 @@ void AIPredicateRewrite::RewriteFilter(unique_ptr<LogicalOperator> &filter_slot)
 		return; // bind failed: leave the plan untouched
 	}
 
-	// The filter's predicate becomes ai_function_with_embed plus any non-convertible expressions.
-	filter.expressions.clear();
-	filter.expressions.push_back(std::move(pred_expr));
-	for (auto &expr : keep_exprs) {
-		filter.expressions.push_back(std::move(expr));
-	}
-	filter_slot->ResolveOperatorTypes();
+	// The node goes above any non-convertible (relational) remainder, never beside it.
+	InstallAINode(filter_slot, std::move(pred_expr), std::move(keep_exprs));
 }
 
 unique_ptr<Expression> AIPredicateRewrite::TryBuildReorderNode(const Expression &tree_expr) {

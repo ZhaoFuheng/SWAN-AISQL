@@ -28,6 +28,7 @@ build_*.log
 
 # private working notes (gaps / todo), not part of the published design
 docs/BACKLOG.md
+docs/ENGINEERING_NOTES.md
 
 # python virtual environments
 .venv/

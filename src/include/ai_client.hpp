@@ -24,6 +24,10 @@ namespace duckdb {
 //! real prompt text.
 static constexpr char AI_IMAGE_OPEN = '\x01';
 static constexpr char AI_IMAGE_CLOSE = '\x02';
+//! Embed-input marker: a text that is the PREDICATE half of an image leaf's feature. The client sends it
+//! as an {"image_text": ...} item so the server encodes it with the CLIP text tower -- the same space as
+//! the image it is compared against -- while plain texts go to the (better, faster) text model.
+static constexpr char AI_IMAGE_TEXT_MARK = '\x03';
 //! True if `text` contains at least one ai_image() sentinel.
 inline bool AITextHasImage(const string &text) {
 	return text.find(AI_IMAGE_OPEN) != string::npos;
@@ -61,7 +65,12 @@ struct AIConfig {
 	//! ai_embed: a separate endpoint + model (local sentence-transformers by default). ai_embed
 	//! always uses the fixed path (no turbo) and has no history, to keep CPU/memory bounded.
 	string embed_url;   // AI_EMBED_URL   (default http://localhost:4002)
-	string embed_model; // AI_EMBED_MODEL (default sentence-transformers/all-MiniLM-L6-v2)
+	string embed_model; // AI_EMBED_MODEL (default sentence-transformers/all-MiniLM-L6-v2; the server also loads CLIP for images)
+	//! AI_EMBED_IMAGES / SET ai_embed_images (default on): embed image leaves (predicate text x image
+	//! through the dual encoder) so they get a real selectivity prior instead of the neutral 0.5.
+	//! Off, or a server that cannot embed images (the client latches on its first refusal), keeps
+	//! the neutral prior + byte-based cost for image leaves.
+	bool embed_images = true;
 	//! TypeSafe System One (Jev) as an optional backend for ai_filter (-> Noul) and ai_classify
 	//! (-> Choice): typed judgments instead of a chat completion. Routed per request by the
 	//! client (AIUsesTypeSafe): the function opts in via AIRequest::question, the setting enables
@@ -85,6 +94,27 @@ struct AIConfig {
 	//! one side's prompt across a chunk that can be a single call, leaving the pool idle behind a
 	//! blocking wave. Overlapping waves refills the pool without speculating on any extra call.
 	idx_t wave_overlap = 8;
+	//! Embedding requests in flight at once and image items per request (AI_EMBED_CONCURRENCY /
+	//! AI_EMBED_BATCH_IMAGES; SET ai_embed_concurrency / ai_embed_batch_images). A CPU CLIP server
+	//! encodes ~0.2 s/image in one 32-image batch but ~0.11 s/image across 4-8 concurrent small
+	//! requests, and no request may outlive the client timeout (a 500-image request took 80 s).
+	idx_t embed_concurrency = 4;
+	idx_t embed_batch_images = 8;
+	//! Rows the leaf region ingests per slice before it embeds, decides and fires (AI_EMBED_SLICE;
+	//! SET ai_debug_embed_slice; 0 = the whole chunk). Slicing lets the first wave launch after the
+	//! first slice's features instead of after the chunk's: 500 CLIP image embeds are ~80 s of Sink
+	//! time during which nothing was in flight.
+	idx_t embed_slice = 100;
+	//! Slice text-only regions too (AI_EMBED_SLICE_TEXT; SET ai_debug_embed_slice_text, default on). Their
+	//! embeds are cheap, so the value is the warm gate below: agent_bench Q17 237 -> 156 calls for +4-7 s,
+	//! Q19 +5 s, nothing else moved. Off restores one batched embed + one fire per chunk.
+	bool embed_slice_text = true;
+	//! Warm gate (AI_WARM_GATE; SET ai_debug_warm_gate): after a region's first slice is decided cold and
+	//! fired, wait until every leaf has a batch of verdicts and the model has trained on them before
+	//! deciding further slices, so they are ordered by a model that knows this query's pass rates. The
+	//! wait only lasts while waves are in flight. Without it every slice is decided while the first wave
+	//! is still in flight (ECOMM two-image query: 787-992 calls cold vs a steady 788 with the gate).
+	bool warm_gate = true;
 	string debug_log;
 	//! Local cache (layer 1): process-global response caches (chat + embed) serving repeats
 	//! within and across queries in this process. In-batch single-flight dedup is unaffected.
@@ -240,6 +270,11 @@ struct AIEmbedResult {
 //! ai_embed call and keeps its cache key distinct from any chat request. Always the fixed path (no
 //! turbo) and no history. De-duplicated + query-scoped cached; output aligned 1:1 with `texts`.
 vector<AIEmbedResult> AIEmbedBatch(const vector<string> &texts, const string &query_text = "");
+
+//! Whether image leaves are embedded: ai_embed_images is on AND the embeddings server has not refused an
+//! image item (a text-only model answers image items with an error entry; the client latches that once
+//! per process so no later request pays for images it cannot get).
+bool AIEmbedImagesSupported();
 
 //! Execute a batch of requests concurrently, with query-scoped de-duplication + response caching
 //! (identical prompts are cached within a query, across its chunks, but never shared between queries).

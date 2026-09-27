@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LOTUS on SemBench ECOMM sf_500 -- gpt-5-mini through the global cache proxy (:4001), concurrency 20.
+"""LOTUS on SemBench ECOMM sf_500 -- gpt-5.6-luna through the global cache proxy (:4001), concurrency 20.
 
 Runs the VENDORED official SemBench LOTUS dialect scripts (lotus_queries/qN.py, unmodified `run(data_dir)`
 functions) and scores them with the TOML metrics: f1 over the output ids, adjusted-rand-index for q3-q6.

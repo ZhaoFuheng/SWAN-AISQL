@@ -10,8 +10,18 @@ namespace {
 // Hidden widths and training hyper-parameters. Named so they are easy to tune in one place.
 constexpr idx_t kHidden1 = 256; // wide first layer: the input is a large [pred_emb, input_emb, cos_sim] vector
 constexpr idx_t kHidden2 = 64;
-constexpr idx_t kFifoCapacity = 64; // fixed-size FIFO of most-recent (embedding, label) pairs
-constexpr idx_t kMinTrainSize = 16; // minimum buffered examples before a training step runs
+// Training window: a fixed-size FIFO of the most recent (embedding, label) pairs, trained full-batch each
+// step. AI_MLP_FIFO (default 256) sets its capacity, AI_MLP_MIN_TRAIN (default 16) the buffered examples
+// a step needs. Measured on the ECOMM two-image query: with 64 the learned order depended on which rows
+// happened to be the last 64 (train on 256 rows -> no reorder, on 32 or 500 -> optimal); 256 covers the
+// distinct domain of a wave-sized slice and stabilises it.
+static idx_t EnvSize(const char *name, idx_t fallback) {
+	const char *v = std::getenv(name);
+	const long long n = v ? std::atoll(v) : 0;
+	return n > 0 ? static_cast<idx_t>(n) : fallback;
+}
+static const idx_t kFifoCapacity = EnvSize("AI_MLP_FIFO", 256);
+static const idx_t kMinTrainSize = EnvSize("AI_MLP_MIN_TRAIN", 16);
 constexpr double kL2 = 1e-5;
 // Adam optimizer (adaptive per-parameter rates -> faster, more stable online convergence than SGD).
 constexpr double kAdamLR = 0.01;

@@ -2,6 +2,7 @@
 
 #include "ai_prompt_cost.hpp"
 #include "duckdb/common/types/blob.hpp"
+#include "duckdb/common/file_system.hpp"
 #include "duckdb/common/types/string_type.hpp"
 #include "yyjson.hpp"
 
@@ -110,6 +111,17 @@ const AIConfig &AIConfig::Get() {
 		c.wave_size = wave > 0 ? static_cast<idx_t>(wave) : 0;
 		c.embed_url = GetEnvOr("AI_EMBED_URL", "http://localhost:4002");
 		c.embed_model = GetEnvOr("AI_EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2");
+		const string embed_images = GetEnvOr("AI_EMBED_IMAGES", "");
+		auto embed_conc = std::atoi(GetEnvOr("AI_EMBED_CONCURRENCY", "4").c_str());
+		c.embed_concurrency = embed_conc > 0 ? static_cast<idx_t>(embed_conc) : 4;
+		auto embed_imgs = std::atoi(GetEnvOr("AI_EMBED_BATCH_IMAGES", "8").c_str());
+		c.embed_batch_images = embed_imgs > 0 ? static_cast<idx_t>(embed_imgs) : 8;
+		c.embed_slice = static_cast<idx_t>(std::atoi(GetEnvOr("AI_EMBED_SLICE", "100").c_str()));
+		const string slice_text = GetEnvOr("AI_EMBED_SLICE_TEXT", "");
+		c.embed_slice_text = !(slice_text == "0" || slice_text == "off" || slice_text == "false");
+		const string warm_gate = GetEnvOr("AI_WARM_GATE", "");
+		c.warm_gate = !(warm_gate == "0" || warm_gate == "off" || warm_gate == "false");
+		c.embed_images = !(embed_images == "off" || embed_images == "0" || embed_images == "false");
 		auto agg_budget = std::atoll(GetEnvOr("AI_AGG_CHAR_BUDGET", "48000").c_str());
 		c.agg_char_budget = agg_budget > 0 ? static_cast<idx_t>(agg_budget) : 48000;
 		c.price_input_per_mtok = std::atof(GetEnvOr("AI_PRICE_INPUT", "0").c_str());
@@ -1461,6 +1473,12 @@ vector<AIResult> AIBatchComplete(const vector<AIRequest> &requests, const string
 static std::mutex g_embed_cache_mutex;
 static std::unordered_map<string, vector<float>> g_embed_cache; // query-scoped key -> vector
 
+//! An embed input that IS a single ai_image sentinel: sent as an image item ({"image": ref}).
+static bool IsImageEmbedInput(const string &in) {
+	return in.size() > 2 && in.front() == AI_IMAGE_OPEN && in.back() == AI_IMAGE_CLOSE &&
+	       in.find(AI_IMAGE_OPEN, 1) == string::npos;
+}
+
 //! Build an OpenAI-style embeddings body. temperature=-1 marks this as an ai_embed call and keeps
 //! its cache key distinct from any chat request for the same text.
 static string BuildEmbedBody(const string &model, const vector<string> &inputs) {
@@ -1472,9 +1490,23 @@ static string BuildEmbedBody(const string &model, const vector<string> &inputs) 
 		// An input that IS a single ai_image sentinel becomes an image item ({"image": ref}) for
 		// the dual-encoder server; everything else embeds as text.
 		const auto &in = inputs[i];
-		if (in.size() > 2 && in.front() == AI_IMAGE_OPEN && in.back() == AI_IMAGE_CLOSE &&
-		    in.find(AI_IMAGE_OPEN, 1) == string::npos) {
-			body += "{\"image\":\"" + AIJsonEscape(in.substr(1, in.size() - 2)) + "\"}";
+		if (IsImageEmbedInput(in)) {
+			// A local path is relative to THIS process's working directory (where the chat path reads the
+			// file); the server runs elsewhere, so send it absolute.
+			string ref = in.substr(1, in.size() - 2);
+			const bool remote = ref.compare(0, 5, "data:") == 0 || ref.compare(0, 7, "http://") == 0 ||
+			                    ref.compare(0, 8, "https://") == 0;
+#ifdef _WIN32
+			const bool absolute = ref.size() > 1 && (ref[1] == ':' || ref[0] == '\\' || ref[0] == '/');
+#else
+			const bool absolute = !ref.empty() && ref[0] == '/';
+#endif
+			if (!remote && !ref.empty() && !absolute) {
+				ref = FileSystem::GetWorkingDirectory() + "/" + ref;
+			}
+			body += "{\"image\":\"" + AIJsonEscape(ref) + "\"}";
+		} else if (!in.empty() && in.front() == AI_IMAGE_TEXT_MARK) {
+			body += "{\"image_text\":\"" + AIJsonEscape(in.substr(1)) + "\"}";
 		} else {
 			body += "\"" + AIJsonEscape(in) + "\"";
 		}
@@ -1483,8 +1515,18 @@ static string BuildEmbedBody(const string &model, const vector<string> &inputs) 
 	return body;
 }
 
+// Latched the first time the embeddings server answers an image item without an embedding (text-only
+// model): from then on image leaves keep their neutral prior and no request carries image items.
+static std::atomic<bool> g_embed_images_unsupported {false};
+
+bool AIEmbedImagesSupported() {
+	return AIConfig::Get().embed_images && !g_embed_images_unsupported.load();
+}
+
 //! POST one embeddings request for `inputs`; fill `out[i]` with the i-th embedding. Returns false on
-//! any transport/parse failure. Accounts one llm_call + usage tokens against the query.
+//! any transport/parse failure. An item the server answers without an embedding (an image the model
+//! cannot embed, an unreadable file) leaves out[i] empty without failing the batch -- the text items
+//! beside it still land. Accounts one llm_call + usage tokens against the query.
 static bool DoEmbedBatchRequest(const AIConfig &config, const vector<string> &inputs, idx_t query_index,
                                 vector<vector<float>> &out) {
 	out.assign(inputs.size(), {});
@@ -1530,10 +1572,16 @@ static bool DoEmbedBatchRequest(const AIConfig &config, const vector<string> &in
 			if (jindex && yyjson_is_int(jindex)) {
 				pos = static_cast<idx_t>(yyjson_get_int(jindex));
 			}
-			yyjson_val *emb = yyjson_obj_get(item, "embedding");
-			if (pos >= out.size() || !emb || !yyjson_is_arr(emb)) {
+			if (pos >= out.size()) {
 				ok = false;
 				break;
+			}
+			yyjson_val *emb = yyjson_obj_get(item, "embedding");
+			if (!emb || !yyjson_is_arr(emb)) {
+				if (IsImageEmbedInput(inputs[pos])) {
+					g_embed_images_unsupported.store(true);
+				}
+				continue; // error entry: this item stays empty, the rest of the batch is fine
 			}
 			vector<float> vec;
 			vec.reserve(yyjson_arr_size(emb));
@@ -1623,23 +1671,70 @@ vector<AIEmbedResult> AIEmbedBatch(const vector<string> &texts, const string &qu
 		g_queries[query_index].cache_hits += (n - miss_rows.size());
 	}
 
-	// One batched request for the unique misses (server-side batching keeps CPU/memory bounded).
-	vector<vector<float>> miss_emb;
-	if (!miss_rows.empty()) {
-		vector<string> inputs;
-		inputs.reserve(miss_rows.size());
-		for (auto row : miss_rows) {
-			inputs.push_back(texts[row]);
+	// Batched requests for the unique misses, split into sub-batches (<= embed_batch_images image items,
+	// <= 512 items) and issued embed_concurrency at a time. Splitting keeps every request well inside the
+	// client timeout (a CLIP image encode is ~0.2 s on a CPU: one 500-image request -- an ECOMM table --
+	// took 80 s, timed out, and every feature of the chunk silently came back empty); concurrency is
+	// what the server's per-request threads and torch's intra-op pool reward (~2x throughput at 4-8
+	// in flight). A sub-batch that fails blanks only its own items.
+	constexpr idx_t kMaxItemsPerRequest = 512;
+	const idx_t max_images = MaxValue<idx_t>(config.embed_batch_images, 1);
+	vector<std::pair<idx_t, idx_t>> ranges; // [start, end) into miss_rows
+	for (idx_t start = 0; start < miss_rows.size();) {
+		idx_t images = 0;
+		idx_t end = start;
+		for (; end < miss_rows.size() && end - start < kMaxItemsPerRequest; end++) {
+			const bool image = IsImageEmbedInput(texts[miss_rows[end]]);
+			if (image && images == max_images) {
+				break;
+			}
+			images += image ? 1 : 0;
 		}
-		if (DoEmbedBatchRequest(config, inputs, query_index, miss_emb)) {
-			std::lock_guard<std::mutex> lock(g_embed_cache_mutex);
-			for (idx_t u = 0; u < miss_rows.size(); u++) {
-				if (config.local_cache && !miss_emb[u].empty()) {
-					g_embed_cache[keys[miss_rows[u]]] = miss_emb[u];
+		ranges.emplace_back(start, end);
+		start = end;
+	}
+	vector<vector<float>> miss_emb(miss_rows.size());
+	std::atomic<idx_t> next_range {0};
+	auto worker = [&]() {
+		for (;;) {
+			const idx_t r = next_range.fetch_add(1);
+			if (r >= ranges.size()) {
+				return;
+			}
+			const idx_t start = ranges[r].first, end = ranges[r].second;
+			vector<string> inputs;
+			inputs.reserve(end - start);
+			for (idx_t u = start; u < end; u++) {
+				inputs.push_back(texts[miss_rows[u]]);
+			}
+			vector<vector<float>> part;
+			bool ok = false;
+			try {
+				ok = DoEmbedBatchRequest(config, inputs, query_index, part);
+			} catch (...) {
+				ok = false; // a throwing worker thread would terminate the process; a failed sub-batch is NULL
+			}
+			if (ok) {
+				std::lock_guard<std::mutex> lock(g_embed_cache_mutex);
+				for (idx_t u = 0; u < inputs.size(); u++) {
+					if (config.local_cache && !part[u].empty()) {
+						g_embed_cache[keys[miss_rows[start + u]]] = part[u];
+					}
+					miss_emb[start + u] = std::move(part[u]);
 				}
 			}
-		} else {
-			miss_emb.assign(miss_rows.size(), {}); // all failed -> SQL NULL
+		}
+	};
+	const idx_t nthreads = MinValue<idx_t>(MaxValue<idx_t>(config.embed_concurrency, 1), ranges.size());
+	if (nthreads <= 1) {
+		worker();
+	} else {
+		vector<std::thread> pool;
+		for (idx_t t = 0; t < nthreads; t++) {
+			pool.emplace_back(worker);
+		}
+		for (auto &t : pool) {
+			t.join();
 		}
 	}
 

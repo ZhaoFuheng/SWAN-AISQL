@@ -15,6 +15,7 @@
 #include "duckdb/main/config.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
 
+#include <csignal>
 #include <cstdlib>
 
 namespace duckdb {
@@ -81,6 +82,33 @@ static void RegisterAISettings(DatabaseInstance &db) {
 	config.AddExtensionOption("ai_embed_model", "Dual-encoder embedding model (text + image)", LogicalType::VARCHAR,
 	                          Value(ai.embed_model), [](ClientContext &, SetScope, Value &v) {
 		                          AIConfig::Mutable().embed_model = StringValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_embed_images",
+	                          "Embed image leaves (predicate text x image via the CLIP server) for selectivity",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(ai.embed_images), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().embed_images = BooleanValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_embed_concurrency", "Embedding requests in flight at once", LogicalType::UBIGINT,
+	                          Value::UBIGINT(ai.embed_concurrency), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().embed_concurrency = MaxValue<idx_t>(v.GetValue<uint64_t>(), 1);
+	                          });
+	config.AddExtensionOption("ai_embed_batch_images", "Image items per embedding request", LogicalType::UBIGINT,
+	                          Value::UBIGINT(ai.embed_batch_images), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().embed_batch_images = MaxValue<idx_t>(v.GetValue<uint64_t>(), 1);
+	                          });
+	config.AddExtensionOption("ai_debug_embed_slice",
+	                          "Rows the region ingests per slice before embedding, deciding and firing (0 = whole chunk)",
+	                          LogicalType::UBIGINT, Value::UBIGINT(ai.embed_slice), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().embed_slice = v.GetValue<uint64_t>();
+	                          });
+	config.AddExtensionOption("ai_debug_embed_slice_text", "Slice text-only regions too (off: only regions with an image leaf)",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(ai.embed_slice_text), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().embed_slice_text = BooleanValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_debug_warm_gate",
+	                          "After the first slice, wait until every leaf has a batch of verdicts and the model trained before deciding more rows",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(ai.warm_gate), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().warm_gate = BooleanValue::Get(v);
 	                          });
 	// TypeSafe System One (Jev) as an optional backend for ai_filter (Noul) / ai_classify (Choice)
 	config.AddExtensionOption("ai_typesafe", "Route these AI functions to TypeSafe System One (csv of filter,classify)",
@@ -259,6 +287,13 @@ static void RegisterAISettings(DatabaseInstance &db) {
 }
 
 static void LoadInternal(ExtensionLoader &loader) {
+#ifndef _WIN32
+	// The LLM/embedding client reuses keep-alive sockets; on macOS httplib writes without MSG_NOSIGNAL,
+	// so a peer that closed an idle pooled connection would otherwise kill the whole process with
+	// SIGPIPE (a silent exit 141 mid-query). Ignored, the write fails with EPIPE, which the client
+	// already treats as a transport error and retries on a fresh connection.
+	signal(SIGPIPE, SIG_IGN);
+#endif
 	RegisterAISettings(loader.GetDatabaseInstance());
 	// Stage 1 smoke function; replaced by the full AI function registration as porting proceeds.
 	auto version_fn = ScalarFunction("aisql_version", {}, LogicalType::VARCHAR,

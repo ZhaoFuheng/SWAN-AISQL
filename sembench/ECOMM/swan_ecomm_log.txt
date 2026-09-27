@@ -310,3 +310,21 @@ q12  lat=   40.1s calls=   613 fresh=    0 tok=  721149 $0.1535  n=68/58  P=0.80
 q13  lat=   36.8s calls=   500 fresh=    0 tok= 1826047 $0.3735  n=15/12  P=0.667 R=0.833 f1=0.741
 q14  lat=   43.4s calls=   536 fresh=    0 tok= 1861484 $0.3807  n=2/2  P=1.0 R=1.0 f1=1.0
 TOTAL(14q)  latency=1028.8s  wall=1028.7s  cost=$8.0206  tokens=38633571  fresh=0  macro-quality=0.699
+
+== 2026-09-26 10:15:14 CDT ==
+SWAN ECOMM gpt-5.6-luna via http://localhost:4001  concurrency=20  sf500  concurrent x14  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q11', 'q12', 'q13', 'q14']
+q5   lat=   14.0s calls=   228 fresh= None tok=  112492 $0.0257  n=228/228  P=1.0 R=1.0 ari=1.0
+q6   lat=   17.5s calls=   228 fresh= None tok=  931990 $0.1896  n=228/228  P=1.0 R=1.0 ari=0.764
+q4   lat=   20.4s calls=   294 fresh= None tok= 1024711 $0.2061  n=294/294  P=1.0 R=1.0 ari=0.679
+q3   lat=   27.4s calls=   500 fresh= None tok=  121740 $0.0272  n=500/500  P=1.0 R=1.0 ari=0.945
+q1   lat=   30.7s calls=   500 fresh= None tok=  142032 $0.0425  n=8/7  P=0.875 R=1.0 f1=0.933
+q8   lat=   35.2s calls=   500 fresh= None tok= 2138334 $0.4382  n=4/1  P=0.25 R=1.0 f1=0.4
+q13  lat=   37.4s calls=   500 fresh= None tok= 1826047 $0.3735  n=15/12  P=0.667 R=0.833 f1=0.741
+q12  lat=   39.8s calls=   613 fresh= None tok=  720763 $0.1535  n=68/58  P=0.809 R=0.948 f1=0.873
+q2   lat=   40.8s calls=   500 fresh= None tok= 1690710 $0.3451  n=11/5  P=0.364 R=0.8 f1=0.5
+q14  lat=   44.2s calls=   536 fresh= None tok= 1861484 $0.3807  n=2/2  P=1.0 R=1.0 f1=1.0
+q9   lat=   66.1s calls=   756 fresh= None tok= 5800571 $1.1645  n=79/46  P=0.57 R=0.978 f1=0.72
+q10  lat=  126.7s calls=  1561 fresh= None tok= 9858124 $2.0111  n=81/8  P=0.099 R=1.0 f1=0.18
+q11  lat=  139.3s calls=  2007 fresh= None tok= 9128662 $1.8633  n=225/18  P=0.08 R=1.0 f1=0.148
+q7   lat=  396.7s calls=  7921 fresh= None tok= 3275525 $0.7995  n=199/173  P=0.849 R=0.977 f1=0.909
+TOTAL(14q)  latency=1036.2s  wall=396.8s  cost=$8.0205  tokens=38633185  fresh=0  macro-quality=0.699

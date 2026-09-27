@@ -37,7 +37,11 @@ private:
 	//! ai_score>/ai_complete= comparisons) -> one ai_function_with_embed node carrying per-leaf meta.
 	//! Returns true if it rewrote the filter; false (all-ai_filter or not applicable) falls through to
 	//! the pure-ai_filter path in RewriteFilter.
-	bool RewriteMixedFilter(LogicalFilter &filter);
+	bool RewriteMixedFilter(unique_ptr<LogicalOperator> &filter_slot);
+	//! Install the folded node: alone in the filter when nothing else is left, otherwise in a NEW filter
+	//! ABOVE the relational remainder, so the cheap predicates always run first (see the .cpp note).
+	void InstallAINode(unique_ptr<LogicalOperator> &filter_slot, unique_ptr<Expression> node,
+	                   vector<unique_ptr<Expression>> keep_exprs);
 	//! Build one ai_function_with_embed node from a SINGLE boolean expression that is an AI tree over >=2
 	//! leaves (ai_filter / ai_classify=,IN / ai_score-compare / ai_complete=). Returns null if the
 	//! expression is not such a tree or a leaf is not bakeable. Used for CASE WHEN conditions.

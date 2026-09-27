@@ -1398,9 +1398,10 @@ static vector<float> BuildPredicateFeature(const vector<float> &pred_emb, const 
 	return feat;
 }
 
-// An image leaf's input carries the ai_image sentinel, so there is no text/image embedding to feed the
-// selectivity MLP. Two consequences for the DP reorder, both handled by detecting the leaf via
-// AITextHasImage(prompt):
+// An image leaf's input carries the ai_image sentinel. With the default embeddings server (CLIP for images)
+// the leaf gets the same pair feature as a text leaf (predicate text x image, one joint space) and the MLP learns
+// its selectivity; the notes below describe the fallback when images cannot be embedded (text-only
+// server, ai_embed_images=false), detected per leaf via AITextHasImage(prompt) + AIEmbedImagesSupported():
 //   - selectivity: unknowable -> a neutral 0.5 (max-entropy), so the ordering is decided by cost alone,
 //     deterministically. In particular the dedup-domain cost scaling (see AIFilterEvaluateBatch) makes a
 //     leaf with few distinct prompts run before one with many -- "smaller dedup-domain first" -- instead
@@ -2028,10 +2029,11 @@ static void AIFilterEvaluateBatch(const AIFilterWithEmbedBindData &bind_data, id
 			// to collect labels), so it never needs the p_row that embed-all would otherwise produce.
 			bool warm_pick = cold;
 			idx_t warm_leaf = warm_pick ? AIWarmupPickLeaf(row, leaf_values[row], n) : n;
-			// Never warm-pick an image leaf: it yields no MLP label (no text/image embedding) and a vision
+			// Never warm-pick an image leaf that cannot be embedded: it would yield no MLP label and a vision
 			// call is expensive. Fall through to the DP instead, which defers the image behind cheaper text
 			// leaves via its high cost -- so even while cold a mixed tree evaluates a trainable text leaf first.
-			if (warm_pick && (warm_leaf >= n || AITextHasImage(prompt[row][warm_leaf]))) {
+			// With the CLIP server an image leaf trains like any other, so it stays a warm-up candidate.
+			if (warm_pick && (warm_leaf >= n || (AITextHasImage(prompt[row][warm_leaf]) && !AIEmbedImagesSupported()))) {
 				warm_pick = false;
 			}
 			if (warm_pick) {
@@ -2050,19 +2052,22 @@ static void AIFilterEvaluateBatch(const AIFilterWithEmbedBindData &bind_data, id
 			// deduplicated call -- the shared document embeds once -- then JIT-predict p_true against
 			// the live model. Embedding happens here (not upfront) so its CPU overlaps the LLM waits.
 			if (!warm_pick) {
-				// Image-leaf embeds are expensive (dual-encoder image towers). Pay them only where the
-				// estimate can change behavior: a speculative gate on a row that is estimable at all.
-				// Plain reorder nodes keep the neutral p + byte-based cost for image leaves, and a
-				// speculative row whose unknown leaves are all images always evaluates regardless.
+				// With a CLIP image model on the server (ai_embed_images, default) an image leaf is estimable like a text
+				// leaf: its predicate text and image embed into one space and the MLP learns the pair.
+				// Without one, image embeds are refused anyway, so pay for them only where the estimate can
+				// change behavior: a speculative gate on a row that is estimable at all. Plain reorder nodes
+				// then keep the neutral p + byte-based cost for image leaves, and a speculative row whose
+				// unknown leaves are all images always evaluates regardless.
+				const bool images_ok = AIEmbedImagesSupported();
 				bool row_estimable = false;
 				for (idx_t l = 0; l < n; l++) {
-					if (leaf_values[row][l] == AITriState::TRI_UNKNOWN && !AITextHasImage(prompt[row][l])) {
+					if (leaf_values[row][l] == AITriState::TRI_UNKNOWN && (images_ok || !AITextHasImage(prompt[row][l]))) {
 						row_estimable = true;
 						break;
 					}
 				}
 				const bool trust_image = AIConfig::Get().trust_image_estimate;
-				const bool embed_images = bind_data.speculative && (row_estimable || trust_image);
+				const bool embed_images = images_ok || (bind_data.speculative && (row_estimable || trust_image));
 				vector<string> texts;
 				vector<idx_t> tleaf;
 				for (idx_t l = 0; l < n; l++) {
@@ -2080,8 +2085,9 @@ static void AIFilterEvaluateBatch(const AIFilterWithEmbedBindData &bind_data, id
 						    close <= open) {
 							continue; // no extractable single image ref -> neutral p
 						}
-						texts.push_back(pred_text[row][l]);
-						// the bare sentinel-wrapped ref: the client turns it into an image item
+						// predicate text marked for the CLIP text tower (the image's space), then the bare
+						// sentinel-wrapped ref: the client turns them into image_text / image items
+						texts.push_back(string(1, AI_IMAGE_TEXT_MARK) + pred_text[row][l]);
 						texts.push_back(input_text[row][l].substr(open, close - open + 1));
 						tleaf.push_back(l);
 						continue;
@@ -2157,6 +2163,10 @@ static void AIFilterEvaluateBatch(const AIFilterWithEmbedBindData &bind_data, id
 					// estimate un-prunes the join (a 4-way image join explodes combinatorially). Always
 					// evaluate them: the call dedups with the pulled-up recheck above, so pruning is the
 					// only effect.
+					// Image leaves stay excluded here even when they embed (CLIP): a zero-shot image
+					// estimate is not calibrated enough to un-prune a join input on; the reorder still
+					// uses the feature for ordering, which cannot change a result. ai_debug_trust_image_estimate
+					// opts in (bench/image_trust_bench.py measures what that costs).
 					bool estimable = false;
 					for (idx_t l = 0; l < n; l++) {
 						if (leaf_values[row][l] == AITriState::TRI_UNKNOWN && !AITextHasImage(prompt[row][l])) {
@@ -2542,8 +2552,24 @@ void AILeafFeatures(const BoundFunctionExpression &eval_call, const AILeafTexts 
 	vector<string> embed_texts;
 	vector<idx_t> estimable;
 	for (idx_t i = 0; i < count; i++) {
-		if (!texts.valid[i] || AITextHasImage(texts.prompt[i])) {
-			continue; // invalid or image leaf: neutral
+		if (!texts.valid[i]) {
+			continue; // NULL prompt: neutral
+		}
+		if (AITextHasImage(texts.prompt[i])) {
+			// Image leaf: predicate text x the image ref through the dual-encoder space (CLIP server),
+			// the same pair feature a text leaf gets. Neutral when images cannot be embedded (text-only
+			// server, ai_embed_images=false, the prompt-mode experiment knob) or the ref is not a single
+			// sentinel-wrapped image.
+			const auto open = texts.input_text[i].find(AI_IMAGE_OPEN);
+			const auto close = texts.input_text[i].find(AI_IMAGE_CLOSE);
+			if (!AIEmbedImagesSupported() || feature_prompt_mode || open == string::npos || close == string::npos ||
+			    close <= open) {
+				continue;
+			}
+			estimable.push_back(i);
+			embed_texts.push_back(string(1, AI_IMAGE_TEXT_MARK) + texts.pred_text[i]); // CLIP text tower
+			embed_texts.push_back(texts.input_text[i].substr(open, close - open + 1));
+			continue;
 		}
 		estimable.push_back(i);
 		if (feature_prompt_mode) {

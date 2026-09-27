@@ -1,11 +1,11 @@
 {
  "model": "gpt-5.6-luna",
  "concurrency": "20",
- "updated": "2026-09-25 01:04:15 CDT",
+ "updated": "2026-09-26 10:15:14 CDT",
  "per_query": {
   "q1": {
-   "latency_s": 30.6,
-   "llm_calls_fresh": 0,
+   "latency_s": 30.7,
+   "llm_calls_fresh": null,
    "llm_calls": 500,
    "cache_hits": 0,
    "tokens": 142032,
@@ -18,11 +18,11 @@
    "metric": "f1",
    "quality": 0.933,
    "error": null,
-   "ran_at": "2026-09-25 01:04:15 CDT"
+   "ran_at": "2026-09-26 10:15:14 CDT"
   },
   "q3": {
-   "latency_s": 27.0,
-   "llm_calls_fresh": 0,
+   "latency_s": 27.4,
+   "llm_calls_fresh": null,
    "llm_calls": 500,
    "cache_hits": 0,
    "tokens": 121740,
@@ -35,11 +35,11 @@
    "metric": "ari",
    "quality": 0.945,
    "error": null,
-   "ran_at": "2026-09-25 01:04:15 CDT"
+   "ran_at": "2026-09-26 10:15:14 CDT"
   },
   "q4": {
-   "latency_s": 20.1,
-   "llm_calls_fresh": 0,
+   "latency_s": 20.4,
+   "llm_calls_fresh": null,
    "llm_calls": 294,
    "cache_hits": 0,
    "tokens": 1024711,
@@ -52,11 +52,11 @@
    "metric": "ari",
    "quality": 0.679,
    "error": null,
-   "ran_at": "2026-09-25 01:04:15 CDT"
+   "ran_at": "2026-09-26 10:15:14 CDT"
   },
   "q5": {
-   "latency_s": 13.7,
-   "llm_calls_fresh": 0,
+   "latency_s": 14.0,
+   "llm_calls_fresh": null,
    "llm_calls": 228,
    "cache_hits": 0,
    "tokens": 112492,
@@ -69,11 +69,11 @@
    "metric": "ari",
    "quality": 1.0,
    "error": null,
-   "ran_at": "2026-09-25 01:04:15 CDT"
+   "ran_at": "2026-09-26 10:15:14 CDT"
   },
   "q6": {
-   "latency_s": 17.2,
-   "llm_calls_fresh": 0,
+   "latency_s": 17.5,
+   "llm_calls_fresh": null,
    "llm_calls": 228,
    "cache_hits": 0,
    "tokens": 931990,
@@ -86,16 +86,16 @@
    "metric": "ari",
    "quality": 0.764,
    "error": null,
-   "ran_at": "2026-09-25 01:04:15 CDT"
+   "ran_at": "2026-09-26 10:15:14 CDT"
   },
   "q7": {
-   "latency_s": 394.1,
-   "llm_calls_fresh": 0,
+   "latency_s": 396.7,
+   "llm_calls_fresh": null,
    "llm_calls": 7921,
    "cache_hits": 0,
    "tokens": 3275525,
    "reasoning_tokens": 38952,
-   "cost_usd": 0.79956,
+   "cost_usd": 0.79955,
    "n_out": 199,
    "n_gold": 173,
    "precision": 0.849,
@@ -103,11 +103,11 @@
    "metric": "f1",
    "quality": 0.909,
    "error": null,
-   "ran_at": "2026-09-25 01:04:15 CDT"
+   "ran_at": "2026-09-26 10:15:14 CDT"
   },
   "q8": {
-   "latency_s": 34.7,
-   "llm_calls_fresh": 0,
+   "latency_s": 35.2,
+   "llm_calls_fresh": null,
    "llm_calls": 500,
    "cache_hits": 0,
    "tokens": 2138334,
@@ -120,11 +120,11 @@
    "metric": "f1",
    "quality": 0.4,
    "error": null,
-   "ran_at": "2026-09-25 01:04:15 CDT"
+   "ran_at": "2026-09-26 10:15:14 CDT"
   },
   "q9": {
-   "latency_s": 65.7,
-   "llm_calls_fresh": 0,
+   "latency_s": 66.1,
+   "llm_calls_fresh": null,
    "llm_calls": 756,
    "cache_hits": 0,
    "tokens": 5800571,
@@ -137,11 +137,11 @@
    "metric": "f1",
    "quality": 0.72,
    "error": null,
-   "ran_at": "2026-09-25 01:04:15 CDT"
+   "ran_at": "2026-09-26 10:15:14 CDT"
   },
   "q10": {
-   "latency_s": 126.0,
-   "llm_calls_fresh": 0,
+   "latency_s": 126.7,
+   "llm_calls_fresh": null,
    "llm_calls": 1561,
    "cache_hits": 186,
    "tokens": 9858124,
@@ -154,11 +154,11 @@
    "metric": "f1",
    "quality": 0.18,
    "error": null,
-   "ran_at": "2026-09-25 01:04:15 CDT"
+   "ran_at": "2026-09-26 10:15:14 CDT"
   },
   "q11": {
-   "latency_s": 138.8,
-   "llm_calls_fresh": 0,
+   "latency_s": 139.3,
+   "llm_calls_fresh": null,
    "llm_calls": 2007,
    "cache_hits": 0,
    "tokens": 9128662,
@@ -171,14 +171,14 @@
    "metric": "f1",
    "quality": 0.148,
    "error": null,
-   "ran_at": "2026-09-25 01:04:15 CDT"
+   "ran_at": "2026-09-26 10:15:14 CDT"
   },
   "q12": {
-   "latency_s": 40.1,
-   "llm_calls_fresh": 0,
+   "latency_s": 39.8,
+   "llm_calls_fresh": null,
    "llm_calls": 613,
    "cache_hits": 0,
-   "tokens": 721149,
+   "tokens": 720763,
    "reasoning_tokens": 1942,
    "cost_usd": 0.15347,
    "n_out": 68,
@@ -188,11 +188,11 @@
    "metric": "f1",
    "quality": 0.873,
    "error": null,
-   "ran_at": "2026-09-25 01:04:15 CDT"
+   "ran_at": "2026-09-26 10:15:14 CDT"
   },
   "q13": {
-   "latency_s": 36.8,
-   "llm_calls_fresh": 0,
+   "latency_s": 37.4,
+   "llm_calls_fresh": null,
    "llm_calls": 500,
    "cache_hits": 0,
    "tokens": 1826047,
@@ -205,11 +205,11 @@
    "metric": "f1",
    "quality": 0.741,
    "error": null,
-   "ran_at": "2026-09-25 01:04:15 CDT"
+   "ran_at": "2026-09-26 10:15:14 CDT"
   },
   "q14": {
-   "latency_s": 43.4,
-   "llm_calls_fresh": 0,
+   "latency_s": 44.2,
+   "llm_calls_fresh": null,
    "llm_calls": 536,
    "cache_hits": 0,
    "tokens": 1861484,
@@ -222,11 +222,11 @@
    "metric": "f1",
    "quality": 1.0,
    "error": null,
-   "ran_at": "2026-09-25 01:04:15 CDT"
+   "ran_at": "2026-09-26 10:15:14 CDT"
   },
   "q2": {
-   "latency_s": 40.6,
-   "llm_calls_fresh": 0,
+   "latency_s": 40.8,
+   "llm_calls_fresh": null,
    "llm_calls": 500,
    "cache_hits": 0,
    "tokens": 1690710,
@@ -239,15 +239,15 @@
    "metric": "f1",
    "quality": 0.5,
    "error": null,
-   "ran_at": "2026-09-25 01:04:15 CDT"
+   "ran_at": "2026-09-26 10:15:14 CDT"
   }
  },
  "total": {
   "n_queries": 14,
-  "latency_s": 1028.8,
-  "sweep_wall_s": 1028.7,
-  "cost_usd": 8.0206,
-  "tokens": 38633571,
+  "latency_s": 1036.2,
+  "sweep_wall_s": 396.8,
+  "cost_usd": 8.0205,
+  "tokens": 38633185,
   "llm_calls_fresh": 0,
   "macro_quality": 0.699
  }

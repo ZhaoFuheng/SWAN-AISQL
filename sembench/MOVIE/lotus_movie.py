@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LOTUS on SemBench MOVIE sf_2000 -- gpt-5-mini through the cache proxy (:4001), concurrency 20.
+"""LOTUS on SemBench MOVIE sf_2000 -- gpt-5.6-luna through the cache proxy (:4001), concurrency 20.
 
 Query implementations are VERBATIM from SemBench's official movie lotus_runner.py (vendored at
 queries/lotus_runner_reference.py): same sem_filter/sem_join/sem_map prompt templates, same head()
@@ -26,7 +26,7 @@ import lotus
 lotus.settings.configure(enable_cache=False)
 from lotus.models import LM
 
-from movie_common import gt, score
+from movie_common import gt, metric_fields, metric_tag, score
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "data", "sf_2000")
@@ -202,11 +202,11 @@ def main():
         rec = {"latency_s": round(dt, 1), "llm_calls_fresh": cache_misses() - m0,
                "llm_calls": cache_requests() - r0,
                "tokens": u.total_tokens, "cost_usd": round(u.total_cost, 5),
-               "n_out": len(out), "n_gold": len(gold), "precision": P, "recall": R,
+               "n_out": len(out), "n_gold": len(gold), **metric_fields(name, P, R),
                "quality": M, "error": err, "ran_at": stamp}
         per_query[name] = rec
         raw[name] = {"predicted": [list(x) for x in out][:5000]}
-        tag = f"ERR {err}" if err else f"P/a={P} R/b={R} quality={M}"
+        tag = f"ERR {err}" if err else f"{metric_tag(name, P, R)} quality={M}"
         line = (f"{name:4} lat={rec['latency_s']:7.1f}s calls={rec.get('llm_calls', 0):6} fresh={rec['llm_calls_fresh']:6} "
                 f"tok={rec['tokens']:9} ${rec['cost_usd']:.4f}  n={rec['n_out']}/{rec['n_gold']}  {tag}")
         print(line, flush=True)

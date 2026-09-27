@@ -1,0 +1,86 @@
+# name: test/sql/optimizer/relational_conjunct_before_ai_node.test
+# description: The folded AI node must sit in its OWN filter above the relational remainder of a
+#              WHERE clause, never beside it in one conjunction. DuckDB's filter evaluates a
+#              conjunction through an AdaptiveFilter that permutes (and randomly explores) conjunct
+#              order, so `ai_node AND id IN (...)` ran the LLM node first over every row whenever the
+#              IN-list was only an "optional" scan filter: 3,218 mock calls (2,200 real calls on
+#              MOVIE) for a 10-row answer. Both rewrite paths (pure ai_filter tree, mixed tree with a
+#              classify comparison) are pinned; reorder-off parity guards the result.
+# group: [aisql]
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+# exact call counts below assume a cold selectivity model: it is process-global, and the files that
+# ran before this one in the same unittest process have trained it
+statement ok
+SELECT ai_selectivity_reset();
+
+# 2,000 rows over 200 ids; the IN-list keeps 10. An IN-list on VARCHAR is not a guaranteed scan
+# filter, so the relational conjunct survives into the Filter operator -- the shape that broke.
+statement ok
+CREATE TABLE t AS SELECT 'm'||(range % 200)::VARCHAR AS id, 'review text number '||range::VARCHAR AS txt FROM range(2000);
+
+# --- pure ai_filter tree + relational IN-list -----------------------------------------------------
+statement ok
+SELECT ai_usage_reset();
+
+# the response cache is process-wide: a second run of this file in one unittest process must refetch
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM t WHERE id IN ('m1','m2') AND ai_filter('[p=60] positive? ' || txt) AND ai_filter('[p=60] mentions director? ' || txt);
+----
+10
+
+# only the 10 surviving rows reach the LLM leaves (was 3,218)
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+35
+
+# --- mixed tree (classify comparison + filter) + relational IN-list --------------------------------
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM t WHERE id IN ('m1','m2') AND ai_classify(txt, ['pos','neg']) = 'pos' AND ai_filter('[p=60] mentions director? ' || txt);
+----
+0
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+33
+
+# --- parity with the reorder disabled: same answer, same calls ------------------------------------
+statement ok
+SET ai_reorder = false;
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM t WHERE id IN ('m1','m2') AND ai_filter('[p=60] positive? ' || txt) AND ai_filter('[p=60] mentions director? ' || txt);
+----
+10
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+35
+
+statement ok
+SET ai_reorder = true;
+
+statement ok
+CALL ai_mock_stop();

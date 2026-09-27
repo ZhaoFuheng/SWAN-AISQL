@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Run LOTUS (gpt-5-mini) on SemBench MMQA over the sf_200 data, through the global cache proxy (:4001).
+"""Run LOTUS (gpt-5.6-luna) on SemBench MMQA over the sf_200 data, through the global cache proxy (:4001).
 
 Mirrors the SWAN Q*.sql mapping (same tables / prompts) so LOTUS-vs-SWAN is apples-to-apples on identical
 data. Records per-subquery latency, LLM cost + tokens (via lm.stats.physical_usage), and accuracy
 (precision/recall/F1 vs the SemBench ground_truth, the same metric the paper uses).
 
-  env: AI_PROXY_URL (default http://localhost:4001), AI_MODEL (default gpt-5-mini), AI_MAX_CONCURRENCY (20).
+  env: AI_PROXY_URL (default http://localhost:4001), AI_MODEL (default gpt-5.6-luna), AI_MAX_CONCURRENCY (20).
   run (from sembench/MMQA):  <swan-env>/bin/python lotus_mmqa.py [q1 q3a q3f q4 q5 q6a q6b q6c]
 """
 import os, sys

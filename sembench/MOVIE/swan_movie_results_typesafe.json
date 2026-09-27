@@ -45,11 +45,11 @@
    "cost_usd": 0.00199,
    "n_out": 1,
    "n_gold": 1,
-   "precision": 9.0,
-   "recall": 0.3571,
    "quality": 0.643,
    "error": null,
-   "ran_at": "2026-09-25 12:28:15 CDT"
+   "ran_at": "2026-09-25 12:28:15 CDT",
+   "value": 9.0,
+   "rel_err": 0.3571
   },
   "q4": {
    "latency_s": 3.3,
@@ -61,11 +61,11 @@
    "cost_usd": 0.00199,
    "n_out": 1,
    "n_gold": 1,
-   "precision": 0.0667,
-   "recall": 0.4286,
    "quality": 0.571,
    "error": null,
-   "ran_at": "2026-09-25 12:28:15 CDT"
+   "ran_at": "2026-09-25 12:28:15 CDT",
+   "value": 0.0667,
+   "rel_err": 0.4286
   },
   "q5": {
    "latency_s": 1.9,
@@ -125,11 +125,11 @@
    "cost_usd": 0.00175,
    "n_out": 2,
    "n_gold": 2,
-   "precision": 0.0,
-   "recall": 0.0404,
    "quality": 0.96,
    "error": null,
-   "ran_at": "2026-09-25 12:28:15 CDT"
+   "ran_at": "2026-09-25 12:28:15 CDT",
+   "value": 0.0,
+   "rel_err": 0.0404
   },
   "q9": {
    "latency_s": 9.0,

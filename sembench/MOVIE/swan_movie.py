@@ -19,7 +19,7 @@ import sys
 import time
 import urllib.request
 
-from movie_common import gt, score
+from movie_common import gt, metric_fields, metric_tag, score
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Provider keys come from the repo's .env (git-ignored; see .env.example): loaded here so the engine and
@@ -162,10 +162,10 @@ def run_one(name, stamp):
            "llm_calls": usage.get("llm_calls"), "cache_hits": usage.get("cache_hits"),
            "tokens": usage.get("total_tokens"), "reasoning_tokens": usage.get("reasoning_tokens"),
            "cost_usd": round(usage.get("cost_usd") or 0.0, 5),
-           "n_out": len(out), "n_gold": len(gold), "precision": P, "recall": R,
+           "n_out": len(out), "n_gold": len(gold), **metric_fields(name, P, R),
            "quality": M, "error": err, "ran_at": stamp}
     raw_entry = {"predicted": [list(x) for x in out][:5000]}
-    tag = f"ERR {err}" if err else f"P/a={P} R/b={R} quality={M}"
+    tag = f"ERR {err}" if err else f"{metric_tag(name, P, R)} quality={M}"
     line = (f"{name:4} lat={rec['latency_s']:7.1f}s calls={str(rec['llm_calls']):>6} "
             f"fresh={str(rec['llm_calls_fresh']):>5} tok={str(rec['tokens']):>9} ${rec['cost_usd']:.4f}  "
             f"n={rec['n_out']}/{rec['n_gold']}  {tag}")
