@@ -21,7 +21,7 @@
 namespace duckdb {
 
 PhysicalAIRegion::PhysicalAIRegion(PhysicalPlan &physical_plan, vector<LogicalType> types,
-                                 unique_ptr<Expression> eval_call, idx_t estimated_cardinality, int64_t limit)
+                                   unique_ptr<Expression> eval_call, idx_t estimated_cardinality, int64_t limit)
     : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
       eval_call(std::move(eval_call)), limit(limit) {
 }
@@ -58,11 +58,11 @@ static idx_t AIRegionWaveOverlap() {
 // on the Sink thread -- so the only thing that crosses threads is this self-contained unit, and the waves
 // that run concurrently own disjoint rep ranges.
 struct AIRegionWave {
-	DataChunk factorized;   //! the reps this wave owns (rep rows + trailing `__count`)
-	idx_t base = 0;         //! rep ordinal of factorized row 0
-	idx_t m = 0;            //! reps in this wave
-	vector<Value> values;    //! the scalar call's results, one per rep
-	string query_text;       //! captured on the Sink thread: ClientContext is not ours to read from a worker
+	DataChunk factorized; //! the reps this wave owns (rep rows + trailing `__count`)
+	idx_t base = 0;       //! rep ordinal of factorized row 0
+	idx_t m = 0;          //! reps in this wave
+	vector<Value> values; //! the scalar call's results, one per rep
+	string query_text;    //! captured on the Sink thread: ClientContext is not ours to read from a worker
 	//! Only set when the wave runs in the background; carries its exception to whoever get()s it.
 	//! MUST STAY LAST: members destruct in reverse declaration order, so this future -- whose destructor
 	//! waits for the worker -- is destroyed FIRST, before the buffers that worker is still writing into.
@@ -77,10 +77,10 @@ struct AIRegionStreamState {
 	unique_ptr<AILeafRegionState> leaf;
 	//! Scalar path: one dictionary on the call's key columns.
 	unique_ptr<AISQLMapChunk> map;
-	vector<Value> rep_result;  //! per rep: result Value (BOOLEAN on the node path, return-type on the scalar path)
-	vector<char> rep_decided;  //! per rep: has a wave evaluated it?
-	bool is_node = false;      //! folded node (-> `leaf`) vs plain scalar AI call (-> `map`)
-	bool active = false;       //! streaming enabled (else the blocking Finalize runs)
+	vector<Value> rep_result; //! per rep: result Value (BOOLEAN on the node path, return-type on the scalar path)
+	vector<char> rep_decided; //! per rep: has a wave evaluated it?
+	bool is_node = false;     //! folded node (-> `leaf`) vs plain scalar AI call (-> `map`)
+	bool active = false;      //! streaming enabled (else the blocking Finalize runs)
 	// Diagnostics (ai_debug_log='region'): wave shape + early-teardown signals.
 	idx_t waves = 0;
 	idx_t rows_at_first_wave = 0;
@@ -149,8 +149,7 @@ unique_ptr<LocalSinkState> PhysicalAIRegion::GetLocalSinkState(ExecutionContext 
 // map and the per-segment diagnostics. Returns nullptr when there is nothing to fire.
 // `sink_wave` = fired from Sink because >= floor new reps accumulated (must carry >= floor reps); false = the
 // Finalize flush of the leftover tail (may be < floor). Split so the floor invariant is observable/verifiable.
-static unique_ptr<AIRegionWave> AIRegionPrepareWave(ClientContext &context, AIRegionStreamState &st,
-                                                    bool sink_wave) {
+static unique_ptr<AIRegionWave> AIRegionPrepareWave(ClientContext &context, AIRegionStreamState &st, bool sink_wave) {
 	auto &map = *st.map;
 	auto wave = make_uniq<AIRegionWave>();
 	wave->base = map.FiredCount();
@@ -288,7 +287,7 @@ SinkCombineResultType PhysicalAIRegion::Combine(ExecutionContext &context, Opera
 }
 
 SinkFinalizeType PhysicalAIRegion::Finalize(Pipeline &pipeline, Event &event, ClientContext &context,
-                                           OperatorSinkFinalizeInput &input) const {
+                                            OperatorSinkFinalizeInput &input) const {
 	auto &gstate = input.global_state.Cast<AIRegionGlobalSinkState>();
 	if (gstate.segments.empty()) {
 		// Blocking path: one global, deduplicated, fully-concurrent evaluation over every buffered row.
@@ -315,8 +314,8 @@ SinkFinalizeType PhysicalAIRegion::Finalize(Pipeline &pipeline, Event &event, Cl
 				fprintf(stderr,
 				        "[leaf-region] leaves=%llu distinct=[%s] rows=%llu waves=%llu passed=%lld limit=%lld %s\n",
 				        (unsigned long long)leaf.DistinctPerLeaf().size(), distinct.c_str(),
-				        (unsigned long long)leaf.RowCount(), (unsigned long long)leaf.Waves(),
-				        (long long)leaf.Passed(), (long long)limit, leaf.TimingSummary().c_str());
+				        (unsigned long long)leaf.RowCount(), (unsigned long long)leaf.Waves(), (long long)leaf.Passed(),
+				        (long long)limit, leaf.TimingSummary().c_str());
 			}
 			continue;
 		}
@@ -336,10 +335,10 @@ SinkFinalizeType PhysicalAIRegion::Finalize(Pipeline &pipeline, Event &event, Cl
 			fprintf(stderr,
 			        "[stream-dedup] distinct=%llu rows=%llu waves=%llu first_wave_at_rows=%llu "
 			        "floor=%llu min_full_wave=%llu last_flush=%llu segments=%zu\n",
-			        (unsigned long long)map.DistinctCount(), (unsigned long long)rows,
-			        (unsigned long long)st.waves, (unsigned long long)st.rows_at_first_wave,
-			        (unsigned long long)AIRegionWaveSize(), (unsigned long long)st.min_full_wave,
-			        (unsigned long long)st.last_flush_reps, gstate.segments.size());
+			        (unsigned long long)map.DistinctCount(), (unsigned long long)rows, (unsigned long long)st.waves,
+			        (unsigned long long)st.rows_at_first_wave, (unsigned long long)AIRegionWaveSize(),
+			        (unsigned long long)st.min_full_wave, (unsigned long long)st.last_flush_reps,
+			        gstate.segments.size());
 		}
 	}
 	D_ASSERT(gstate.results.size() == gstate.buffer.Count());
@@ -370,7 +369,7 @@ unique_ptr<GlobalSourceState> PhysicalAIRegion::GetGlobalSourceState(ClientConte
 }
 
 SourceResultType PhysicalAIRegion::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
-                                                  OperatorSourceInput &input) const {
+                                                   OperatorSourceInput &input) const {
 	auto &gsink = sink_state->Cast<AIRegionGlobalSinkState>();
 	auto &gstate = input.global_state.Cast<AIDedupGlobalSourceState>();
 

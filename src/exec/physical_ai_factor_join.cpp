@@ -110,8 +110,7 @@ SinkFinalizeType PhysicalAIFactorJoin::Finalize(Pipeline &, Event &, ClientConte
 //===--------------------------------------------------------------------===//
 class FactorJoinProbeState : public OperatorState {
 public:
-	FactorJoinProbeState(ClientContext &context, const PhysicalAIFactorJoin &op)
-	    : executor(context, *op.predicate) {
+	FactorJoinProbeState(ClientContext &context, const PhysicalAIFactorJoin &op) : executor(context, *op.predicate) {
 		// pair-evaluation chunk in the cross layout: probe columns then build columns
 		vector<LogicalType> cross_types(op.types.begin(), op.types.end() - 1);
 		pair_chunk.Initialize(Allocator::Get(context), cross_types);

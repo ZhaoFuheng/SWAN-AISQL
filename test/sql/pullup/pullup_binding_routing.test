@@ -1,12 +1,13 @@
 # name: test/sql/pullup/pullup_binding_routing.test
 # description: Binding integrity when hoists/pushes reshape plans under positional maps.
+# group: [pullup]
+
 #              Bug 1: pullup hoisted filters through a PROJECTION without routing their source
 #              columns (dangling base bindings on CTE shapes). Bug 2: the region push-below
 #              reordered the child output sequence under a parent FILTER whose positional
 #              projection_map then selected the wrong columns. Both found by the PLOP
 #              agent_bench CTE workload; both asserted here as no-error + exact result parity
 #              against the whole optimizer stack disabled.
-# group: [aisql]
 
 require aisql
 

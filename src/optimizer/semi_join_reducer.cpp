@@ -412,8 +412,8 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 			}
 		}
 		for (idx_t k = 0; k < target_exprs.size(); k++) {
-			reducer->conditions.push_back(JoinCondition(std::move(target_exprs[k]), std::move(rhs_exprs[k]),
-			                                            ExpressionType::COMPARE_EQUAL));
+			reducer->conditions.push_back(
+			    JoinCondition(std::move(target_exprs[k]), std::move(rhs_exprs[k]), ExpressionType::COMPARE_EQUAL));
 		}
 		reducer->children.push_back(std::move(*target));
 		reducer->children.push_back(std::move(reducer_side));

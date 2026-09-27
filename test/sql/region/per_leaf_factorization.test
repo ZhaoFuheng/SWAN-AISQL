@@ -1,5 +1,7 @@
 # name: test/sql/region/per_leaf_factorization.test
 # description: PER-LEAF FACTORIZATION. A region whose folded tree keys on >= 2 sides of the join below
+# group: [region]
+
 #              keeps one dictionary PER LEAF (each on that leaf's own columns) instead of one on the
 #              union of all leaf columns, and evaluates leaf batches in a global DP order, a later
 #              leaf only for reps some undecided row still needs. Observable as call counts equal to
@@ -8,7 +10,6 @@
 #              Every shape is parity-checked against the BLOCKING path (ai_debug_region_blocking=true:
 #              one tuple-keyed global evaluation, an independent implementation); the mock's verdict is
 #              deterministic per prompt, so the two must agree row for row.
-# group: [aisql]
 
 require aisql
 

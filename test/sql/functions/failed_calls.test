@@ -1,9 +1,10 @@
 # name: test/sql/functions/failed_calls.test
 # description: A request that gets no usable answer must be VISIBLE: the function yields NULL and
+# group: [functions]
+
 #              ai_usage().failed_calls counts it (llm_calls counts only answered requests). Before,
 #              an unreachable endpoint gave NULLs and a zero-call ai_usage() with no message -- the
 #              "SELECT ai_filter('some text') -> NULL, 0 llm calls" report from a first-time user.
-# group: [aisql]
 
 require aisql
 

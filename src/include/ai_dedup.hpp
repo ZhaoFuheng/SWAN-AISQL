@@ -83,7 +83,6 @@ void AIDedupFireWaveFactorized(ClientContext &context, const BoundFunctionExpres
 void AIDedupFireWaveScalarFactorized(ClientContext &context, const BoundFunctionExpression &eval_call,
                                      DataChunk &factorized, vector<Value> &out_values);
 
-
 //===--------------------------------------------------------------------===//
 // Factor-graph seams (used by PhysicalAIFactorGraph: unary leaves evaluate over side dictionaries,
 // binary leaves over surviving pair domains -- the cross product is never materialized)

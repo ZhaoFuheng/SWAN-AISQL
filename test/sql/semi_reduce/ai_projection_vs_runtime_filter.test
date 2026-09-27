@@ -1,11 +1,12 @@
 # name: test/sql/semi_reduce/ai_projection_vs_runtime_filter.test
 # description: MMQA q1 shape -- an ai_complete PROJECTION under a plain-key join to a selective
+# group: [semi_reduce]
+
 #              neighbour. On this shape DuckDB's runtime hash-join filter (join_filter_pushdown)
 #              ALSO prunes the scan at execution time, which used to be the only reason q1 cost
 #              1 call: the reducer's SEMI landed above the projection and pruned rows already paid
 #              for. The claim under test: the 1 call is now the REDUCER's doing. Disabling the
 #              runtime filter must leave it at 1; only with both off does it become 200.
-# group: [aisql]
 
 require aisql
 

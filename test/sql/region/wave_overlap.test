@@ -1,5 +1,7 @@
 # name: test/sql/region/wave_overlap.test
 # description: Overlapping region waves (ai_debug_wave_overlap) change only SCHEDULING, never results or
+# group: [region]
+
 #              call counts. A wave's LLM batch is only as wide as the distinct PROMPTS its reps carry, so
 #              above a join that repeats one side's prompt across a chunk a wave can issue a single call
 #              while Sink blocks on it; running several waves at once refills the request pool. Nothing is
@@ -9,7 +11,6 @@
 #              shape where short-circuiting makes a leaf unnecessary is NOT count-stable -- the MLP's
 #              exploration of that leaf varies with timing in either direction -- so it must not be
 #              asserted on. See [[agentbench-latency-wave-trickle]].
-# group: [aisql]
 
 require aisql
 

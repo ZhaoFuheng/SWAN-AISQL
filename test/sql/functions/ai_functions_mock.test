@@ -1,6 +1,6 @@
 # name: test/sql/functions/ai_functions_mock.test
 # description: AI scalar/table functions end-to-end against the in-process deterministic mock
-# group: [aisql]
+# group: [functions]
 
 require aisql
 

@@ -95,11 +95,11 @@ private:
 		float label;
 	};
 	std::mutex buffer_mutex;
-	std::deque<Sample> buffer;         // fixed-size FIFO of the most recent examples
-	uint64_t examples_seen = 0;        // total AddExample calls
-	uint64_t train_steps = 0;          // total completed mini-batch steps
-	double first_loss = -1.0;          // BCE of the first step (-1 = none yet)
-	double last_loss = -1.0;           // BCE of the most recent step
+	std::deque<Sample> buffer;  // fixed-size FIFO of the most recent examples
+	uint64_t examples_seen = 0; // total AddExample calls
+	uint64_t train_steps = 0;   // total completed mini-batch steps
+	double first_loss = -1.0;   // BCE of the first step (-1 = none yet)
+	double last_loss = -1.0;    // BCE of the most recent step
 
 	std::atomic<bool> training_in_flight {false};
 

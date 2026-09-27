@@ -207,12 +207,21 @@ struct MockServerState {
 	string saved_model;
 };
 
-std::mutex g_mock_mutex;
+static std::mutex &MockMutex() {
+	static std::mutex value;
+	return value;
+}
 //! Requests that carried an explicit prompt-cache breakpoint (write or read), for policy tests.
-std::atomic<int64_t> g_mock_breakpoint_requests {0};
+static std::atomic<int64_t> &MockBreakpointRequests() {
+	static std::atomic<int64_t> value {0};
+	return value;
+}
 // Leaked on purpose: a detached listener thread may outlive main() (a failed test skips
 // ai_mock_stop), and static destruction of the server while it runs would crash the harness.
-MockServerState &g_mock = *(new MockServerState());
+static MockServerState &Mock() {
+	static MockServerState &state = *(new MockServerState());
+	return state;
+}
 
 void HandlePost(const duckdb_httplib::Request &req, duckdb_httplib::Response &res) {
 	yyjson_doc *doc = yyjson_read(req.body.c_str(), req.body.size(), 0);
@@ -324,7 +333,7 @@ void HandlePost(const duckdb_httplib::Request &req, duckdb_httplib::Response &re
 	} else {
 		// chat completion: seed = last user message content (python-dumps'd when multimodal)
 		if (req.body.find("\"prompt_cache_breakpoint\"") != string::npos) {
-			g_mock_breakpoint_requests.fetch_add(1);
+			MockBreakpointRequests().fetch_add(1);
 		}
 		string seed;
 		yyjson_val *msgs = root ? yyjson_obj_get(root, "messages") : nullptr;
@@ -350,8 +359,8 @@ void HandlePost(const duckdb_httplib::Request &req, duckdb_httplib::Response &re
 							yyjson_arr_foreach(content, pidx, pmax, part) {
 								yyjson_val *ptype = yyjson_is_obj(part) ? yyjson_obj_get(part, "type") : nullptr;
 								yyjson_val *ptext = yyjson_is_obj(part) ? yyjson_obj_get(part, "text") : nullptr;
-								if (!ptype || !yyjson_is_str(ptype) ||
-								    string(yyjson_get_str(ptype)) != "text" || !ptext || !yyjson_is_str(ptext)) {
+								if (!ptype || !yyjson_is_str(ptype) || string(yyjson_get_str(ptype)) != "text" ||
+								    !ptext || !yyjson_is_str(ptext)) {
 									all_text = false;
 									break;
 								}
@@ -424,15 +433,17 @@ void HandlePost(const duckdb_httplib::Request &req, duckdb_httplib::Response &re
 } // namespace
 
 int AIMockStart() {
-	g_mock_breakpoint_requests.store(0);
-	std::lock_guard<std::mutex> lock(g_mock_mutex);
-	if (g_mock.server) {
-		return g_mock.port; // already running
+	MockBreakpointRequests().store(0);
+	std::lock_guard<std::mutex> lock(MockMutex());
+	if (Mock().server) {
+		return Mock().port; // already running
 	}
 	auto server = std::make_unique<duckdb_httplib::Server>();
 	// Keep-alive clients hold one server thread per persistent connection; the default pool
 	// (~hardware threads) starves under 20+ pooled engine connections, so size it explicitly.
-	server->new_task_queue = [] { return new duckdb_httplib::ThreadPool(64); };
+	server->new_task_queue = [] {
+		return new duckdb_httplib::ThreadPool(64);
+	};
 	server->Post(R"(.*)", HandlePost);
 	server->Get(R"(.*)", [](const duckdb_httplib::Request &, duckdb_httplib::Response &res) {
 		res.set_content("{\"status\": \"ok\"}", "application/json");
@@ -442,17 +453,17 @@ int AIMockStart() {
 		throw IOException("ai_mock_start: could not bind a port");
 	}
 	auto *srv = server.get();
-	g_mock.server = std::move(server);
-	g_mock.port = port;
+	Mock().server = std::move(server);
+	Mock().port = port;
 	std::thread([srv]() { srv->listen_after_bind(); }).detach();
 	while (!srv->is_running()) {
 		std::this_thread::yield();
 	}
 	auto &cfg = AIConfig::Mutable();
-	g_mock.saved_base_url = cfg.base_url;
-	g_mock.saved_embed_url = cfg.embed_url;
-	g_mock.saved_typesafe_url = cfg.typesafe_url;
-	g_mock.saved_model = cfg.model;
+	Mock().saved_base_url = cfg.base_url;
+	Mock().saved_embed_url = cfg.embed_url;
+	Mock().saved_typesafe_url = cfg.typesafe_url;
+	Mock().saved_model = cfg.model;
 	const string url = "http://127.0.0.1:" + std::to_string(port);
 	cfg.base_url = url;
 	cfg.embed_url = url;
@@ -462,21 +473,21 @@ int AIMockStart() {
 }
 
 bool AIMockStop() {
-	std::lock_guard<std::mutex> lock(g_mock_mutex);
-	if (!g_mock.server) {
+	std::lock_guard<std::mutex> lock(MockMutex());
+	if (!Mock().server) {
 		return false;
 	}
-	g_mock.server->stop();
-	while (g_mock.server->is_running()) {
+	Mock().server->stop();
+	while (Mock().server->is_running()) {
 		std::this_thread::yield();
 	}
-	g_mock.server.reset();
-	g_mock.port = 0;
+	Mock().server.reset();
+	Mock().port = 0;
 	auto &cfg = AIConfig::Mutable();
-	cfg.base_url = g_mock.saved_base_url;
-	cfg.embed_url = g_mock.saved_embed_url;
-	cfg.typesafe_url = g_mock.saved_typesafe_url;
-	cfg.model = g_mock.saved_model;
+	cfg.base_url = Mock().saved_base_url;
+	cfg.embed_url = Mock().saved_embed_url;
+	cfg.typesafe_url = Mock().saved_typesafe_url;
+	cfg.model = Mock().saved_model;
 	return true;
 }
 
@@ -487,8 +498,8 @@ struct AIMockBindData : public TableFunctionData {
 	bool done = false;
 };
 
-static unique_ptr<FunctionData> AIMockBind(ClientContext &, TableFunctionBindInput &,
-                                           vector<LogicalType> &return_types, vector<Identifier> &names) {
+static unique_ptr<FunctionData> AIMockBind(ClientContext &, TableFunctionBindInput &, vector<LogicalType> &return_types,
+                                           vector<Identifier> &names) {
 	return_types.emplace_back(LogicalType::INTEGER);
 	names.emplace_back("port");
 	return make_uniq<AIMockBindData>();
@@ -515,8 +526,7 @@ static void AIMockStopFunction(ClientContext &, TableFunctionInput &data, DataCh
 }
 
 static unique_ptr<FunctionData> AIMockBreakpointsBind(ClientContext &, TableFunctionBindInput &,
-                                                      vector<LogicalType> &return_types,
-                                                      vector<Identifier> &names) {
+                                                      vector<LogicalType> &return_types, vector<Identifier> &names) {
 	return_types.emplace_back(LogicalType::BIGINT);
 	names.emplace_back("breakpoint_requests");
 	return make_uniq<AIMockBindData>();
@@ -529,14 +539,13 @@ static void AIMockBreakpointsFunction(ClientContext &, TableFunctionInput &data,
 	}
 	bind.done = true;
 	output.SetChildCardinality(1);
-	output.SetValue(0, 0, Value::BIGINT(g_mock_breakpoint_requests.load()));
+	output.SetValue(0, 0, Value::BIGINT(MockBreakpointRequests().load()));
 }
 
 void RegisterAIMockFunctions(ExtensionLoader &loader) {
 	loader.RegisterFunction(TableFunction("ai_mock_start", {}, AIMockStartFunction, AIMockBind));
 	loader.RegisterFunction(TableFunction("ai_mock_stop", {}, AIMockStopFunction, AIMockBind));
-	loader.RegisterFunction(
-	    TableFunction("ai_mock_breakpoints", {}, AIMockBreakpointsFunction, AIMockBreakpointsBind));
+	loader.RegisterFunction(TableFunction("ai_mock_breakpoints", {}, AIMockBreakpointsFunction, AIMockBreakpointsBind));
 }
 
 } // namespace duckdb

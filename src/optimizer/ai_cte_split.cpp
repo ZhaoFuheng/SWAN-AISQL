@@ -148,9 +148,9 @@ static bool SplitOne(Binder &binder, unique_ptr<LogicalOperator> &op) {
 	// per reference is cheap. That is the whole trade this pass makes.
 	cte.materialize = CTEMaterialize::CTE_MATERIALIZE_NEVER;
 
-	auto outer = make_uniq<LogicalMaterializedCTE>(Identifier("__ai_prefix"), prefix_cte_index, prefix_types.size(),
-	                                               std::move(relational), std::move(op),
-	                                               CTEMaterialize::CTE_MATERIALIZE_ALWAYS);
+	auto outer =
+	    make_uniq<LogicalMaterializedCTE>(Identifier("__ai_prefix"), prefix_cte_index, prefix_types.size(),
+	                                      std::move(relational), std::move(op), CTEMaterialize::CTE_MATERIALIZE_ALWAYS);
 	outer->ResolveOperatorTypes();
 	op = std::move(outer);
 	return true;

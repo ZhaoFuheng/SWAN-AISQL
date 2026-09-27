@@ -22,8 +22,8 @@ namespace duckdb {
 //! Streaming by default (ai_debug_region_blocking=true falls back to one global evaluation in Finalize). A
 //! folded NODE is held per leaf (exec/ai_leaf_region.hpp: |A| + |B| reps, per-row leaf order, leaf waves in
 //! prompt currency); a plain SCALAR call folds into an AISQLMapChunk on its key columns and fires a WAVE once
-//! >= ai_debug_wave_size (default 5 x ai_concurrency) new distinct reps have accumulated. In practice a wave is one input chunk's worth of
-//! new reps, because a wave drains everything pending and every chunk clears the floor.
+//! >= ai_debug_wave_size (default 5 x ai_concurrency) new distinct reps have accumulated. In practice a wave is one
+//! input chunk's worth of new reps, because a wave drains everything pending and every chunk clears the floor.
 //!
 //! A wave's LLM batch is only as wide as the DISTINCT PROMPTS its reps carry, not its rep count: above a
 //! join that repeats one side's prompt across a whole chunk, a wave can collapse to a single call. So up to
@@ -39,7 +39,7 @@ public:
 
 public:
 	PhysicalAIRegion(PhysicalPlan &physical_plan, vector<LogicalType> types, unique_ptr<Expression> eval_call,
-	                idx_t estimated_cardinality, int64_t limit = -1);
+	                 idx_t estimated_cardinality, int64_t limit = -1);
 
 	//! The AI call (a BoundFunctionExpression) evaluated once per distinct input and broadcast to all rows.
 	unique_ptr<Expression> eval_call;

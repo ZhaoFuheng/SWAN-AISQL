@@ -1,5 +1,7 @@
 # name: test/sql/functions/null_prompt_columns.test
 # description: NULL handling for a prompt built from columns. A prompt made with `||` is NULL if
+# group: [functions]
+
 #              ANY operand is, so ONE missing field erased the whole prompt and the predicate never
 #              saw the columns that DID have values -- the row was dropped with nothing judged.
 #
@@ -12,7 +14,6 @@
 #              Expressed in the EXPRESSION rather than in each function, so every evaluation path
 #              inherits it -- the scalar functions and equally the folded reorder node, which
 #              rebuilds prompts from this expression.
-# group: [aisql]
 
 require aisql
 

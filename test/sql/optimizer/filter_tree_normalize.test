@@ -1,5 +1,7 @@
 # name: test/sql/optimizer/filter_tree_normalize.test
 # description: The boolean tree handed to the DP orderer is normalized: leaves are identified by
+# group: [optimizer]
+
 #              their PROMPT (the same question asked twice is one leaf), NOT is pushed to the
 #              leaves (De Morgan), same-type nodes are flattened, and duplicate / absorbed /
 #              common-factored subtrees collapse.
@@ -12,7 +14,6 @@
 #              KLEENE ONLY: every rule below holds in three-valued logic, which is the logic an AI
 #              leaf lives in (its verdict may be NULL/UNKNOWN). Complement (`a AND NOT a`) is NOT
 #              applied -- it is UNKNOWN, not FALSE, when a is UNKNOWN.
-# group: [aisql]
 
 require aisql
 

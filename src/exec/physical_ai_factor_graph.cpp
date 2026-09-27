@@ -20,8 +20,7 @@ namespace duckdb {
 
 PhysicalAIFactorGraph::PhysicalAIFactorGraph(PhysicalPlan &physical_plan, vector<LogicalType> types_p,
                                              unique_ptr<Expression> node_p, vector<idx_t> side_widths_p,
-                                             int64_t limit_p, idx_t existential_side_p,
-                                             idx_t estimated_cardinality)
+                                             int64_t limit_p, idx_t existential_side_p, idx_t estimated_cardinality)
     : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, std::move(types_p), estimated_cardinality),
       node(std::move(node_p)), side_widths(std::move(side_widths_p)), limit(limit_p),
       existential_side(existential_side_p) {
@@ -44,8 +43,8 @@ PhysicalAIFactorGraph::PhysicalAIFactorGraph(PhysicalPlan &physical_plan, vector
 			unary_leaves[sides[0]].push_back(l);
 			continue;
 		}
-		auto it = std::find_if(edges.begin(), edges.end(),
-		                       [&](const Edge &e) { return e.s == sides[0] && e.t == sides[1]; });
+		auto it =
+		    std::find_if(edges.begin(), edges.end(), [&](const Edge &e) { return e.s == sides[0] && e.t == sides[1]; });
 		if (it == edges.end()) {
 			edges.push_back(Edge {sides[0], sides[1], {l}});
 		} else {
@@ -197,7 +196,6 @@ static void EvaluateDomain(ClientContext &context, const Expression &sub_node, c
 	}
 }
 
-
 //===--------------------------------------------------------------------===//
 // Lazy (need-driven streaming) evaluation -- ai_debug_graph_eval='lazy'
 //
@@ -325,11 +323,11 @@ struct GraphStreamPool {
 						tasks.pop_front();
 					}
 					bool valid = false;
-					const bool value = AIFactorEvalUnit(task.sub_node->Cast<BoundFunctionExpression>(),
-					                                    task.prompts, query_text, valid,
-					                                    task.prefixes.empty() ? nullptr : &task.prefixes,
-					                                    task.expected_reuse) &&
-					                   valid;
+					const bool value =
+					    AIFactorEvalUnit(task.sub_node->Cast<BoundFunctionExpression>(), task.prompts, query_text,
+					                     valid, task.prefixes.empty() ? nullptr : &task.prefixes,
+					                     task.expected_reuse) &&
+					    valid;
 					{
 						std::lock_guard<std::mutex> lock(m);
 						done.push_back(Done {std::move(task.key), task.is_unary, task.domain, task.a, task.b, value});
@@ -380,8 +378,7 @@ struct GraphStreamPool {
 static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGraph &op,
                                       FactorGraphSinkState &sink, const string &query_text,
                                       const vector<idx_t> &parent_edge_of_side, const vector<idx_t> &side_level,
-                                      vector<vector<char>> &live,
-                                      vector<vector<std::pair<idx_t, idx_t>>> &edge_pass) {
+                                      vector<vector<char>> &live, vector<vector<std::pair<idx_t, idx_t>>> &edge_pass) {
 	const idx_t k1 = op.side_widths.size();
 	const idx_t ne = op.edges.size();
 	const idx_t total_width = op.side_offsets.back() + op.side_widths.back();
@@ -575,16 +572,14 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 			useful[s].assign(sink.sides[s].reps.size(), 0);
 		}
 		for (idx_t m = 0; m < satisfied.size(); m++) {
-			useful[es][m] = live[es][m] && !satisfied[m] &&
-			                (op.unary_leaves[es].empty() || uval[es][m] == 1);
+			useful[es][m] = live[es][m] && !satisfied[m] && (op.unary_leaves[es].empty() || uval[es][m] == 1);
 		}
 		// sides in increasing level order inherit usefulness across their parent edge
 		vector<idx_t> order(k1);
 		for (idx_t s = 0; s < k1; s++) {
 			order[s] = s;
 		}
-		std::sort(order.begin(), order.end(),
-		          [&](idx_t x, idx_t y) { return side_level[x] < side_level[y]; });
+		std::sort(order.begin(), order.end(), [&](idx_t x, idx_t y) { return side_level[x] < side_level[y]; });
 		for (const auto s : order) {
 			const idx_t pe = parent_edge_of_side[s];
 			if (pe == DConstants::INVALID_INDEX) {
@@ -642,8 +637,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 		}
 		edge_sub[e] = AIFactorSubNode(fn, edge.leaf_ids, index_map);
 		edge_types[e].assign(op.types.begin() + NumericCast<int64_t>(op.side_offsets[edge.s]),
-		                     op.types.begin() +
-		                         NumericCast<int64_t>(op.side_offsets[edge.s] + op.side_widths[edge.s]));
+		                     op.types.begin() + NumericCast<int64_t>(op.side_offsets[edge.s] + op.side_widths[edge.s]));
 		for (idx_t c = 0; c < op.side_widths[edge.t]; c++) {
 			edge_types[e].push_back(op.types[op.side_offsets[edge.t] + c]);
 		}
@@ -1032,8 +1026,8 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 		}
 		parked.emplace(key, vector<GraphStreamPool::Done> {});
 		pool.Submit(GraphStreamPool::Task {is_unary ? side_sub[domain].get() : edge_sub[domain].get(),
-		                                   std::move(prompts), std::move(prefixes), std::move(key), is_unary, domain,
-		                                   a, b, expected_reuse});
+		                                   std::move(prompts), std::move(prefixes), std::move(key), is_unary, domain, a,
+		                                   b, expected_reuse});
 	};
 	auto apply_value = [&](bool is_unary, idx_t domain, idx_t a, idx_t b, bool value) {
 		if (is_unary) {
@@ -1124,8 +1118,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 						if (!parent_ok(e, pm) || open_child_edge(parent_of[e], pm) != e) {
 							continue;
 						}
-						const double p_fail =
-						    1.0 - 0.5 * (member_est(e, true, i) + member_est(e, false, j));
+						const double p_fail = 1.0 - 0.5 * (member_est(e, true, i) + member_est(e, false, j));
 						const double score =
 						    p_fail * (0.1 + kill_credit(e, edge.s, true, i) + kill_credit(e, edge.t, false, j));
 						if (score > best_pair_score) {
@@ -1135,16 +1128,15 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 					}
 				}
 			}
-			if (best_unary_side < k1 &&
-			    (best_pair_edge == ne || best_unary_score >= best_pair_score)) {
+			if (best_unary_side < k1 && (best_pair_edge == ne || best_unary_score >= best_pair_score)) {
 				// batch = highest-impact ready members of the chosen side
 				vector<std::pair<double, idx_t>> scored;
 				for (idx_t m = 0; m < uval[best_unary_side].size(); m++) {
 					if (live[best_unary_side][m] && uval[best_unary_side][m] == 0) {
-						scored.emplace_back(-static_cast<double>(unknown_pairs(
-						                        best_unary_side, m, DConstants::INVALID_INDEX,
-						                        DConstants::INVALID_INDEX)),
-						                    m);
+						scored.emplace_back(
+						    -static_cast<double>(unknown_pairs(best_unary_side, m, DConstants::INVALID_INDEX,
+						                                       DConstants::INVALID_INDEX)),
+						    m);
 					}
 				}
 				std::sort(scored.begin(), scored.end());
@@ -1325,139 +1317,140 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 	{
 		vector<idx_t> parent_edge_of_side, side_level;
 		if (AIConfig::Get().graph_eval_lazy && OrientForest(op, sink, parent_edge_of_side, side_level)) {
-			LazyFactorGraphEvaluation(context, op, sink, query_text, parent_edge_of_side, side_level, live,
-			                          edge_pass);
+			LazyFactorGraphEvaluation(context, op, sink, query_text, parent_edge_of_side, side_level, live, edge_pass);
 			lazy_done = true;
 		}
 	}
 	if (!lazy_done) {
-	// 1. Unary pre-pass: side predicates over member domains; a false member dies before any
-	//    tuple containing it exists.
-	for (idx_t s = 0; s < k; s++) {
-		if (op.unary_leaves[s].empty() || sink.sides[s].reps.empty()) {
-			continue;
+		// 1. Unary pre-pass: side predicates over member domains; a false member dies before any
+		//    tuple containing it exists.
+		for (idx_t s = 0; s < k; s++) {
+			if (op.unary_leaves[s].empty() || sink.sides[s].reps.empty()) {
+				continue;
+			}
+			vector<idx_t> index_map(total_width, DConstants::INVALID_INDEX);
+			for (idx_t c = 0; c < op.side_widths[s]; c++) {
+				index_map[op.side_offsets[s] + c] = c;
+			}
+			auto sub_node = AIFactorSubNode(fn, op.unary_leaves[s], index_map);
+			vector<LogicalType> chunk_types(op.types.begin() + NumericCast<int64_t>(op.side_offsets[s]),
+			                                op.types.begin() +
+			                                    NumericCast<int64_t>(op.side_offsets[s] + op.side_widths[s]));
+			chunk_types.push_back(LogicalType::BIGINT); // trailing __count
+			auto &side = sink.sides[s];
+			vector<char> pass;
+			EvaluateDomain(
+			    context, *sub_node, chunk_types, side.reps.size(), query_text,
+			    [&](DataChunk &chunk, idx_t j, idx_t row) {
+				    for (idx_t c = 0; c < op.side_widths[s]; c++) {
+					    chunk.data[c].SetValue(j, side.reps[row][c]);
+				    }
+				    chunk.data[op.side_widths[s]].SetValue(j, Value::BIGINT(NumericCast<int64_t>(side.counts[row])));
+			    },
+			    pass);
+			for (idx_t r = 0; r < side.reps.size(); r++) {
+				live[s][r] = pass[r];
+			}
 		}
-		vector<idx_t> index_map(total_width, DConstants::INVALID_INDEX);
-		for (idx_t c = 0; c < op.side_widths[s]; c++) {
-			index_map[op.side_offsets[s] + c] = c;
-		}
-		auto sub_node = AIFactorSubNode(fn, op.unary_leaves[s], index_map);
-		vector<LogicalType> chunk_types(op.types.begin() + NumericCast<int64_t>(op.side_offsets[s]),
-		                                op.types.begin() + NumericCast<int64_t>(op.side_offsets[s] + op.side_widths[s]));
-		chunk_types.push_back(LogicalType::BIGINT); // trailing __count
-		auto &side = sink.sides[s];
-		vector<char> pass;
-		EvaluateDomain(context, *sub_node, chunk_types, side.reps.size(), query_text,
-		               [&](DataChunk &chunk, idx_t j, idx_t row) {
-			               for (idx_t c = 0; c < op.side_widths[s]; c++) {
-				               chunk.data[c].SetValue(j, side.reps[row][c]);
-			               }
-			               chunk.data[op.side_widths[s]].SetValue(j, Value::BIGINT(NumericCast<int64_t>(side.counts[row])));
-		               },
-		               pass);
-		for (idx_t r = 0; r < side.reps.size(); r++) {
-			live[s][r] = pass[r];
-		}
-	}
 
-	// 2. Edges over surviving pair domains, smallest live domain first; cascade deletions to
-	//    fixed point after each edge so later domains shrink further.
-	vector<char> edge_done(ne, 0);
-	for (idx_t round = 0; round < ne; round++) {
-		idx_t best = ne;
-		idx_t best_size = 0;
-		for (idx_t e = 0; e < ne; e++) {
-			if (edge_done[e]) {
-				continue;
-			}
-			const idx_t size = live_count(op.edges[e].s) * live_count(op.edges[e].t);
-			if (best == ne || size < best_size) {
-				best = e;
-				best_size = size;
-			}
-		}
-		auto &edge = op.edges[best];
-		edge_done[best] = 1;
-		vector<std::pair<idx_t, idx_t>> pairs;
-		for (idx_t i = 0; i < sink.sides[edge.s].reps.size(); i++) {
-			if (!live[edge.s][i]) {
-				continue;
-			}
-			for (idx_t j = 0; j < sink.sides[edge.t].reps.size(); j++) {
-				if (live[edge.t][j]) {
-					pairs.emplace_back(i, j);
-				}
-			}
-		}
-		vector<idx_t> index_map(total_width, DConstants::INVALID_INDEX);
-		for (idx_t c = 0; c < op.side_widths[edge.s]; c++) {
-			index_map[op.side_offsets[edge.s] + c] = c;
-		}
-		for (idx_t c = 0; c < op.side_widths[edge.t]; c++) {
-			index_map[op.side_offsets[edge.t] + c] = op.side_widths[edge.s] + c;
-		}
-		auto sub_node = AIFactorSubNode(fn, edge.leaf_ids, index_map);
-		vector<LogicalType> chunk_types(op.types.begin() + NumericCast<int64_t>(op.side_offsets[edge.s]),
-		                                op.types.begin() +
-		                                    NumericCast<int64_t>(op.side_offsets[edge.s] + op.side_widths[edge.s]));
-		for (idx_t c = 0; c < op.side_widths[edge.t]; c++) {
-			chunk_types.push_back(op.types[op.side_offsets[edge.t] + c]);
-		}
-		chunk_types.push_back(LogicalType::BIGINT);
-		auto &s_side = sink.sides[edge.s];
-		auto &t_side = sink.sides[edge.t];
-		vector<char> pass;
-		EvaluateDomain(context, *sub_node, chunk_types, pairs.size(), query_text,
-		               [&](DataChunk &chunk, idx_t j, idx_t row) {
-			               auto &pair = pairs[row];
-			               for (idx_t c = 0; c < op.side_widths[edge.s]; c++) {
-				               chunk.data[c].SetValue(j, s_side.reps[pair.first][c]);
-			               }
-			               for (idx_t c = 0; c < op.side_widths[edge.t]; c++) {
-				               chunk.data[op.side_widths[edge.s] + c].SetValue(j, t_side.reps[pair.second][c]);
-			               }
-			               chunk.data[op.side_widths[edge.s] + op.side_widths[edge.t]].SetValue(j, Value::BIGINT(1));
-		               },
-		               pass);
-		for (idx_t p = 0; p < pairs.size(); p++) {
-			if (pass[p]) {
-				edge_pass[best].push_back(pairs[p]);
-			}
-		}
-		// Backward cascade: a live member with no passing live partner on an evaluated incident
-		// edge cannot appear in any surviving tuple -- delete it; repeat to fixed point.
-		bool changed = true;
-		while (changed) {
-			changed = false;
+		// 2. Edges over surviving pair domains, smallest live domain first; cascade deletions to
+		//    fixed point after each edge so later domains shrink further.
+		vector<char> edge_done(ne, 0);
+		for (idx_t round = 0; round < ne; round++) {
+			idx_t best = ne;
+			idx_t best_size = 0;
 			for (idx_t e = 0; e < ne; e++) {
-				if (!edge_done[e]) {
+				if (edge_done[e]) {
 					continue;
 				}
-				auto &ed = op.edges[e];
-				vector<char> has_s(sink.sides[ed.s].reps.size(), 0);
-				vector<char> has_t(sink.sides[ed.t].reps.size(), 0);
-				for (auto &pair : edge_pass[e]) {
-					if (live[ed.s][pair.first] && live[ed.t][pair.second]) {
-						has_s[pair.first] = 1;
-						has_t[pair.second] = 1;
+				const idx_t size = live_count(op.edges[e].s) * live_count(op.edges[e].t);
+				if (best == ne || size < best_size) {
+					best = e;
+					best_size = size;
+				}
+			}
+			auto &edge = op.edges[best];
+			edge_done[best] = 1;
+			vector<std::pair<idx_t, idx_t>> pairs;
+			for (idx_t i = 0; i < sink.sides[edge.s].reps.size(); i++) {
+				if (!live[edge.s][i]) {
+					continue;
+				}
+				for (idx_t j = 0; j < sink.sides[edge.t].reps.size(); j++) {
+					if (live[edge.t][j]) {
+						pairs.emplace_back(i, j);
 					}
 				}
-				for (idx_t r = 0; r < has_s.size(); r++) {
-					if (live[ed.s][r] && !has_s[r]) {
-						live[ed.s][r] = 0;
-						changed = true;
-					}
+			}
+			vector<idx_t> index_map(total_width, DConstants::INVALID_INDEX);
+			for (idx_t c = 0; c < op.side_widths[edge.s]; c++) {
+				index_map[op.side_offsets[edge.s] + c] = c;
+			}
+			for (idx_t c = 0; c < op.side_widths[edge.t]; c++) {
+				index_map[op.side_offsets[edge.t] + c] = op.side_widths[edge.s] + c;
+			}
+			auto sub_node = AIFactorSubNode(fn, edge.leaf_ids, index_map);
+			vector<LogicalType> chunk_types(op.types.begin() + NumericCast<int64_t>(op.side_offsets[edge.s]),
+			                                op.types.begin() +
+			                                    NumericCast<int64_t>(op.side_offsets[edge.s] + op.side_widths[edge.s]));
+			for (idx_t c = 0; c < op.side_widths[edge.t]; c++) {
+				chunk_types.push_back(op.types[op.side_offsets[edge.t] + c]);
+			}
+			chunk_types.push_back(LogicalType::BIGINT);
+			auto &s_side = sink.sides[edge.s];
+			auto &t_side = sink.sides[edge.t];
+			vector<char> pass;
+			EvaluateDomain(
+			    context, *sub_node, chunk_types, pairs.size(), query_text,
+			    [&](DataChunk &chunk, idx_t j, idx_t row) {
+				    auto &pair = pairs[row];
+				    for (idx_t c = 0; c < op.side_widths[edge.s]; c++) {
+					    chunk.data[c].SetValue(j, s_side.reps[pair.first][c]);
+				    }
+				    for (idx_t c = 0; c < op.side_widths[edge.t]; c++) {
+					    chunk.data[op.side_widths[edge.s] + c].SetValue(j, t_side.reps[pair.second][c]);
+				    }
+				    chunk.data[op.side_widths[edge.s] + op.side_widths[edge.t]].SetValue(j, Value::BIGINT(1));
+			    },
+			    pass);
+			for (idx_t p = 0; p < pairs.size(); p++) {
+				if (pass[p]) {
+					edge_pass[best].push_back(pairs[p]);
 				}
-				for (idx_t r = 0; r < has_t.size(); r++) {
-					if (live[ed.t][r] && !has_t[r]) {
-						live[ed.t][r] = 0;
-						changed = true;
+			}
+			// Backward cascade: a live member with no passing live partner on an evaluated incident
+			// edge cannot appear in any surviving tuple -- delete it; repeat to fixed point.
+			bool changed = true;
+			while (changed) {
+				changed = false;
+				for (idx_t e = 0; e < ne; e++) {
+					if (!edge_done[e]) {
+						continue;
+					}
+					auto &ed = op.edges[e];
+					vector<char> has_s(sink.sides[ed.s].reps.size(), 0);
+					vector<char> has_t(sink.sides[ed.t].reps.size(), 0);
+					for (auto &pair : edge_pass[e]) {
+						if (live[ed.s][pair.first] && live[ed.t][pair.second]) {
+							has_s[pair.first] = 1;
+							has_t[pair.second] = 1;
+						}
+					}
+					for (idx_t r = 0; r < has_s.size(); r++) {
+						if (live[ed.s][r] && !has_s[r]) {
+							live[ed.s][r] = 0;
+							changed = true;
+						}
+					}
+					for (idx_t r = 0; r < has_t.size(); r++) {
+						if (live[ed.t][r] && !has_t[r]) {
+							live[ed.t][r] = 0;
+							changed = true;
+						}
 					}
 				}
 			}
 		}
-	}
-
 	}
 
 	// 3. Enumerate surviving tuples: DFS in side order; each new side's candidates are its live

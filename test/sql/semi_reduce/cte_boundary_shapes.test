@@ -1,5 +1,7 @@
 # name: test/sql/semi_reduce/cte_boundary_shapes.test
 # description: The CTE-boundary SPEC: for each shape a semantic CTE can take, what the AI predicate
+# group: [semi_reduce]
+
 #              must be evaluated on. Written as the contract any future boundary implementation has
 #              to satisfy, after three attempts at one broke these numbers in ways only the
 #              agent_bench runs caught.
@@ -24,7 +26,6 @@
 #              breaks is a CTE shared between another CTE's body and the main query, with a second
 #              AI CTE alongside -- the agent_bench Q26 arrangement, and the smallest one found
 #              that reproduces it.
-# group: [aisql]
 
 require aisql
 

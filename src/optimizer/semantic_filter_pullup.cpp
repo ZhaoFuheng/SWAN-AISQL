@@ -172,8 +172,8 @@ static void WidenJoinMaps(Expression &expr, LogicalJoin &join) {
 	ExpressionIterator::EnumerateChildren(expr, [&](Expression &child) { WidenJoinMaps(child, join); });
 }
 
-void SemanticFilterPullup::ExtractAIFilters(unique_ptr<LogicalOperator> &op,
-                                            vector<unique_ptr<Expression>> &pulled, idx_t cluster_card) {
+void SemanticFilterPullup::ExtractAIFilters(unique_ptr<LogicalOperator> &op, vector<unique_ptr<Expression>> &pulled,
+                                            idx_t cluster_card) {
 	if (op->type == LogicalOperatorType::LOGICAL_FILTER) {
 		auto &filter = op->Cast<LogicalFilter>();
 		// Detect the AI-comparison leaves (ai_filter / ai_classify=/ai_score>/ai_complete=) among the ANDed
@@ -196,28 +196,22 @@ void SemanticFilterPullup::ExtractAIFilters(unique_ptr<LogicalOperator> &op,
 		// NOTHING at the leaf (== pure pull-up); the pulled-up predicate is still result-complete.
 		unique_ptr<Expression> spec;
 		if (!leaves.empty()) {
-			const idx_t leaf_card = op->children.empty()
-			                            ? op->EstimateCardinality(optimizer.context)
-			                            : op->children[0]->EstimateCardinality(optimizer.context);
-			const double fanout =
-			    leaf_card ? static_cast<double>(cluster_card) / static_cast<double>(leaf_card) : 1.0;
-			const double min_fanout =
-			    AIDoubleSetting(optimizer.context, "ai_debug_speculative_min_fanout", 0.3);
+			const idx_t leaf_card = op->children.empty() ? op->EstimateCardinality(optimizer.context)
+			                                             : op->children[0]->EstimateCardinality(optimizer.context);
+			const double fanout = leaf_card ? static_cast<double>(cluster_card) / static_cast<double>(leaf_card) : 1.0;
+			const double min_fanout = AIDoubleSetting(optimizer.context, "ai_debug_speculative_min_fanout", 0.3);
 			// At threshold 0 the speculative gate passes every row through (pure pull-up) but the node still
 			// embeds/predicts each row -- pure overhead. Read the same AI_SPECULATIVE_THRESHOLD the node binds
 			// (default 0.5) and skip emitting it entirely when it is <= 0; the pulled-up filter is complete.
-			const double spec_threshold =
-			    AIDoubleSetting(optimizer.context, "ai_debug_speculative_threshold", 0.5);
+			const double spec_threshold = AIDoubleSetting(optimizer.context, "ai_debug_speculative_threshold", 0.5);
 			// The fanout gate exists because a speculative leaf pre-filter would spend LLM calls on rows a
 			// selective join discards. But Yannakakis now reduces the base RELATIONALLY before this node, so the
 			// leaf already sees only join-surviving rows -- making the gate obsolete. AI_SPECULATIVE_ALWAYS=1
 			// drops the fanout gate to measure that (the threshold<=0 "pure pull-up" bypass still applies).
-			const bool always_spec =
-			    AIBoolSetting(optimizer.context, "ai_debug_speculative_always", false);
+			const bool always_spec = AIBoolSetting(optimizer.context, "ai_debug_speculative_always", false);
 			const bool bypass = (!always_spec && fanout < min_fanout) || spec_threshold <= 0.0;
 			if (AIConfig::Get().debug_log.find("spec") != string::npos) {
-				fprintf(stderr,
-				        "[spec-debug] leaf_card=%llu cluster_card=%llu fanout=%.3f min=%.2f thr=%.2f -> %s\n",
+				fprintf(stderr, "[spec-debug] leaf_card=%llu cluster_card=%llu fanout=%.3f min=%.2f thr=%.2f -> %s\n",
 				        (unsigned long long)leaf_card, (unsigned long long)cluster_card, fanout, min_fanout,
 				        spec_threshold, bypass ? "BYPASS (pure pull-up)" : "emit speculative");
 			}

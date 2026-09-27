@@ -1,6 +1,5 @@
 #include "optimizer/ai_join_rewrite.hpp"
 
-
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/catalog_entry/scalar_function_catalog_entry.hpp"
 #include "duckdb/function/function_binder.hpp"
@@ -163,11 +162,11 @@ static void RemapPositionalMap(vector<ProjectionIndex> &map, const vector<Column
 //! and an AI region emits its child's columns in order and appends its own result, so the reshape is carried
 //! up through those until a map is reached. A region stacked above the pushed one is exactly the
 //! ai_reorder=false shape -- two unfolded filters over one join, the filter testing both results on top.
-static void RemapParentPositionalMaps(LogicalOperator &root, LogicalOperator &target,
-                                      vector<ColumnBinding> old_out) {
+static void RemapParentPositionalMaps(LogicalOperator &root, LogicalOperator &target, vector<ColumnBinding> old_out) {
 	optional_ptr<LogicalOperator> cur = &target;
 	while (auto parent = ParentOf(root, *cur)) {
-		if (parent->type == LogicalOperatorType::LOGICAL_FILTER || parent->type == LogicalOperatorType::LOGICAL_ORDER_BY) {
+		if (parent->type == LogicalOperatorType::LOGICAL_FILTER ||
+		    parent->type == LogicalOperatorType::LOGICAL_ORDER_BY) {
 			auto &map = parent->type == LogicalOperatorType::LOGICAL_FILTER
 			                ? parent->Cast<LogicalFilter>().projection_map
 			                : parent->Cast<LogicalOrder>().projection_map;
@@ -249,9 +248,9 @@ void AIJoinRewrite::TryPushBelowJoin(unique_ptr<LogicalOperator> &op, unique_ptr
 	// Region[P?[Join(..)]]  ->  P'?[Join(.., Region[side])]. The region's output binding (dedup_index, 0) flows
 	// up through the join (its bindings are the union of its children's); with a projection on top it is
 	// re-exposed via an appended passthrough, and consumers are rebound to the projection's new column.
-	auto region_node = std::move(op);                     // owns Region (child: P or Join)
-	unique_ptr<LogicalOperator> proj_node;                // owns P if present
-	unique_ptr<LogicalOperator> join_node;                // owns the Join
+	auto region_node = std::move(op);      // owns Region (child: P or Join)
+	unique_ptr<LogicalOperator> proj_node; // owns P if present
+	unique_ptr<LogicalOperator> join_node; // owns the Join
 	if (proj) {
 		proj_node = std::move(region_node->children[0]);
 		join_node = std::move(proj_node->children[0]);
@@ -386,8 +385,7 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 	// chain of cross products. The folded node's leaves must each read one side (unary) or two
 	// sides (edge), with at least one edge -- then the region collapses into an n-ary factor graph
 	// (member/pair domains with exact backward pruning; the cross product never materializes).
-	if (op->type != LogicalOperatorType::LOGICAL_FILTER || op->expressions.size() != 1 ||
-	    op->children.size() != 1) {
+	if (op->type != LogicalOperatorType::LOGICAL_FILTER || op->expressions.size() != 1 || op->children.size() != 1) {
 		return false;
 	}
 	auto *region = LogicalAIRegion::TryCast(*op->children[0]);
@@ -400,8 +398,7 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 		return false;
 	}
 	auto &colref = pred_ref.Cast<BoundColumnRefExpression>();
-	if (colref.Binding().table_index != region->region_index ||
-	    colref.Binding().column_index.GetIndex() != 0) {
+	if (colref.Binding().table_index != region->region_index || colref.Binding().column_index.GetIndex() != 0) {
 		return false;
 	}
 	if (region->expressions[0]->GetExpressionClass() != ExpressionClass::BOUND_FUNCTION) {
@@ -548,8 +545,7 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 
 bool AIJoinRewrite::TryFactorJoin(unique_ptr<LogicalOperator> &op) {
 	// Match: Filter(sole predicate == #region output) over AIRegion over CrossProduct.
-	if (op->type != LogicalOperatorType::LOGICAL_FILTER || op->expressions.size() != 1 ||
-	    op->children.size() != 1) {
+	if (op->type != LogicalOperatorType::LOGICAL_FILTER || op->expressions.size() != 1 || op->children.size() != 1) {
 		return false;
 	}
 	auto *region = LogicalAIRegion::TryCast(*op->children[0]);
@@ -562,8 +558,7 @@ bool AIJoinRewrite::TryFactorJoin(unique_ptr<LogicalOperator> &op) {
 		return false;
 	}
 	auto &colref = pred_ref.Cast<BoundColumnRefExpression>();
-	if (colref.Binding().table_index != region->region_index ||
-	    colref.Binding().column_index.GetIndex() != 0) {
+	if (colref.Binding().table_index != region->region_index || colref.Binding().column_index.GetIndex() != 0) {
 		return false;
 	}
 	auto &cross = *region->children[0];
@@ -603,8 +598,7 @@ bool AIJoinRewrite::TryFactorJoin(unique_ptr<LogicalOperator> &op) {
 	if (!reads_left || !reads_right) {
 		return false;
 	}
-	auto factor =
-	    make_uniq<LogicalAIFactorJoin>(region->region_index, std::move(region->expressions[0]));
+	auto factor = make_uniq<LogicalAIFactorJoin>(region->region_index, std::move(region->expressions[0]));
 	factor->children.push_back(std::move(cross.children[0]));
 	factor->children.push_back(std::move(cross.children[1]));
 	factor->ResolveOperatorTypes();
@@ -650,8 +644,8 @@ static void AddColumnRefs(const Expression &e, BindingSet &s) {
 static bool ExprHasAICall(const Expression &e) {
 	if (e.GetExpressionType() == ExpressionType::BOUND_FUNCTION) {
 		const auto name = e.Cast<BoundFunctionExpression>().Function().GetName();
-		if (name == "ai_function_with_embed" || name == "ai_filter" || name == "ai_classify" ||
-		    name == "ai_score" || name == "ai_complete") {
+		if (name == "ai_function_with_embed" || name == "ai_filter" || name == "ai_classify" || name == "ai_score" ||
+		    name == "ai_complete") {
 			return true;
 		}
 	}
@@ -734,8 +728,7 @@ static bool ConsumerIsDuplicateInsensitive(LogicalOperator &op, BindingSet &need
 bool AIJoinRewrite::TrySemiConvertForConsumer(LogicalOperator &consumer) {
 	BindingSet needed;
 	bool saw_ai = false;
-	if (consumer.children.size() != 1 || !ConsumerIsDuplicateInsensitive(consumer, needed, saw_ai) ||
-	    needed.Empty()) {
+	if (consumer.children.size() != 1 || !ConsumerIsDuplicateInsensitive(consumer, needed, saw_ai) || needed.Empty()) {
 		return false;
 	}
 	// Walk down through row-preserving ops, tracking what each level needs from below. Projections are opaque

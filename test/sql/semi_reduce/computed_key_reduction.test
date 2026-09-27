@@ -1,5 +1,7 @@
 # name: test/sql/semi_reduce/computed_key_reduction.test
 # description: Yannakakis semi-reduction must reach the AI leaf even when the join key is
+# group: [semi_reduce]
+
 #              COMPUTED in a projection above the ai_filter. The reducer descends below the
 #              ai_filter so the LLM runs on reduced rows only; a computed key (CAST/SPLIT_PART,
 #              arithmetic, concat) lives in a projection on that path, so the key expression is
@@ -8,7 +10,6 @@
 #              fingerprint (~150 calls where ~9 join candidates survive).
 #              Every case asserts BOTH the call count (the optimization) and exact result
 #              parity against the whole stack disabled (the correctness).
-# group: [aisql]
 
 require aisql
 

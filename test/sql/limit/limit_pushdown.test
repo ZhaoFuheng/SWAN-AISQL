@@ -1,6 +1,6 @@
 # name: test/sql/limit/limit_pushdown.test
 # description: AILimitPushdown plants LIMIT k into AI evaluation; sound, complete, and call-saving
-# group: [aisql]
+# group: [limit]
 
 require aisql
 

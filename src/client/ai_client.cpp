@@ -35,23 +35,36 @@ namespace duckdb {
 //===--------------------------------------------------------------------===//
 // Usage records: one AIQueryUsage per distinct query text, guarded by a mutex.
 //===--------------------------------------------------------------------===//
-static std::mutex g_usage_mutex;
-static std::unordered_map<string, idx_t> g_query_index; // query_text -> index into g_queries
-static vector<AIQueryUsage> g_queries;
-static uint64_t g_next_query_id = 1;
+static std::mutex &UsageMutex() {
+	static std::mutex value;
+	return value;
+}
+// query_text -> index into Queries()
+static std::unordered_map<string, idx_t> &QueryIndex() {
+	static std::unordered_map<string, idx_t> value;
+	return value;
+}
+static vector<AIQueryUsage> &Queries() {
+	static vector<AIQueryUsage> value;
+	return value;
+}
+static uint64_t &NextQueryId() {
+	static uint64_t value = 1;
+	return value;
+}
 
-// Caller must hold g_usage_mutex.
+// Caller must hold UsageMutex().
 static idx_t GetOrCreateQueryIndex(const string &query_text) {
-	auto it = g_query_index.find(query_text);
-	if (it != g_query_index.end()) {
+	auto it = QueryIndex().find(query_text);
+	if (it != QueryIndex().end()) {
 		return it->second;
 	}
-	const idx_t index = g_queries.size();
+	const idx_t index = Queries().size();
 	AIQueryUsage record;
-	record.query_id = g_next_query_id++;
+	record.query_id = NextQueryId()++;
 	record.query_text = query_text;
-	g_queries.push_back(std::move(record));
-	g_query_index.emplace(query_text, index);
+	Queries().push_back(std::move(record));
+	QueryIndex().emplace(query_text, index);
 	return index;
 }
 
@@ -63,11 +76,7 @@ static string GetEnvOr(const char *name, const string &fallback) {
 	return (value && value[0]) ? string(value) : fallback;
 }
 
-AIConfig &AIConfig::Mutable() {
-	return const_cast<AIConfig &>(Get());
-}
-
-const AIConfig &AIConfig::Get() {
+static AIConfig &ConfigInstance() {
 	static AIConfig config = []() {
 		AIConfig c;
 		c.base_url = GetEnvOr("AI_PROXY_URL", "http://localhost:4000");
@@ -144,6 +153,14 @@ const AIConfig &AIConfig::Get() {
 	return config;
 }
 
+const AIConfig &AIConfig::Get() {
+	return ConfigInstance();
+}
+
+AIConfig &AIConfig::Mutable() {
+	return ConfigInstance();
+}
+
 bool AIUsesTypeSafe(const AIRequest &request) {
 	const auto &config = AIConfig::Get();
 	// Jev is text-only: an image sentinel ANYWHERE in what would be sent (a join may carry the
@@ -163,14 +180,17 @@ bool AIUsesTypeSafe(const AIRequest &request) {
 }
 
 //! Turbo toggle: -1 = follow AI_TURBO default, 0 = forced off, 1 = forced on (via ai_turbo()).
-static std::atomic<int8_t> g_turbo_state {-1};
+static std::atomic<int8_t> &TurboState() {
+	static std::atomic<int8_t> value {-1};
+	return value;
+}
 
 void AITurboSetEnabled(bool enabled) {
-	g_turbo_state.store(enabled ? 1 : 0);
+	TurboState().store(enabled ? 1 : 0);
 }
 
 bool AITurboEnabled() {
-	const int8_t state = g_turbo_state.load();
+	const int8_t state = TurboState().load();
 	if (state < 0) {
 		return AIConfig::Get().turbo_default;
 	}
@@ -346,9 +366,18 @@ bool AIParseStringField(const string &content, const char *field, string &out) {
 // need absolute-ish counts (the prefix-cache gate) divide bytes by this ratio; the relative-cost
 // consumers (DP ordering) keep the plain bytes/4 stand-in, where only monotonicity matters.
 //===--------------------------------------------------------------------===//
-static std::mutex g_tokratio_mutex;
-static double g_tokratio_ema = 4.0;
-static idx_t g_tokratio_samples = 0;
+static std::mutex &TokratioMutex() {
+	static std::mutex value;
+	return value;
+}
+static double &TokratioEma() {
+	static double value = 4.0;
+	return value;
+}
+static idx_t &TokratioSamples() {
+	static idx_t value = 0;
+	return value;
+}
 
 static void ObserveTokenRatio(const string &body, uint64_t prompt_tokens) {
 	// text calls only (image base64 dominates bytes with unrelated token economics), and only
@@ -360,14 +389,14 @@ static void ObserveTokenRatio(const string &body, uint64_t prompt_tokens) {
 	if (ratio < 1.0 || ratio > 16.0) {
 		return; // implausible: malformed usage or exotic payload
 	}
-	std::lock_guard<std::mutex> lock(g_tokratio_mutex);
-	g_tokratio_ema = g_tokratio_ema * 0.9375 + ratio * 0.0625; // alpha = 1/16
-	g_tokratio_samples++;
+	std::lock_guard<std::mutex> lock(TokratioMutex());
+	TokratioEma() = TokratioEma() * 0.9375 + ratio * 0.0625; // alpha = 1/16
+	TokratioSamples()++;
 }
 
 double AICalibratedBytesPerToken() {
-	std::lock_guard<std::mutex> lock(g_tokratio_mutex);
-	return g_tokratio_samples >= 20 ? g_tokratio_ema : 4.0;
+	std::lock_guard<std::mutex> lock(TokratioMutex());
+	return TokratioSamples() >= 20 ? TokratioEma() : 4.0;
 }
 
 //! `typesafe`: the body is a System One response (usage.input_tokens/output_tokens, priced per
@@ -380,26 +409,17 @@ static void AccountUsage(idx_t query_index, const string &body, const string &co
 		yyjson_val *root = yyjson_doc_get_root(doc);
 		yyjson_val *usage = root && yyjson_is_obj(root) ? yyjson_obj_get(root, "usage") : nullptr;
 		if (usage && yyjson_is_obj(usage)) {
-			yyjson_val *v;
-			if ((v = yyjson_obj_get(usage, typesafe ? "input_tokens" : "prompt_tokens")) && yyjson_is_num(v)) {
-				input_tokens = static_cast<uint64_t>(yyjson_get_num(v));
-			}
-			if ((v = yyjson_obj_get(usage, typesafe ? "output_tokens" : "completion_tokens")) && yyjson_is_num(v)) {
-				output_tokens = static_cast<uint64_t>(yyjson_get_num(v));
-			}
-			if ((v = yyjson_obj_get(usage, "total_tokens")) && yyjson_is_num(v)) {
-				total_tokens = static_cast<uint64_t>(yyjson_get_num(v));
-			}
-			yyjson_val *prompt_details = yyjson_obj_get(usage, "prompt_tokens_details");
-			if (prompt_details && yyjson_is_obj(prompt_details) &&
-			    (v = yyjson_obj_get(prompt_details, "cached_tokens")) && yyjson_is_num(v)) {
-				cached_tokens = static_cast<uint64_t>(yyjson_get_num(v));
-			}
-			yyjson_val *completion_details = yyjson_obj_get(usage, "completion_tokens_details");
-			if (completion_details && yyjson_is_obj(completion_details) &&
-			    (v = yyjson_obj_get(completion_details, "reasoning_tokens")) && yyjson_is_num(v)) {
-				reasoning_tokens = static_cast<uint64_t>(yyjson_get_num(v));
-			}
+			auto num_field = [](yyjson_val *obj, const char *key, uint64_t &out) {
+				yyjson_val *v = obj && yyjson_is_obj(obj) ? yyjson_obj_get(obj, key) : nullptr;
+				if (v && yyjson_is_num(v)) {
+					out = static_cast<uint64_t>(yyjson_get_num(v));
+				}
+			};
+			num_field(usage, typesafe ? "input_tokens" : "prompt_tokens", input_tokens);
+			num_field(usage, typesafe ? "output_tokens" : "completion_tokens", output_tokens);
+			num_field(usage, "total_tokens", total_tokens);
+			num_field(yyjson_obj_get(usage, "prompt_tokens_details"), "cached_tokens", cached_tokens);
+			num_field(yyjson_obj_get(usage, "completion_tokens_details"), "reasoning_tokens", reasoning_tokens);
 		}
 		yyjson_doc_free(doc);
 	}
@@ -429,8 +449,8 @@ static void AccountUsage(idx_t query_index, const string &body, const string &co
 	}
 
 	ObserveTokenRatio(body, input_tokens);
-	std::lock_guard<std::mutex> lock(g_usage_mutex);
-	auto &record = g_queries[query_index];
+	std::lock_guard<std::mutex> lock(UsageMutex());
+	auto &record = Queries()[query_index];
 	record.llm_calls += 1;
 	record.input_tokens += input_tokens;
 	record.cached_tokens += cached_tokens;
@@ -569,8 +589,8 @@ static string BuildRequestBody(const AIConfig &config, const AIRequest &request)
 		body += ",";
 	}
 	if (request.emit_breakpoint && !request.prompt_prefix.empty()) {
-		body += "{\"role\":\"user\",\"content\":" +
-		        BuildUserContentPrefixed(request.prompt_prefix, request.prompt) + "}";
+		body +=
+		    "{\"role\":\"user\",\"content\":" + BuildUserContentPrefixed(request.prompt_prefix, request.prompt) + "}";
 	} else if (!request.prompt_prefix.empty()) {
 		body += "{\"role\":\"user\",\"content\":" + BuildUserContent(request.prompt_prefix + request.prompt) + "}";
 	} else {
@@ -598,8 +618,8 @@ static string BuildRequestBody(const AIConfig &config, const AIRequest &request)
 static string BuildSystemOneBody(const AIConfig &config, const AIRequest &request) {
 	// A Noul judges the whole ai_filter prompt (any declared prefix included, exactly as the chat
 	// path would send it); a Choice judges the classified input the function set as `state`.
-	const string state = request.question == AIRequest::Question::NOUL ? request.prompt_prefix + request.prompt
-	                                                                     : request.state;
+	const string state =
+	    request.question == AIRequest::Question::NOUL ? request.prompt_prefix + request.prompt : request.state;
 	string body = "{\"model\":\"" + AIJsonEscape(config.typesafe_model) + "\",\"state\":\"" + AIJsonEscape(state) +
 	              "\",\"questions\":{\"q\":{";
 	if (request.question == AIRequest::Question::NOUL) {
@@ -714,24 +734,33 @@ static int32_t ParseRetryAfterMs(const duckdb_httplib::Response &response) {
 // around every HTTP attempt. Batch pools, streaming graph units and hedge duplicates all draw
 // from the same permits, so concurrent operators (or hedging) can never stack past the cap.
 //===--------------------------------------------------------------------===//
-static std::mutex g_gate_mutex;
-static std::condition_variable g_gate_cv;
-static idx_t g_gate_in_flight = 0;
+static std::mutex &GateMutex() {
+	static std::mutex value;
+	return value;
+}
+static std::condition_variable &GateCv() {
+	static std::condition_variable value;
+	return value;
+}
+static idx_t &GateInFlight() {
+	static idx_t value = 0;
+	return value;
+}
 
 class ChatGatePermit {
 public:
 	ChatGatePermit() {
 		const idx_t cap = MaxValue<idx_t>(AIConfig::Get().max_concurrency, 1);
-		std::unique_lock<std::mutex> lock(g_gate_mutex);
-		g_gate_cv.wait(lock, [&]() { return g_gate_in_flight < cap; });
-		g_gate_in_flight++;
+		std::unique_lock<std::mutex> lock(GateMutex());
+		GateCv().wait(lock, [&]() { return GateInFlight() < cap; });
+		GateInFlight()++;
 	}
 	~ChatGatePermit() {
 		{
-			std::lock_guard<std::mutex> lock(g_gate_mutex);
-			g_gate_in_flight--;
+			std::lock_guard<std::mutex> lock(GateMutex());
+			GateInFlight()--;
 		}
-		g_gate_cv.notify_one();
+		GateCv().notify_one();
 	}
 };
 
@@ -743,8 +772,14 @@ public:
 // on a fresh connection before reporting TRANSIENT, so failure semantics match the old
 // client-per-request behavior exactly.
 //===--------------------------------------------------------------------===//
-static std::mutex g_conn_pool_mutex;
-static std::unordered_map<string, vector<duckdb::unique_ptr<duckdb_httplib::Client>>> g_conn_pool;
+static std::mutex &ConnPoolMutex() {
+	static std::mutex value;
+	return value;
+}
+static std::unordered_map<string, vector<duckdb::unique_ptr<duckdb_httplib::Client>>> &ConnPool() {
+	static std::unordered_map<string, vector<duckdb::unique_ptr<duckdb_httplib::Client>>> value;
+	return value;
+}
 static constexpr idx_t CONN_POOL_MAX_IDLE = 64; // per URL; > concurrency + hedges + embed callers
 
 static duckdb::unique_ptr<duckdb_httplib::Client> NewConn(const string &url, const AIConfig &config) {
@@ -758,9 +793,9 @@ static duckdb::unique_ptr<duckdb_httplib::Client> NewConn(const string &url, con
 struct ConnLease {
 	ConnLease(const string &url_p, const AIConfig &config_p) : url(url_p), config(config_p) {
 		if (config.http_keepalive) {
-			std::lock_guard<std::mutex> lock(g_conn_pool_mutex);
-			auto it = g_conn_pool.find(url);
-			if (it != g_conn_pool.end() && !it->second.empty()) {
+			std::lock_guard<std::mutex> lock(ConnPoolMutex());
+			auto it = ConnPool().find(url);
+			if (it != ConnPool().end() && !it->second.empty()) {
 				client = std::move(it->second.back());
 				it->second.pop_back();
 				reused = true;
@@ -789,8 +824,8 @@ struct ConnLease {
 		if (!healthy || !config.http_keepalive || !client) {
 			return; // drop: broken socket, or pooling disabled
 		}
-		std::lock_guard<std::mutex> lock(g_conn_pool_mutex);
-		auto &idle = g_conn_pool[url];
+		std::lock_guard<std::mutex> lock(ConnPoolMutex());
+		auto &idle = ConnPool()[url];
 		if (idle.size() < CONN_POOL_MAX_IDLE) {
 			idle.push_back(std::move(client));
 		}
@@ -823,7 +858,8 @@ static AIResult DoSingleRequest(const AIConfig &config, const AIRequest &request
 	} catch (const std::exception &e) {
 		// e.g. an https URL in a build without TLS support: a permanent, reported failure -- never
 		// an uncaught exception on a worker thread.
-		error = string("cannot open a connection: ") + e.what() + " (route it through an http proxy, e.g. serve/ai_cache_server.py)";
+		error = string("cannot open a connection: ") + e.what() +
+		        " (route it through an http proxy, e.g. serve/ai_cache_server.py)";
 		return result;
 	}
 	ConnLease &lease = *lease_holder;
@@ -836,9 +872,9 @@ static AIResult DoSingleRequest(const AIConfig &config, const AIRequest &request
 	// Wall-clock start (ms since epoch). A caching proxy uses it to reproduce the original latency
 	// from the client's point of view -- replying at start+latency rather than adding its own
 	// receive/queue overhead. Carried as a header so it never affects the request-body cache key.
-	const auto start_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-	                          std::chrono::system_clock::now().time_since_epoch())
-	                          .count();
+	const auto start_ms =
+	    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+	        .count();
 	headers.emplace("X-Request-Start-Ms", std::to_string(start_ms));
 	const string body = typesafe ? BuildSystemOneBody(config, request) : BuildRequestBody(config, request);
 	const char *path = typesafe ? "/v1/systemone" : "/v1/chat/completions";
@@ -881,8 +917,7 @@ static AIResult DoSingleRequest(const AIConfig &config, const AIRequest &request
 		error = "unparseable response body: " + response->body.substr(0, 200);
 		return result;
 	}
-	AccountUsage(query_index, response->body, response->get_header_value("x-litellm-response-cost"), config,
-	             typesafe);
+	AccountUsage(query_index, response->body, response->get_header_value("x-litellm-response-cost"), config, typesafe);
 	result.content = std::move(content);
 	result.success = true;
 	outcome = AICallOutcome::OK;
@@ -892,8 +927,14 @@ static AIResult DoSingleRequest(const AIConfig &config, const AIRequest &request
 //===--------------------------------------------------------------------===//
 // Batch execution: de-dup + cache + bounded concurrency
 //===--------------------------------------------------------------------===//
-static std::mutex g_cache_mutex;
-static std::unordered_map<string, AIResult> g_cache;
+static std::mutex &CacheMutex() {
+	static std::mutex value;
+	return value;
+}
+static std::unordered_map<string, AIResult> &Cache() {
+	static std::unordered_map<string, AIResult> value;
+	return value;
+}
 
 //! A prompt this process has already SENT but not yet answered. The cache alone cannot dedup
 //! these: it is only written when a response lands, so two batches that start the same prompt
@@ -906,9 +947,12 @@ struct AIInFlight {
 	bool done = false;
 	AIResult result;
 };
-//! key -> the request in flight for it. Guarded by g_cache_mutex; entries live only between
+//! key -> the request in flight for it. Guarded by CacheMutex(); entries live only between
 //! dispatch and publication, and waiters hold a shared_ptr so erasing never strands them.
-static std::unordered_map<string, shared_ptr<AIInFlight>> g_inflight;
+static std::unordered_map<string, shared_ptr<AIInFlight>> &Inflight() {
+	static std::unordered_map<string, shared_ptr<AIInFlight>> value;
+	return value;
+}
 
 //! Publishes an owned in-flight entry and retires it from the registry. RAII so an exception on
 //! the dispatch path cannot leave a waiter blocked forever -- it then publishes the default
@@ -942,9 +986,9 @@ struct AIInFlightPublisher {
 				e->cv.notify_all();
 			}
 		}
-		std::lock_guard<std::mutex> lock(g_cache_mutex);
+		std::lock_guard<std::mutex> lock(CacheMutex());
 		for (auto &k : keys) {
-			g_inflight.erase(k);
+			Inflight().erase(k);
 		}
 	}
 };
@@ -963,7 +1007,9 @@ static string RequestSignature(const AIConfig &config, const AIRequest &request)
 	             request.json_schema + "\x1f" + request.prompt_prefix + request.prompt;
 	if (AIUsesTypeSafe(request)) {
 		// A System One answer is a different sample from a chat answer to the same prompt.
-		sig += "\x1e" "typesafe\x1f" + config.typesafe_model + "\x1f" + request.instructions;
+		sig += "\x1e"
+		       "typesafe\x1f" +
+		       config.typesafe_model + "\x1f" + request.instructions;
 		for (const auto &opt : request.options) {
 			sig += "\x1f" + opt.first + "=" + opt.second;
 		}
@@ -986,21 +1032,21 @@ bool AICacheProbe(const AIRequest &request, const string &query_text, AIResult &
 	}
 	idx_t query_index;
 	{
-		std::lock_guard<std::mutex> lock(g_usage_mutex);
+		std::lock_guard<std::mutex> lock(UsageMutex());
 		query_index = GetOrCreateQueryIndex(query_text);
 	}
 	const string key = CacheScopePrefix(config, query_index) + RequestSignature(config, request);
 	{
-		std::lock_guard<std::mutex> lock(g_cache_mutex);
-		auto it = g_cache.find(key);
-		if (it == g_cache.end()) {
+		std::lock_guard<std::mutex> lock(CacheMutex());
+		auto it = Cache().find(key);
+		if (it == Cache().end()) {
 			return false;
 		}
 		out = it->second;
 	}
 	{
-		std::lock_guard<std::mutex> lock(g_usage_mutex);
-		g_queries[query_index].cache_hits++;
+		std::lock_guard<std::mutex> lock(UsageMutex());
+		Queries()[query_index].cache_hits++;
 	}
 	return true;
 }
@@ -1109,7 +1155,8 @@ static void SleepBackoff(idx_t attempt, int32_t retry_after_ms, idx_t seed) {
 	const idx_t shift = attempt > 7 ? 6 : (attempt == 0 ? 0 : attempt - 1);
 	const int64_t window = std::min<int64_t>(static_cast<int64_t>(100) << shift, 8000);
 	// Hash (seed, attempt) -> uniform in [0, window): decorrelates rows/attempts without shared RNG state.
-	uint64_t h = static_cast<uint64_t>(seed) * 0x9E3779B97F4A7C15ULL + static_cast<uint64_t>(attempt) * 0xD1B54A32D192ED03ULL;
+	uint64_t h =
+	    static_cast<uint64_t>(seed) * 0x9E3779B97F4A7C15ULL + static_cast<uint64_t>(attempt) * 0xD1B54A32D192ED03ULL;
 	h ^= h >> 33;
 	h *= 0xFF51AFD7ED558CCDULL;
 	h ^= h >> 33;
@@ -1127,8 +1174,8 @@ static void SleepBackoff(idx_t attempt, int32_t retry_after_ms, idx_t seed) {
 //! with no message at all -- indistinguishable from "nothing to do".
 static void NoteCallFailure(const AIConfig &config, const AIRequest &request, idx_t query_index, const string &error) {
 	{
-		std::lock_guard<std::mutex> lock(g_usage_mutex);
-		g_queries[query_index].failed_calls++;
+		std::lock_guard<std::mutex> lock(UsageMutex());
+		Queries()[query_index].failed_calls++;
 	}
 	static std::mutex reported_mutex;
 	static std::set<string> reported;
@@ -1164,8 +1211,8 @@ static AIResult DoRequestWithRetry(const AIConfig &config, const AIRequest &requ
 			}
 			if (attempt >= config.max_retries) {
 				NoteCallFailure(config, request, query_index,
-				                error + " (after " + std::to_string(attempt + 1) + " attempt(s); ai_max_retries=" +
-				                    std::to_string(config.max_retries) + ")");
+				                error + " (after " + std::to_string(attempt + 1) +
+				                    " attempt(s); ai_max_retries=" + std::to_string(config.max_retries) + ")");
 				return result; // exhausted retries: keep the failure result
 			}
 			attempt++;
@@ -1191,28 +1238,37 @@ static AIResult DoRequestWithRetry(const AIConfig &config, const AIRequest &requ
 // on real APIs this converts p99+ stragglers (the 920s q12 outlier class) into ~p50 waits at
 // ~1% extra calls.
 //===--------------------------------------------------------------------===//
-static std::mutex g_lat_mutex;
-static vector<int64_t> g_lat_ring;
-static idx_t g_lat_pos = 0;
+static std::mutex &LatMutex() {
+	static std::mutex value;
+	return value;
+}
+static vector<int64_t> &LatRing() {
+	static vector<int64_t> value;
+	return value;
+}
+static idx_t &LatPos() {
+	static idx_t value = 0;
+	return value;
+}
 
 static void RecordCallLatency(int64_t ms) {
-	std::lock_guard<std::mutex> lock(g_lat_mutex);
-	if (g_lat_ring.size() < 512) {
-		g_lat_ring.push_back(ms);
+	std::lock_guard<std::mutex> lock(LatMutex());
+	if (LatRing().size() < 512) {
+		LatRing().push_back(ms);
 	} else {
-		g_lat_ring[g_lat_pos] = ms;
-		g_lat_pos = (g_lat_pos + 1) % g_lat_ring.size();
+		LatRing()[LatPos()] = ms;
+		LatPos() = (LatPos() + 1) % LatRing().size();
 	}
 }
 
 static int64_t HedgeDeadlineMs() {
 	vector<int64_t> sample;
 	{
-		std::lock_guard<std::mutex> lock(g_lat_mutex);
-		if (g_lat_ring.size() < 50) {
+		std::lock_guard<std::mutex> lock(LatMutex());
+		if (LatRing().size() < 50) {
 			return -1;
 		}
-		sample = g_lat_ring;
+		sample = LatRing();
 	}
 	const idx_t p99_pos = (sample.size() * 99) / 100;
 	std::nth_element(sample.begin(), sample.begin() + NumericCast<int64_t>(p99_pos), sample.end());
@@ -1247,10 +1303,19 @@ struct PrefixState {
 	PrefixPhase phase;
 	std::chrono::steady_clock::time_point last_use;
 };
-static std::mutex g_prefix_mutex;
-static std::condition_variable g_prefix_cv;
-static std::unordered_map<string, PrefixState> g_prefix_states;
-static constexpr int64_t PREFIX_TTL_SECONDS = 25 * 60; // provider keeps ~30 min after last use
+static std::mutex &PrefixMutex() {
+	static std::mutex value;
+	return value;
+}
+static std::condition_variable &PrefixCv() {
+	static std::condition_variable value;
+	return value;
+}
+static std::unordered_map<string, PrefixState> &PrefixStates() {
+	static std::unordered_map<string, PrefixState> value;
+	return value;
+}
+static constexpr int64_t PREFIX_TTL_SECONDS = int64_t(25) * 60; // provider keeps ~30 min after last use
 
 //! Provider cache identity of the reusable span. model/system/schema conservatively included:
 //! colliding spans under different envelopes would at worst prime twice, never corrupt.
@@ -1278,16 +1343,16 @@ static bool ApplyPrefixLifecycle(const AIConfig &config, AIRequest &request) {
 	}
 	const string key = PrefixKey(config, request);
 	const auto now = std::chrono::steady_clock::now();
-	std::unique_lock<std::mutex> lock(g_prefix_mutex);
+	std::unique_lock<std::mutex> lock(PrefixMutex());
 	while (true) {
-		auto it = g_prefix_states.find(key);
-		if (it == g_prefix_states.end()) {
+		auto it = PrefixStates().find(key);
+		if (it == PrefixStates().end()) {
 			if (request.expected_reuse >= 2) {
-				g_prefix_states[key] = {PrefixPhase::PRIMING, now};
+				PrefixStates()[key] = {PrefixPhase::PRIMING, now};
 				request.emit_breakpoint = true;
 				return true; // hinted: first call is the write
 			}
-			g_prefix_states[key] = {PrefixPhase::SEEN_PLAIN, now};
+			PrefixStates()[key] = {PrefixPhase::SEEN_PLAIN, now};
 			return false; // adaptive: first arrival goes plain
 		}
 		switch (it->second.phase) {
@@ -1296,7 +1361,7 @@ static bool ApplyPrefixLifecycle(const AIConfig &config, AIRequest &request) {
 			request.emit_breakpoint = true;
 			return true; // adaptive: proven reuse, second arrival is the write
 		case PrefixPhase::PRIMING:
-			g_prefix_cv.wait(lock); // park (no permit held) until the write lands or fails
+			PrefixCv().wait(lock); // park (no permit held) until the write lands or fails
 			continue;
 		case PrefixPhase::WARM:
 			if (std::chrono::duration_cast<std::chrono::seconds>(now - it->second.last_use).count() >
@@ -1317,11 +1382,10 @@ static bool ApplyPrefixLifecycle(const AIConfig &config, AIRequest &request) {
 static void FinishPrefixPrime(const AIConfig &config, const AIRequest &request, bool success) {
 	const string key = PrefixKey(config, request);
 	{
-		std::lock_guard<std::mutex> lock(g_prefix_mutex);
-		g_prefix_states[key] = {success ? PrefixPhase::WARM : PrefixPhase::NOCACHE,
-		                        std::chrono::steady_clock::now()};
+		std::lock_guard<std::mutex> lock(PrefixMutex());
+		PrefixStates()[key] = {success ? PrefixPhase::WARM : PrefixPhase::NOCACHE, std::chrono::steady_clock::now()};
 	}
-	g_prefix_cv.notify_all();
+	PrefixCv().notify_all();
 }
 
 static AIResult HedgedRequest(const AIConfig &config, const AIRequest &request, idx_t query_index, idx_t seed,
@@ -1361,8 +1425,8 @@ static AIResult HedgedRequest(const AIConfig &config, const AIRequest &request, 
 		if (!shared->cv.wait_for(lock, std::chrono::milliseconds(deadline_ms), [&]() { return shared->done; })) {
 			lock.unlock();
 			{
-				std::lock_guard<std::mutex> ulock(g_usage_mutex);
-				g_queries[query_index].hedged_calls++;
+				std::lock_guard<std::mutex> ulock(UsageMutex());
+				Queries()[query_index].hedged_calls++;
 			}
 			launch(seed ^ 0x9E3779B9U);
 			lock.lock();
@@ -1388,7 +1452,7 @@ vector<AIResult> AIBatchComplete(const vector<AIRequest> &requests, const string
 
 	idx_t query_index;
 	{
-		std::lock_guard<std::mutex> lock(g_usage_mutex);
+		std::lock_guard<std::mutex> lock(UsageMutex());
 		query_index = GetOrCreateQueryIndex(query_text);
 	}
 
@@ -1409,11 +1473,11 @@ vector<AIResult> AIBatchComplete(const vector<AIRequest> &requests, const string
 	vector<shared_ptr<AIInFlight>> row_wait(n);
 	AIInFlightPublisher publisher; // retires this batch's in-flight entries on every exit path
 	{
-		std::lock_guard<std::mutex> lock(g_cache_mutex);
+		std::lock_guard<std::mutex> lock(CacheMutex());
 		std::unordered_map<string, idx_t> local_unique;
 		for (idx_t i = 0; i < n; i++) {
-			auto cached = config.local_cache ? g_cache.find(keys[i]) : g_cache.end();
-			if (cached != g_cache.end()) {
+			auto cached = config.local_cache ? Cache().find(keys[i]) : Cache().end();
+			if (cached != Cache().end()) {
 				results[i] = cached->second;
 				served[i] = true;
 				continue;
@@ -1427,8 +1491,8 @@ vector<AIResult> AIBatchComplete(const vector<AIRequest> &requests, const string
 				// Another batch already sent this exact prompt: wait for its answer instead of
 				// asking the same question twice. Registered under the same key, so the query
 				// scope applies here too.
-				auto flying = g_inflight.find(keys[i]);
-				if (flying != g_inflight.end()) {
+				auto flying = Inflight().find(keys[i]);
+				if (flying != Inflight().end()) {
 					row_wait[i] = flying->second;
 					waiting[i] = true;
 					continue;
@@ -1440,7 +1504,7 @@ vector<AIResult> AIBatchComplete(const vector<AIRequest> &requests, const string
 			row_to_unique[i] = slot;
 			if (config.local_cache) {
 				auto entry = make_shared_ptr<AIInFlight>();
-				g_inflight.emplace(keys[i], entry);
+				Inflight().emplace(keys[i], entry);
 				publisher.Add(std::move(entry), keys[i]);
 			}
 		}
@@ -1448,8 +1512,8 @@ vector<AIResult> AIBatchComplete(const vector<AIRequest> &requests, const string
 
 	// Every input row that did not spawn a unique network request is a cache/de-dup hit.
 	{
-		std::lock_guard<std::mutex> lock(g_usage_mutex);
-		g_queries[query_index].cache_hits += (n - miss_rows.size());
+		std::lock_guard<std::mutex> lock(UsageMutex());
+		Queries()[query_index].cache_hits += (n - miss_rows.size());
 	}
 
 	// Execute the unique misses concurrently. Concurrency never exceeds the number of
@@ -1472,10 +1536,10 @@ vector<AIResult> AIBatchComplete(const vector<AIRequest> &requests, const string
 	// in-flight entries retire, so a batch arriving in the gap finds the cached answer rather
 	// than re-sending: every instant is covered by one or the other.
 	{
-		std::lock_guard<std::mutex> lock(g_cache_mutex);
+		std::lock_guard<std::mutex> lock(CacheMutex());
 		for (idx_t u = 0; u < miss_rows.size(); u++) {
 			if (config.local_cache && miss_results[u].success) {
-				g_cache[keys[miss_rows[u]]] = miss_results[u];
+				Cache()[keys[miss_rows[u]]] = miss_results[u];
 			}
 		}
 	}
@@ -1504,8 +1568,15 @@ vector<AIResult> AIBatchComplete(const vector<AIRequest> &requests, const string
 //===--------------------------------------------------------------------===//
 // Embeddings: ai_embed (fixed path, no history; one batched request per chunk)
 //===--------------------------------------------------------------------===//
-static std::mutex g_embed_cache_mutex;
-static std::unordered_map<string, vector<float>> g_embed_cache; // query-scoped key -> vector
+static std::mutex &EmbedCacheMutex() {
+	static std::mutex value;
+	return value;
+}
+// query-scoped key -> vector
+static std::unordered_map<string, vector<float>> &EmbedCache() {
+	static std::unordered_map<string, vector<float>> value;
+	return value;
+}
 
 //! An embed input that IS a single ai_image sentinel: sent as an image item ({"image": ref}).
 static bool IsImageEmbedInput(const string &in) {
@@ -1551,10 +1622,13 @@ static string BuildEmbedBody(const string &model, const vector<string> &inputs) 
 
 // Latched the first time the embeddings server answers an image item without an embedding (text-only
 // model): from then on image leaves keep their neutral prior and no request carries image items.
-static std::atomic<bool> g_embed_images_unsupported {false};
+static std::atomic<bool> &EmbedImagesUnsupported() {
+	static std::atomic<bool> value {false};
+	return value;
+}
 
 bool AIEmbedImagesSupported() {
-	return AIConfig::Get().embed_images && !g_embed_images_unsupported.load();
+	return AIConfig::Get().embed_images && !EmbedImagesUnsupported().load();
 }
 
 //! POST one embeddings request for `inputs`; fill `out[i]` with the i-th embedding. Returns false on
@@ -1570,9 +1644,9 @@ static bool DoEmbedBatchRequest(const AIConfig &config, const vector<string> &in
 	if (!config.api_key.empty()) {
 		headers.emplace("Authorization", "Bearer " + config.api_key);
 	}
-	const auto start_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-	                          std::chrono::system_clock::now().time_since_epoch())
-	                          .count();
+	const auto start_ms =
+	    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
+	        .count();
 	headers.emplace("X-Request-Start-Ms", std::to_string(start_ms));
 	const string body = BuildEmbedBody(config.embed_model, inputs);
 	auto response = lease.client->Post("/v1/embeddings", headers, body, "application/json");
@@ -1613,7 +1687,7 @@ static bool DoEmbedBatchRequest(const AIConfig &config, const vector<string> &in
 			yyjson_val *emb = yyjson_obj_get(item, "embedding");
 			if (!emb || !yyjson_is_arr(emb)) {
 				if (IsImageEmbedInput(inputs[pos])) {
-					g_embed_images_unsupported.store(true);
+					EmbedImagesUnsupported().store(true);
 				}
 				continue; // error entry: this item stays empty, the rest of the batch is fine
 			}
@@ -1638,8 +1712,8 @@ static bool DoEmbedBatchRequest(const AIConfig &config, const vector<string> &in
 	}
 	yyjson_doc_free(doc);
 	if (ok) {
-		std::lock_guard<std::mutex> lock(g_usage_mutex);
-		auto &record = g_queries[query_index];
+		std::lock_guard<std::mutex> lock(UsageMutex());
+		auto &record = Queries()[query_index];
 		record.llm_calls += 1;
 		record.embed_calls += 1; // so chat calls == llm_calls - embed_calls (process-isolated count)
 		record.input_tokens += total_tokens;
@@ -1659,7 +1733,7 @@ vector<AIEmbedResult> AIEmbedBatch(const vector<string> &texts, const string &qu
 
 	idx_t query_index;
 	{
-		std::lock_guard<std::mutex> lock(g_usage_mutex);
+		std::lock_guard<std::mutex> lock(UsageMutex());
 		query_index = GetOrCreateQueryIndex(query_text);
 	}
 
@@ -1675,15 +1749,15 @@ vector<AIEmbedResult> AIEmbedBatch(const vector<string> &texts, const string &qu
 	vector<idx_t> row_to_unique(n);
 	vector<bool> served(n, false);
 	{
-		std::lock_guard<std::mutex> lock(g_embed_cache_mutex);
+		std::lock_guard<std::mutex> lock(EmbedCacheMutex());
 		std::unordered_map<string, idx_t> local_unique;
 		for (idx_t i = 0; i < n; i++) {
 			if (texts[i].empty()) {
 				served[i] = true; // leave results[i].success = false -> SQL NULL
 				continue;
 			}
-			auto cached = config.local_cache ? g_embed_cache.find(keys[i]) : g_embed_cache.end();
-			if (cached != g_embed_cache.end()) {
+			auto cached = config.local_cache ? EmbedCache().find(keys[i]) : EmbedCache().end();
+			if (cached != EmbedCache().end()) {
 				results[i].embedding = cached->second;
 				results[i].success = true;
 				served[i] = true;
@@ -1701,8 +1775,8 @@ vector<AIEmbedResult> AIEmbedBatch(const vector<string> &texts, const string &qu
 		}
 	}
 	{
-		std::lock_guard<std::mutex> lock(g_usage_mutex);
-		g_queries[query_index].cache_hits += (n - miss_rows.size());
+		std::lock_guard<std::mutex> lock(UsageMutex());
+		Queries()[query_index].cache_hits += (n - miss_rows.size());
 	}
 
 	// Batched requests for the unique misses, split into sub-batches (<= embed_batch_images image items,
@@ -1749,10 +1823,10 @@ vector<AIEmbedResult> AIEmbedBatch(const vector<string> &texts, const string &qu
 				ok = false; // a throwing worker thread would terminate the process; a failed sub-batch is NULL
 			}
 			if (ok) {
-				std::lock_guard<std::mutex> lock(g_embed_cache_mutex);
+				std::lock_guard<std::mutex> lock(EmbedCacheMutex());
 				for (idx_t u = 0; u < inputs.size(); u++) {
 					if (config.local_cache && !part[u].empty()) {
-						g_embed_cache[keys[miss_rows[start + u]]] = part[u];
+						EmbedCache()[keys[miss_rows[start + u]]] = part[u];
 					}
 					miss_emb[start + u] = std::move(part[u]);
 				}
@@ -1791,60 +1865,66 @@ vector<AIEmbedResult> AIEmbedBatch(const vector<string> &texts, const string &qu
 uint64_t AILocalCacheClear() {
 	uint64_t cleared = 0;
 	{
-		std::lock_guard<std::mutex> lock(g_cache_mutex);
-		cleared += g_cache.size();
-		g_cache.clear();
+		std::lock_guard<std::mutex> lock(CacheMutex());
+		cleared += Cache().size();
+		Cache().clear();
 	}
 	{
-		std::lock_guard<std::mutex> lock(g_embed_cache_mutex);
-		cleared += g_embed_cache.size();
-		g_embed_cache.clear();
+		std::lock_guard<std::mutex> lock(EmbedCacheMutex());
+		cleared += EmbedCache().size();
+		EmbedCache().clear();
 	}
 	return cleared;
 }
 
 vector<AIQueryUsage> AIGetUsage() {
-	std::lock_guard<std::mutex> lock(g_usage_mutex);
-	return g_queries;
+	std::lock_guard<std::mutex> lock(UsageMutex());
+	return Queries();
 }
 
 uint64_t AIResetUsage() {
-	std::lock_guard<std::mutex> lock(g_usage_mutex);
-	const uint64_t cleared = g_queries.size();
-	g_queries.clear();
-	g_query_index.clear();
-	g_next_query_id = 1;
+	std::lock_guard<std::mutex> lock(UsageMutex());
+	const uint64_t cleared = Queries().size();
+	Queries().clear();
+	QueryIndex().clear();
+	NextQueryId() = 1;
 	return cleared;
 }
 
 //===--------------------------------------------------------------------===//
 // Training data: (prompt, embedding, actual ai_filter result), deduped by prompt
 //===--------------------------------------------------------------------===//
-static std::mutex g_training_mutex;
-static std::unordered_map<string, AITrainingExample> g_training;
+static std::mutex &TrainingMutex() {
+	static std::mutex value;
+	return value;
+}
+static std::unordered_map<string, AITrainingExample> &Training() {
+	static std::unordered_map<string, AITrainingExample> value;
+	return value;
+}
 
 void AIRecordTrainingExample(const string &prompt, const vector<float> &embedding, bool label) {
-	std::lock_guard<std::mutex> lock(g_training_mutex);
-	if (g_training.find(prompt) != g_training.end()) {
+	std::lock_guard<std::mutex> lock(TrainingMutex());
+	if (Training().find(prompt) != Training().end()) {
 		return; // dedup by prompt: keep the first observed label
 	}
-	g_training.emplace(prompt, AITrainingExample {prompt, embedding, label});
+	Training().emplace(prompt, AITrainingExample {prompt, embedding, label});
 }
 
 vector<AITrainingExample> AIGetTrainingData() {
-	std::lock_guard<std::mutex> lock(g_training_mutex);
+	std::lock_guard<std::mutex> lock(TrainingMutex());
 	vector<AITrainingExample> out;
-	out.reserve(g_training.size());
-	for (auto &kv : g_training) {
+	out.reserve(Training().size());
+	for (auto &kv : Training()) {
 		out.push_back(kv.second);
 	}
 	return out;
 }
 
 uint64_t AIResetTrainingData() {
-	std::lock_guard<std::mutex> lock(g_training_mutex);
-	const uint64_t cleared = g_training.size();
-	g_training.clear();
+	std::lock_guard<std::mutex> lock(TrainingMutex());
+	const uint64_t cleared = Training().size();
+	Training().clear();
 	return cleared;
 }
 
@@ -1855,25 +1935,34 @@ struct AIHistoryTurn {
 	string input;
 	string output;
 };
-static std::mutex g_history_mutex;
-static std::unordered_map<string, vector<AIHistoryTurn>> g_history;
-static std::atomic<bool> g_history_enabled {false};
+static std::mutex &HistoryMutex() {
+	static std::mutex value;
+	return value;
+}
+static std::unordered_map<string, vector<AIHistoryTurn>> &History() {
+	static std::unordered_map<string, vector<AIHistoryTurn>> value;
+	return value;
+}
+static std::atomic<bool> &HistoryEnabled() {
+	static std::atomic<bool> value {false};
+	return value;
+}
 
 void AIHistorySetEnabled(bool enabled) {
-	g_history_enabled.store(enabled);
+	HistoryEnabled().store(enabled);
 }
 
 bool AIHistoryEnabled() {
-	return g_history_enabled.load();
+	return HistoryEnabled().load();
 }
 
 void AIHistoryRecord(const vector<string> &keys, const string &input, const string &output) {
 	if (keys.empty()) {
 		return;
 	}
-	std::lock_guard<std::mutex> lock(g_history_mutex);
+	std::lock_guard<std::mutex> lock(HistoryMutex());
 	for (const auto &key : keys) {
-		g_history[key].push_back(AIHistoryTurn {input, output});
+		History()[key].push_back(AIHistoryTurn {input, output});
 	}
 }
 
@@ -1882,11 +1971,11 @@ vector<std::pair<string, string>> AIHistoryGather(const vector<string> &keys) {
 	if (keys.empty()) {
 		return turns;
 	}
-	std::lock_guard<std::mutex> lock(g_history_mutex);
+	std::lock_guard<std::mutex> lock(HistoryMutex());
 	std::set<std::pair<string, string>> seen;
 	for (const auto &key : keys) {
-		auto it = g_history.find(key);
-		if (it == g_history.end()) {
+		auto it = History().find(key);
+		if (it == History().end()) {
 			continue;
 		}
 		for (const auto &turn : it->second) {
@@ -1900,9 +1989,9 @@ vector<std::pair<string, string>> AIHistoryGather(const vector<string> &keys) {
 }
 
 uint64_t AIHistoryReset() {
-	std::lock_guard<std::mutex> lock(g_history_mutex);
-	const uint64_t cleared = g_history.size();
-	g_history.clear();
+	std::lock_guard<std::mutex> lock(HistoryMutex());
+	const uint64_t cleared = History().size();
+	History().clear();
 	return cleared;
 }
 

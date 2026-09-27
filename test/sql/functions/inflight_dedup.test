@@ -1,5 +1,7 @@
 # name: test/sql/functions/inflight_dedup.test
 # description: The same prompt must be SENT once, even when two batches start it at the same
+# group: [functions]
+
 #              moment. The local cache alone cannot do this -- it is written when a response
 #              LANDS, so batches that begin the same prompt concurrently all miss and all pay.
 #              That is the normal case once a CTE carrying an AI filter is inlined: each
@@ -14,7 +16,6 @@
 #              answer long enough for the copies to overlap; a join-shaped version of the same
 #              query does NOT reproduce it (the copies there do not run concurrently), which is
 #              why the shape is what it is.
-# group: [aisql]
 
 require aisql
 

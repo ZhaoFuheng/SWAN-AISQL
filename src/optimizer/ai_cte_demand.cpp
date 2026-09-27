@@ -279,9 +279,9 @@ static unique_ptr<LogicalOperator> BuildDemandUnion(Binder &binder, const vector
 	}
 	auto keys = std::move(sources[0]);
 	for (idx_t i = 1; i < sources.size(); i++) {
-		auto setop = make_uniq<LogicalSetOperation>(binder.GenerateTableIndex(), 1, std::move(keys),
-		                                            std::move(sources[i]), LogicalOperatorType::LOGICAL_UNION, true,
-		                                            false);
+		auto setop =
+		    make_uniq<LogicalSetOperation>(binder.GenerateTableIndex(), 1, std::move(keys), std::move(sources[i]),
+		                                   LogicalOperatorType::LOGICAL_UNION, true, false);
 		setop->ResolveOperatorTypes();
 		keys = std::move(setop);
 	}

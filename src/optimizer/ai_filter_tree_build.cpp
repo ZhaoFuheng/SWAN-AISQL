@@ -164,17 +164,18 @@ static void FlattenConcat(const Expression &expr, vector<const Expression *> &ou
 //! prefix-cache prefix -- must see the concatenation underneath. Missing this silently disabled
 //! explicit prompt caching (prefix_cache.test: 35 breakpoint requests -> 0).
 const Expression &AIUnwrapNullGuard(const Expression &expr) {
+	const Expression *result = &expr; // the argument always outlives the call: it is a plan node's expression
 	if (expr.GetExpressionClass() != ExpressionClass::BOUND_CASE) {
-		return expr;
+		return *result;
 	}
 	auto &case_expr = expr.Cast<BoundCaseExpression>();
 	if (case_expr.CaseChecks().size() != 1) {
-		return expr;
+		return *result;
 	}
 	auto &then_expr = *case_expr.CaseChecks()[0].then_expr;
 	if (then_expr.GetExpressionClass() != ExpressionClass::BOUND_CONSTANT ||
 	    !then_expr.Cast<BoundConstantExpression>().GetValue().IsNull()) {
-		return expr; // someone else's CASE: leave it alone
+		return *result; // someone else's CASE: leave it alone
 	}
 	return case_expr.Else();
 }
@@ -683,15 +684,15 @@ bool AIBuildMixedLeafArgs(ClientContext &context, const vector<AIMixedLeaf> &lea
 				metas[j] +=
 				    "@" + AIFormatBound(lo, is_int) + "," + AIFormatBound(hi, is_int) + "," + (is_int ? "i" : "d");
 			}
-			feat_pred[j] = make_uniq<BoundConstantExpression>(Value(string("Is the score ") + AIOpPhrase(leaf.op) +
-			                                                        " " + val +
-			                                                        (crit.empty() ? string() : " for: " + crit) + "?"));
+			feat_pred[j] =
+			    make_uniq<BoundConstantExpression>(Value(string("Is the score ") + AIOpPhrase(leaf.op) + " " + val +
+			                                             (crit.empty() ? string() : " for: " + crit) + "?"));
 			feat_input[j] = std::move(input);
 		} else { // 'M' ai_complete: raw completion compared to a literal (or set)
 			call_prompts[j] = input->Copy();
-			feat_pred[j] = make_uniq<BoundConstantExpression>(Value(
-			    is_set ? ("Is the completion " + string(AIOpPhrase(leaf.op)) + " " + val + "?")
-			           : ("Is the completion '" + val + "'?")));
+			feat_pred[j] = make_uniq<BoundConstantExpression>(
+			    Value(is_set ? ("Is the completion " + string(AIOpPhrase(leaf.op)) + " " + val + "?")
+			                 : ("Is the completion '" + val + "'?")));
 			feat_input[j] = std::move(input);
 		}
 		if (!call_prompts[j]) {

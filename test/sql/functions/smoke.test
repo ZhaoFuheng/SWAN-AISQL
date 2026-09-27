@@ -1,6 +1,6 @@
 # name: test/sql/functions/smoke.test
 # description: aisql extension loads, registers settings and functions
-# group: [aisql]
+# group: [functions]
 
 require aisql
 

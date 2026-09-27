@@ -42,7 +42,6 @@ unique_ptr<Expression> AILimitPushdown::BuildNode(vector<unique_ptr<Expression>>
 	return function_binder.BindScalarFunction(entry, std::move(args), error);
 }
 
-
 //! After a LIMIT k lands in an evaluation above, eager speculative leaf work below it cannot pay
 //! off (the k-bounded evaluation above is strictly cheaper): mark every speculative leaf node in
 //! the subtree to stand down (pass rows through with no embeds, no calls).
@@ -117,9 +116,9 @@ unique_ptr<Expression> AILimitPushdown::BuildCombinedNode(const vector<Expressio
 	for (auto *expr : exprs) {
 		subtrees.push_back(AIBuildMixedTree(*expr, leaf_list));
 	}
-	unique_ptr<AIFilterTreeNode> tree =
-	    subtrees.size() == 1 ? std::move(subtrees[0])
-	                         : AIFilterTreeNode::Op(AIFilterTreeType::AND_OP, std::move(subtrees));
+	unique_ptr<AIFilterTreeNode> tree = subtrees.size() == 1
+	                                        ? std::move(subtrees[0])
+	                                        : AIFilterTreeNode::Op(AIFilterTreeType::AND_OP, std::move(subtrees));
 	const string tree_str = AIFilterTreeSerialize(*tree);
 	const idx_t m = leaf_list.size();
 
@@ -237,8 +236,8 @@ static bool SubtreeHasAICall(const LogicalOperator &op) {
 		std::function<void(const Expression &)> walk = [&](const Expression &e) {
 			if (e.GetExpressionClass() == ExpressionClass::BOUND_FUNCTION) {
 				const auto &name = e.Cast<BoundFunctionExpression>().Function().GetName();
-				if (name == "ai_filter" || name == "ai_classify" || name == "ai_score" ||
-				    name == "ai_complete" || name == "ai_function_with_embed") {
+				if (name == "ai_filter" || name == "ai_classify" || name == "ai_score" || name == "ai_complete" ||
+				    name == "ai_function_with_embed") {
 					found = true;
 					return;
 				}
@@ -250,8 +249,7 @@ static bool SubtreeHasAICall(const LogicalOperator &op) {
 			return true;
 		}
 	}
-	if (LogicalAIRegion::TryCast(const_cast<LogicalOperator &>(op)) ||
-	    LogicalAIFactorGraph::TryCast(const_cast<LogicalOperator &>(op))) {
+	if (LogicalAIRegion::Is(op) || LogicalAIFactorGraph::Is(op)) {
 		return true;
 	}
 	for (auto &child : op.children) {

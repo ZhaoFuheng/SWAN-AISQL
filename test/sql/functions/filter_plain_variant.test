@@ -1,5 +1,7 @@
 # name: test/sql/functions/filter_plain_variant.test
 # description: ai_debug_prompt_variant='plain' sends ai_filter's prompt BARE -- no system message,
+# group: [functions]
+
 #              no json_schema response format, no prefix-cache block splitting -- and reads the
 #              verdict from the answer TEXT. It exists for cross-engine comparisons: PLOP carries
 #              its own "Return a single yes or no" instruction INSIDE the prompt and sends nothing
@@ -12,7 +14,6 @@
 #              (a bare answer then parses as NULL and keeps 0 rows) and fails if plain forgets to
 #              drop the schema (the mock answers JSON, not 'yes'). The prose case guards the
 #              parser's refusal to guess.
-# group: [aisql]
 
 require aisql
 

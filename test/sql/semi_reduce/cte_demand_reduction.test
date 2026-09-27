@@ -1,5 +1,7 @@
 # name: test/sql/semi_reduce/cte_demand_reduction.test
 # description: AIReduceCTEsByDemand imports the pruning that lives OUTSIDE a semantic CTE into its
+# group: [semi_reduce]
+
 #              body. A CTE body is a bare relation carrying no join edges of its own, so Yannakakis
 #              has nothing to work with there; the joins that could prune it sit in the query that
 #              READS it. This pass carries those keys across: each reference contributes the key
@@ -19,7 +21,6 @@
 #              materialized vs 426 with it inlined). Sharing one materialized body and pruning per
 #              reference are mutually exclusive by construction -- so this pass helps exactly when
 #              the references are JOINTLY selective, which the cases below are and Q26 is not.
-# group: [aisql]
 
 require aisql
 

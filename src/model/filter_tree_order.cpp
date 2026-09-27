@@ -156,10 +156,9 @@ static unique_ptr<AIFilterTreeNode> FactorCommon(unique_ptr<AIFilterTreeNode> no
 			if (std::find(common.begin(), common.end(), key) == common.end()) {
 				rest.push_back(std::move(conjunct));
 			} else if (factored.size() < common.size() &&
-			           std::find_if(factored.begin(), factored.end(),
-			                        [&key](const unique_ptr<AIFilterTreeNode> &f) {
-				                        return AIFilterTreeSerialize(*f) == key;
-			                        }) == factored.end()) {
+			           std::find_if(factored.begin(), factored.end(), [&key](const unique_ptr<AIFilterTreeNode> &f) {
+				           return AIFilterTreeSerialize(*f) == key;
+			           }) == factored.end()) {
 				factored.push_back(std::move(conjunct));
 			}
 		}
@@ -401,9 +400,8 @@ static SubtreeStats ComputeStats(const AIFilterTreeNode &node, const vector<doub
 			cs.push_back(ComputeStats(*child, p, cost));
 		}
 		// optimal order for OR: ascending cost / P(true)
-		std::sort(cs.begin(), cs.end(), [](const SubtreeStats &a, const SubtreeStats &b) {
-			return a.cost * b.p_true < b.cost * a.p_true;
-		});
+		std::sort(cs.begin(), cs.end(),
+		          [](const SubtreeStats &a, const SubtreeStats &b) { return a.cost * b.p_true < b.cost * a.p_true; });
 		double reach = 1.0, c = 0.0, prod_false = 1.0;
 		for (auto &s : cs) {
 			c += reach * s.cost;

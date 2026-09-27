@@ -1,6 +1,7 @@
 #include "exec/ai_leaf_region.hpp"
 
 #include "duckdb/common/allocator.hpp"
+#include "duckdb/common/string_util.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "filter_tree_order.hpp"
 #include "ai_client.hpp"
@@ -20,9 +21,8 @@ static bool ExpressionHasAIImage(const Expression &expr) {
 		return true;
 	}
 	bool found = false;
-	ExpressionIterator::EnumerateChildren(expr, [&](const Expression &child) {
-		found = found || ExpressionHasAIImage(child);
-	});
+	ExpressionIterator::EnumerateChildren(
+	    expr, [&](const Expression &child) { found = found || ExpressionHasAIImage(child); });
 	return found;
 }
 
@@ -413,14 +413,11 @@ void AILeafRegionState::Finish(idx_t overlap_p) {
 }
 
 string AILeafRegionState::TimingSummary() const {
-	char buf[256];
-	snprintf(buf, sizeof(buf),
-	         "embed=%.1fs refresh=%.1fs(%llu) decide=%.1fs warm_gate=%.1fs drain_wait=%.1fs(blocked %llu/%llu) "
-	         "first_wave=%.1fs@%llu rows",
-	         t_embed, t_refresh, (unsigned long long)refreshes, t_decide, t_warm_gate, t_drain,
-	         (unsigned long long)drains_blocked, (unsigned long long)waves, t_first_wave,
-	         (unsigned long long)rows_at_first_wave);
-	return string(buf);
+	return StringUtil::Format(
+	    "embed=%.1fs refresh=%.1fs(%llu) decide=%.1fs warm_gate=%.1fs drain_wait=%.1fs(blocked %llu/%llu) "
+	    "first_wave=%.1fs@%llu rows",
+	    t_embed, t_refresh, refreshes, t_decide, t_warm_gate, t_drain, drains_blocked, waves, t_first_wave,
+	    rows_at_first_wave);
 }
 
 void AILeafRegionState::Results(vector<Value> &out) const {

@@ -1,9 +1,10 @@
 # name: test/sql/lotus_envelope/never_worse_than_lotus.test
 # description: The LOTUS envelope: on every core shape, aisql's chat calls must be <= the
+# group: [lotus_envelope]
+
 #   LOTUS-equivalent count (flat evaluation: every operator evaluates every input row - a filter
 #   over N rows = N calls, a semantic join = |A|x|B| calls, no dedup, no early-stop), and results
 #   must equal flat evaluation's. "Never worse than LOTUS" in calls and answers, per shape.
-# group: [aisql]
 
 require aisql
 

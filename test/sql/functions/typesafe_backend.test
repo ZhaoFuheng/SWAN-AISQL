@@ -1,6 +1,6 @@
 # name: test/sql/functions/typesafe_backend.test
 # description: ai_filter -> TypeSafe Noul and ai_classify -> TypeSafe Choice behind SET ai_typesafe
-# group: [aisql]
+# group: [functions]
 
 require aisql
 

@@ -13,6 +13,14 @@ LogicalAIRegion::LogicalAIRegion(TableIndex region_index, unique_ptr<Expression>
 	expressions.push_back(std::move(eval_expr));
 }
 
+bool LogicalAIRegion::Is(const LogicalOperator &op) {
+	if (op.type != LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR) {
+		return false;
+	}
+	auto id = op.Cast<LogicalExtensionOperator>().GetTypeBindingVerificationIdentifier();
+	return id && *id == IDENTIFIER;
+}
+
 LogicalAIRegion *LogicalAIRegion::TryCast(LogicalOperator &op) {
 	if (op.type != LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR) {
 		return nullptr;

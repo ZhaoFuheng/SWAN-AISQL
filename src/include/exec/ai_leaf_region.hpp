@@ -78,21 +78,21 @@ public:
 private:
 	struct Rep {
 		double p = 0.5;
-		uint64_t p_step = 0;   //! model training step the prediction was made at (stale once it advances)
-		vector<float> feat;    //! selectivity feature, embedded once at staging; a refresh is a forward pass
+		uint64_t p_step = 0; //! model training step the prediction was made at (stale once it advances)
+		vector<float> feat;  //! selectivity feature, embedded once at staging; a refresh is a forward pass
 		double cost = 1.0;
 		bool valid = true;
-		int8_t verdict = -1;   //! -1 unknown, 0 false, 1 true (meaningful once state == DONE)
-		uint8_t state = 0;     //! 0 idle, 1 pending, 2 in flight, 3 done
+		int8_t verdict = -1;      //! -1 unknown, 0 false, 1 true (meaningful once state == DONE)
+		uint8_t state = 0;        //! 0 idle, 1 pending, 2 in flight, 3 done
 		vector<uint32_t> waiters; //! rows waiting on this rep's verdict
 	};
 	struct Leaf {
 		vector<idx_t> key_cols;
 		std::unordered_map<string, uint32_t> dict;
 		vector<Rep> reps;
-		AILeafTexts texts;         //! per rep (index-aligned with `reps`)
-		vector<uint32_t> pending;  //! reps some undecided row waits on, not yet fired
-		DataChunk stage;           //! rows of reps whose texts are not built yet
+		AILeafTexts texts;        //! per rep (index-aligned with `reps`)
+		vector<uint32_t> pending; //! reps some undecided row waits on, not yet fired
+		DataChunk stage;          //! rows of reps whose texts are not built yet
 		vector<uint32_t> stage_reps;
 	};
 
@@ -124,8 +124,8 @@ private:
 	const string query_text;
 	vector<LogicalType> child_types;
 	vector<Leaf> leaves;
-	vector<uint32_t> row_reps;   //! n per row
-	vector<int8_t> row_result;   //! -2 undecided, -1 NULL, 0 false, 1 true
+	vector<uint32_t> row_reps; //! n per row
+	vector<int8_t> row_result; //! -2 undecided, -1 NULL, 0 false, 1 true
 	int64_t passed = 0;
 	idx_t waves = 0;
 	vector<unique_ptr<AILeafWave>> inflight;

@@ -1,6 +1,6 @@
 # name: test/sql/factor_join/factor_join.test
 # description: Factorized semantic join: pair-domain calls, no cross materialization, exact parity
-# group: [aisql]
+# group: [factor_join]
 
 require aisql
 

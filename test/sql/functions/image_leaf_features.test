@@ -1,10 +1,11 @@
 # name: test/sql/functions/image_leaf_features.test
 # description: An image leaf gets a real selectivity feature (predicate text x image through the
+# group: [functions]
+
 #              dual-encoder embeddings route) instead of the neutral prior, on both evaluation
 #              paths (per-row batch and the leaf region). ai_embed_images=false restores the
 #              neutral prior: the answer is identical (a conjunction is order-independent) and
 #              the image leaf costs no embed request.
-# group: [aisql]
 
 require aisql
 

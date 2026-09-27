@@ -89,9 +89,9 @@ private:
 	vector<LogicalType> row_types;
 	vector<idx_t> key_cols;
 	std::unordered_map<string, idx_t> key_to_rep; //! distinct key -> rep ordinal (first-seen)
-	vector<idx_t> counts;                          //! per rep: fan-out count
-	vector<idx_t> row_rep;                         //! per appended row: rep ordinal (broadcast map)
-	ColumnDataCollection staged;                   //! unfired rep rows (spillable), dropped each MarkFired()
+	vector<idx_t> counts;                         //! per rep: fan-out count
+	vector<idx_t> row_rep;                        //! per appended row: rep ordinal (broadcast map)
+	ColumnDataCollection staged;                  //! unfired rep rows (spillable), dropped each MarkFired()
 	ColumnDataAppendState staged_append;
 	DataChunk stage_chunk; //! staging buffer, flushed to `staged` at STANDARD_VECTOR_SIZE
 	idx_t fired = 0;

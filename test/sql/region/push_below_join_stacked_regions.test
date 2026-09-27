@@ -1,5 +1,7 @@
 # name: test/sql/region/push_below_join_stacked_regions.test
 # description: Two single-sided AI filters over a cross product, NOT folded into one node (ai_reorder=false),
+# group: [region]
+
 #              so they become two regions stacked above the join with the filter that tests both results on
 #              top. The join rewrite pushes each region below the join onto its side; that reshapes the join's
 #              output order, and the filter's positional projection_map -- two operators up, not on the
@@ -9,7 +11,6 @@
 #              The shape needs joins under the AI-filtered CTE (they give the filter its projection map) and
 #              an explicit final column list; SELECT * over a single join plans fine, which is why the
 #              existing ai_reorder=false tests never hit it.
-# group: [aisql]
 
 require aisql
 

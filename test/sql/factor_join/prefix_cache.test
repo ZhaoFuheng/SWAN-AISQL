@@ -1,8 +1,9 @@
 # name: test/sql/factor_join/prefix_cache.test
 # description: prefix-cache client lifecycle: operators declare (split + expected_reuse hint), the
+# group: [factor_join]
+
 #              client decides writes/reads. Result- and call-neutral vs plain; breakpoints follow
 #              the policy exactly (hinted groups all ride the cache, singletons place no bet).
-# group: [aisql]
 
 require aisql
 

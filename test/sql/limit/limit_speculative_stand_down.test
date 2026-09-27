@@ -1,6 +1,6 @@
 # name: test/sql/limit/limit_speculative_stand_down.test
 # description: speculative leaf nodes stand down when LIMIT k is pushed into the evaluation above
-# group: [aisql]
+# group: [limit]
 
 require aisql
 

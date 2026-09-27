@@ -65,7 +65,8 @@ struct AIConfig {
 	//! ai_embed: a separate endpoint + model (local sentence-transformers by default). ai_embed
 	//! always uses the fixed path (no turbo) and has no history, to keep CPU/memory bounded.
 	string embed_url;   // AI_EMBED_URL   (default http://localhost:4002)
-	string embed_model; // AI_EMBED_MODEL (default sentence-transformers/all-MiniLM-L6-v2; the server also loads CLIP for images)
+	string embed_model; // AI_EMBED_MODEL (default sentence-transformers/all-MiniLM-L6-v2; the server also loads CLIP
+	                    // for images)
 	//! AI_EMBED_IMAGES / SET ai_embed_images (default on): embed image leaves (predicate text x image
 	//! through the dual encoder) so they get a real selectivity prior instead of the neutral 0.5.
 	//! Off, or a server that cannot embed images (the client latches on its first refusal), keeps
@@ -78,16 +79,16 @@ struct AIConfig {
 	//! it per function, and image-bearing prompts always stay on the chat model (Jev is text-only).
 	//! The answer is folded back into the chat envelope ({"result":...}) so every parser and the
 	//! reorder/selectivity machinery are untouched. Settings: ai_typesafe='filter,classify'.
-	bool typesafe_filter = false;   // AI_TYPESAFE contains "filter"
-	bool typesafe_classify = false; // AI_TYPESAFE contains "classify"
-	bool typesafe_score = false;    // AI_TYPESAFE contains "score"
-	string typesafe_url;            // AI_TYPESAFE_URL   (default http://localhost:4001 = the cache proxy, which
-	                                //                    terminates TLS towards https://api.typesafe.ai)
-	string typesafe_model;          // AI_TYPESAFE_MODEL (default jev-latest)
-	string typesafe_api_key;        // TYPESAFE_API_KEY
-	double typesafe_threshold = 0.5;      // Noul probability >= threshold -> true
-	bool typesafe_score_argmax = false;   // AI_TYPESAFE_SCORE_MODE=argmax: a Score answers its most probable level
-	                                      // instead of the probability-weighted one (default 'expected')
+	bool typesafe_filter = false;        // AI_TYPESAFE contains "filter"
+	bool typesafe_classify = false;      // AI_TYPESAFE contains "classify"
+	bool typesafe_score = false;         // AI_TYPESAFE contains "score"
+	string typesafe_url;                 // AI_TYPESAFE_URL   (default http://localhost:4001 = the cache proxy, which
+	                                     //                    terminates TLS towards https://api.typesafe.ai)
+	string typesafe_model;               // AI_TYPESAFE_MODEL (default jev-latest)
+	string typesafe_api_key;             // TYPESAFE_API_KEY
+	double typesafe_threshold = 0.5;     // Noul probability >= threshold -> true
+	bool typesafe_score_argmax = false;  // AI_TYPESAFE_SCORE_MODE=argmax: a Score answers its most probable level
+	                                     // instead of the probability-weighted one (default 'expected')
 	double typesafe_price_input = 0.042; // USD per 1M input tokens (output tokens are free)
 	//! AI Region execution knobs (bridged from ai_debug_* settings): streaming sink on/off,
 	//! wave-size override (0 = derived floor of 5x concurrency), debug log channels (csv).
@@ -175,18 +176,19 @@ struct AIConfig {
 
 //! Per-query LLM usage/cost record. One entry per distinct query text.
 struct AIQueryUsage {
-	uint64_t query_id = 0;          // stable id assigned when the query is first seen
-	string query_text;              // the SQL text (from ClientContext::GetCurrentQuery)
-	uint64_t llm_calls = 0;         // actual requests sent to a model (chat + embed)
-	uint64_t embed_calls = 0;       // subset of llm_calls that were ai_embed requests (chat = llm_calls - embed_calls)
-	uint64_t embed_tokens = 0;      // subset of input_tokens/total_tokens from ai_embed requests
-	uint64_t cache_hits = 0;        // inputs served from response cache / in-batch de-dup (no call)
-	uint64_t hedged_calls = 0;      // duplicate attempts fired past the p99 hedge deadline
-	uint64_t failed_calls = 0;      // requests that got no usable answer (transport error / non-2xx after retries): the AI function returned NULL
-	uint64_t input_tokens = 0;      // prompt tokens
-	uint64_t cached_tokens = 0;     // provider-cached prompt tokens (subset of input_tokens)
-	uint64_t output_tokens = 0;     // completion tokens
-	uint64_t reasoning_tokens = 0;  // reasoning tokens (subset of output_tokens)
+	uint64_t query_id = 0;      // stable id assigned when the query is first seen
+	string query_text;          // the SQL text (from ClientContext::GetCurrentQuery)
+	uint64_t llm_calls = 0;     // actual requests sent to a model (chat + embed)
+	uint64_t embed_calls = 0;   // subset of llm_calls that were ai_embed requests (chat = llm_calls - embed_calls)
+	uint64_t embed_tokens = 0;  // subset of input_tokens/total_tokens from ai_embed requests
+	uint64_t cache_hits = 0;    // inputs served from response cache / in-batch de-dup (no call)
+	uint64_t hedged_calls = 0;  // duplicate attempts fired past the p99 hedge deadline
+	uint64_t failed_calls = 0;  // requests that got no usable answer (transport error / non-2xx after retries): the AI
+	                            // function returned NULL
+	uint64_t input_tokens = 0;  // prompt tokens
+	uint64_t cached_tokens = 0; // provider-cached prompt tokens (subset of input_tokens)
+	uint64_t output_tokens = 0; // completion tokens
+	uint64_t reasoning_tokens = 0; // reasoning tokens (subset of output_tokens)
 	uint64_t total_tokens = 0;
 	double cost_usd = 0.0;
 };

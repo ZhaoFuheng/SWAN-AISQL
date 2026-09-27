@@ -1,7 +1,8 @@
 # name: test/sql/functions/local_cache_scope.test
 # description: ai_local_cache_scope: query-level (default; Q1 never serves Q2) vs cross_query
+# group: [functions]
+
 #              (process-lifetime, lotus-style)
-# group: [aisql]
 
 require aisql
 

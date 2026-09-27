@@ -1,5 +1,7 @@
 # name: test/sql/functions/keybind_idempotent.test
 # description: AI function binding must be IDEMPOTENT. DuckDB re-binds a function whenever it
+# group: [functions]
+
 #              duplicates a plan (LogicalOperator::Copy serializes + deserializes; CTE inlining
 #              copies the body once per reference). AIKeyBind appends one history-key column per
 #              column-ref in the prompt, so a second bind used to append them AGAIN -- shifting
@@ -13,7 +15,6 @@
 #              COVERAGE: this file fails with the fix reverted. That required a mock-fidelity
 #              fix too -- the mock used to answer a request whose body was not valid JSON with a
 #              benign "ok", hiding exactly this failure; it now returns 400 like the provider.
-# group: [aisql]
 
 require aisql
 

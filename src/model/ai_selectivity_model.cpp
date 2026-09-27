@@ -17,7 +17,7 @@ constexpr idx_t kHidden2 = 64;
 // distinct domain of a wave-sized slice and stabilises it.
 static idx_t EnvSize(const char *name, idx_t fallback) {
 	const char *v = std::getenv(name);
-	const long long n = v ? std::atoll(v) : 0;
+	const int64_t n = v ? std::atoll(v) : 0;
 	return n > 0 ? static_cast<idx_t>(n) : fallback;
 }
 static const idx_t kFifoCapacity = EnvSize("AI_MLP_FIFO", 256);

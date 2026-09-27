@@ -51,9 +51,8 @@ namespace duckdb {
 //===--------------------------------------------------------------------===//
 // Fixed structured-output schemas shared by all AI functions except ai_complete.
 // Every function returns a single "result" field; only the leaf type differs.
-static const char *const BOOL_RESULT_SCHEMA =
-    "{\"type\":\"object\",\"properties\":{\"result\":{\"type\":\"boolean\"}},"
-    "\"required\":[\"result\"],\"additionalProperties\":false}";
+static const char *const BOOL_RESULT_SCHEMA = "{\"type\":\"object\",\"properties\":{\"result\":{\"type\":\"boolean\"}},"
+                                              "\"required\":[\"result\"],\"additionalProperties\":false}";
 static const char *const NUMBER_RESULT_SCHEMA =
     "{\"type\":\"object\",\"properties\":{\"result\":{\"type\":\"number\"}},"
     "\"required\":[\"result\"],\"additionalProperties\":false}";
@@ -142,7 +141,7 @@ static string AIScoreLevelDescription(const string &text, int64_t n) {
 		if (text.compare(p, num.size(), num) == 0) {
 			size_t q = p + num.size();
 			const bool sep = q < end && (text[q] == ':' || text[q] == '.' || text[q] == ')' ||
-			                            (text[q] == ' ' && q + 1 < end && text[q + 1] == '-'));
+			                             (text[q] == ' ' && q + 1 < end && text[q + 1] == '-'));
 			if (sep) {
 				q += text[q] == ' ' ? 2 : 1;
 				while (q < end && text[q] == ' ') {
@@ -187,9 +186,8 @@ static void AIMarkScoreQuestion(AIRequest &req, const string &input, const strin
 		req.options.emplace_back(std::to_string(n), desc);
 	}
 }
-static const char *const AI_COMPLETE_SYSTEM_PROMPT =
-    "The user will provide an instruction and some relevant context.\n"
-    "Your job is to answer the user's instruction given the context.";
+static const char *const AI_COMPLETE_SYSTEM_PROMPT = "The user will provide an instruction and some relevant context.\n"
+                                                     "Your job is to answer the user's instruction given the context.";
 static const char *const AI_CLASSIFY_SYSTEM_PROMPT =
     "The user will provide a list of categories and some relevant context.\n"
     "Your job is to select the single listed category that best matches the given context.";
@@ -378,8 +376,8 @@ static unique_ptr<FunctionData> AIKeyBind(BindScalarFunctionInput &input) {
 		if (rewrote && all_in_concat) {
 			unique_ptr<Expression> all_null;
 			for (auto &key_expr : key_exprs) {
-				auto is_null = make_uniq<BoundOperatorExpression>(ExpressionType::OPERATOR_IS_NULL,
-				                                                  LogicalType::BOOLEAN);
+				auto is_null =
+				    make_uniq<BoundOperatorExpression>(ExpressionType::OPERATOR_IS_NULL, LogicalType::BOOLEAN);
 				is_null->GetChildrenMutable().push_back(key_expr->Copy());
 				if (!all_null) {
 					all_null = std::move(is_null);
@@ -391,8 +389,8 @@ static unique_ptr<FunctionData> AIKeyBind(BindScalarFunctionInput &input) {
 				}
 			}
 			auto null_value = make_uniq<BoundConstantExpression>(Value(LogicalType::VARCHAR));
-			arguments[0] = make_uniq<BoundCaseExpression>(std::move(all_null), std::move(null_value),
-			                                              std::move(guarded));
+			arguments[0] =
+			    make_uniq<BoundCaseExpression>(std::move(all_null), std::move(null_value), std::move(guarded));
 		}
 	}
 	const idx_t key_start = arguments.size();
@@ -1367,8 +1365,7 @@ struct AIFilterWithEmbedBindData : public FunctionData {
 
 static unique_ptr<FunctionData> AIFilterWithEmbedBindImpl(BindScalarFunctionInput &input, bool speculative) {
 	auto &arguments = input.GetArguments();
-	if (arguments.empty() || !arguments[0] ||
-	    arguments[0]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
+	if (arguments.empty() || !arguments[0] || arguments[0]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
 		throw BinderException("ai_function_with_embed: first argument must be a constant tree string");
 	}
 	auto &value = arguments[0]->Cast<BoundConstantExpression>().GetValue();
@@ -1549,7 +1546,8 @@ static void AIFilterAppendArgs(DataChunk &args, idx_t n, vector<vector<string>> 
 				row_valid[r] = 0;
 			} else {
 				prompt[r][l] = StringValue::Get(pv);
-				cost[r][l] = AITextHasImage(prompt[r][l]) ? AIImageLeafCost(prompt[r][l]) : AIEstimatePromptCost(prompt[r][l]);
+				cost[r][l] =
+				    AITextHasImage(prompt[r][l]) ? AIImageLeafCost(prompt[r][l]) : AIEstimatePromptCost(prompt[r][l]);
 			}
 			Value ptv = ptcol.GetValue(row);
 			if (!ptv.IsNull()) {
@@ -1595,7 +1593,7 @@ static vector<AILeafMeta> AIParseLeafMeta(const string &meta, idx_t n) {
 			if (c1 != string::npos && c2 != string::npos) {
 				const string op = tok.substr(c1 + 1, c2 - c1 - 1);
 				out[leaf].val = tok.substr(c2 + 1);
-				out[leaf].op = op == "ne" ? 'n'
+				out[leaf].op = op == "ne"   ? 'n'
 				               : op == "gt" ? 'g'
 				               : op == "lt" ? 'l'
 				               : op == "ge" ? 'G'
@@ -1652,8 +1650,8 @@ static AIRequest AILeafRequest(const AILeafMeta &m, const string &prompt, const 
 		static const string kInput = "\n\nInput:\n";
 		static const string kTail = "\n\nRespond with exactly one of the listed categories, verbatim.";
 		const auto input_at = prompt.find(kInput);
-		if (prompt.compare(0, kCats.size(), kCats) == 0 && input_at != string::npos &&
-		    prompt.size() >= kTail.size() && prompt.compare(prompt.size() - kTail.size(), kTail.size(), kTail) == 0) {
+		if (prompt.compare(0, kCats.size(), kCats) == 0 && input_at != string::npos && prompt.size() >= kTail.size() &&
+		    prompt.compare(prompt.size() - kTail.size(), kTail.size(), kTail) == 0) {
 			vector<std::pair<string, string>> options;
 			for (auto &cat : StringUtil::Split(prompt.substr(kCats.size(), input_at - kCats.size()), ", ")) {
 				options.emplace_back(cat, string());
@@ -1954,7 +1952,9 @@ static void AIFilterEvaluateBatch(const AIFilterWithEmbedBindData &bind_data, id
 		const int64_t old = ema.load(std::memory_order_relaxed);
 		ema.store(old == 0 ? sample : (old * 7 + sample) / 8, std::memory_order_relaxed);
 	};
-	auto feat_key = [n](idx_t r, idx_t l) { return static_cast<uint64_t>(r) * n + l; };
+	auto feat_key = [n](idx_t r, idx_t l) {
+		return static_cast<uint64_t>(r) * n + l;
+	};
 	auto note_pass = [&](idx_t r) {
 		const int64_t w = out_weights ? static_cast<int64_t>((*out_weights)[r]) : 1; // fan-out count (1 if unweighted)
 		if (limit >= 0 && passed.fetch_add(w) + w >= limit) {
@@ -2109,7 +2109,8 @@ static void AIFilterEvaluateBatch(const AIFilterWithEmbedBindData &bind_data, id
 			// call is expensive. Fall through to the DP instead, which defers the image behind cheaper text
 			// leaves via its high cost -- so even while cold a mixed tree evaluates a trainable text leaf first.
 			// With the CLIP server an image leaf trains like any other, so it stays a warm-up candidate.
-			if (warm_pick && (warm_leaf >= n || (AITextHasImage(prompt[row][warm_leaf]) && !AIEmbedImagesSupported()))) {
+			if (warm_pick &&
+			    (warm_leaf >= n || (AITextHasImage(prompt[row][warm_leaf]) && !AIEmbedImagesSupported()))) {
 				warm_pick = false;
 			}
 			if (warm_pick) {
@@ -2128,16 +2129,17 @@ static void AIFilterEvaluateBatch(const AIFilterWithEmbedBindData &bind_data, id
 			// deduplicated call -- the shared document embeds once -- then JIT-predict p_true against
 			// the live model. Embedding happens here (not upfront) so its CPU overlaps the LLM waits.
 			if (!warm_pick) {
-				// With a CLIP image model on the server (ai_embed_images, default) an image leaf is estimable like a text
-				// leaf: its predicate text and image embed into one space and the MLP learns the pair.
-				// Without one, image embeds are refused anyway, so pay for them only where the estimate can
-				// change behavior: a speculative gate on a row that is estimable at all. Plain reorder nodes
-				// then keep the neutral p + byte-based cost for image leaves, and a speculative row whose
-				// unknown leaves are all images always evaluates regardless.
+				// With a CLIP image model on the server (ai_embed_images, default) an image leaf is estimable like a
+				// text leaf: its predicate text and image embed into one space and the MLP learns the pair. Without
+				// one, image embeds are refused anyway, so pay for them only where the estimate can change behavior: a
+				// speculative gate on a row that is estimable at all. Plain reorder nodes then keep the neutral p +
+				// byte-based cost for image leaves, and a speculative row whose unknown leaves are all images always
+				// evaluates regardless.
 				const bool images_ok = AIEmbedImagesSupported();
 				bool row_estimable = false;
 				for (idx_t l = 0; l < n; l++) {
-					if (leaf_values[row][l] == AITriState::TRI_UNKNOWN && (images_ok || !AITextHasImage(prompt[row][l]))) {
+					if (leaf_values[row][l] == AITriState::TRI_UNKNOWN &&
+					    (images_ok || !AITextHasImage(prompt[row][l]))) {
 						row_estimable = true;
 						break;
 					}
@@ -2267,8 +2269,7 @@ static void AIFilterEvaluateBatch(const AIFilterWithEmbedBindData &bind_data, id
 			for (idx_t l = 0; l < n; l++) {
 				eff_cost[l] = cost[row][l] * domain_frac[l];
 			}
-			idx_t leaf =
-			    warm_pick ? warm_leaf : AIFilterTreeChooseNextLeaf(tree, leaf_values[row], p_row, eff_cost);
+			idx_t leaf = warm_pick ? warm_leaf : AIFilterTreeChooseNextLeaf(tree, leaf_values[row], p_row, eff_cost);
 			if (leaf >= n) {
 				// A concurrent waiter routed this row's last unknown leaf between the fold check above and
 				// the pick: nothing left to evaluate. Re-fold and resolve; fall back to the first unknown
@@ -2352,11 +2353,11 @@ static void AIFilterEvaluateBatch(const AIFilterWithEmbedBindData &bind_data, id
 			// plain ai_filter leaf (meta kind F) is the original path.
 			bool value_ok = false;
 			const auto llm_t0 = std::chrono::steady_clock::now();
-			const bool value = AIEvalLeaf(leaf_meta[leaf], prompt[row][leaf], query_text, value_ok, nullptr, 0,
-			                              &pred_text[row][leaf]);
-			ema_update(llm_lat_us, std::chrono::duration_cast<std::chrono::microseconds>(
-			                           std::chrono::steady_clock::now() - llm_t0)
-			                           .count());
+			const bool value =
+			    AIEvalLeaf(leaf_meta[leaf], prompt[row][leaf], query_text, value_ok, nullptr, 0, &pred_text[row][leaf]);
+			ema_update(llm_lat_us,
+			           std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - llm_t0)
+			               .count());
 			if (value_ok && !feats[leaf].empty()) {
 				// The real (function + comparison) outcome is the ground-truth label for the selectivity MLP.
 				// Skip leaves with no embedding (image leaves, or a failed embed): a pseudo-random selectivity
@@ -2427,7 +2428,8 @@ static void AIFilterEvaluateBatch(const AIFilterWithEmbedBindData &bind_data, id
 								// same gate as the inline stage: only where the estimate can gate
 								bool r_estimable = false;
 								for (idx_t l2 = 0; l2 < n; l2++) {
-									if (leaf_values[r][l2] == AITriState::TRI_UNKNOWN && !AITextHasImage(prompt[r][l2])) {
+									if (leaf_values[r][l2] == AITriState::TRI_UNKNOWN &&
+									    !AITextHasImage(prompt[r][l2])) {
 										r_estimable = true;
 										break;
 									}
@@ -2457,8 +2459,8 @@ static void AIFilterEvaluateBatch(const AIFilterWithEmbedBindData &bind_data, id
 					auto embs = AIEmbedBatch(texts, query_text);
 					ema_update(embed_lat_us, std::chrono::duration_cast<std::chrono::microseconds>(
 					                             std::chrono::steady_clock::now() - emb_t0)
-					                             .count() /
-					                         int64_t(lv.size()));
+					                                 .count() /
+					                             int64_t(lv.size()));
 					std::lock_guard<std::mutex> flk(feat_mutex);
 					for (idx_t u = 0; u < lv.size(); u++) {
 						feat_cache[feat_key(r, lv[u])] =
@@ -2615,7 +2617,8 @@ void AILeafBuildTexts(ClientContext &context, const BoundFunctionExpression &eva
 		out.pred_text.push_back(ptv.IsNull() ? string() : StringValue::Get(ptv));
 		out.input_text.push_back(itv.IsNull() ? string() : StringValue::Get(itv));
 		const auto &prompt = out.prompt.back();
-		out.cost.push_back(pv.IsNull() ? 1.0 : (AITextHasImage(prompt) ? AIImageLeafCost(prompt) : AIEstimatePromptCost(prompt)));
+		out.cost.push_back(
+		    pv.IsNull() ? 1.0 : (AITextHasImage(prompt) ? AIImageLeafCost(prompt) : AIEstimatePromptCost(prompt)));
 	}
 }
 
@@ -2721,7 +2724,8 @@ void AILeafEvaluate(ClientContext &context, const BoundFunctionExpression &eval_
 	AIFilterWithEmbedBindData one(AIFilterTreeParse("L0"), "L0", 1, node.speculative, node.threshold, -1, meta);
 	one.stand_down = node.stand_down;
 	const idx_t count = texts.Size();
-	vector<vector<string>> prompt(count, vector<string>(1)), pred(count, vector<string>(1)), input(count, vector<string>(1));
+	vector<vector<string>> prompt(count, vector<string>(1)), pred(count, vector<string>(1)),
+	    input(count, vector<string>(1));
 	vector<vector<double>> cost(count, vector<double>(1, 1.0));
 	vector<char> valid(count, 1);
 	for (idx_t i = 0; i < count; i++) {
@@ -2921,8 +2925,8 @@ void AIDedupEvaluate(ClientContext &context, const BoundFunctionExpression &eval
 	flush();
 
 	if (std::getenv("AI_DEDUP_DEBUG")) {
-		fprintf(stderr, "[dedup] limit=%lld distinct_reps=%zu is_filter_node=%d\n", (long long)limit,
-		        key_to_rep.size(), is_filter_node ? 1 : 0);
+		fprintf(stderr, "[dedup] limit=%lld distinct_reps=%zu is_filter_node=%d\n", (long long)limit, key_to_rep.size(),
+		        is_filter_node ? 1 : 0);
 	}
 	// Fan-out count per representative (how many buffered rows it broadcasts to) -- the weight that makes a
 	// pushed LIMIT count OUTPUT rows, not distinct inputs. reps are 0..key_to_rep.size()-1 in first-seen order.
@@ -3077,8 +3081,8 @@ void RegisterAIFunctions(ExtensionLoader &loader) {
 	// varargs=ANY so the call still binds after AIKeyBind appends one history-key column per column-ref in the
 	// prompt (e.g. ai_filter('..'||a.x||'..'||b.y) -> ai_filter(prompt, a.x, b.y)); the extra keys are consumed
 	// by GetRowKeys. Without it a non-constant prompt fails to bind ("ai_filter(VARCHAR, VARCHAR)").
-	loader.RegisterFunction(MakeVolatile(ScalarFunction("ai_filter", {varchar}, LogicalType::BOOLEAN, AIFilterFunction, AIKeyBind,
-	                                        nullptr, nullptr, LogicalType::ANY)));
+	loader.RegisterFunction(MakeVolatile(ScalarFunction("ai_filter", {varchar}, LogicalType::BOOLEAN, AIFilterFunction,
+	                                                    AIKeyBind, nullptr, nullptr, LogicalType::ANY)));
 
 	ScalarFunctionSet ai_classify("ai_classify");
 	// varargs=ANY on the base (input, categories) overload accepts the history-key columns AIKeyBind appends --
@@ -3086,14 +3090,12 @@ void RegisterAIFunctions(ExtensionLoader &loader) {
 	// keys -> 4 args). ANY is safe (no numeric overloads to steal, and keys can be any column type). A 1-key
 	// input still resolves to the exact 3-arg overload below, so the (input, categories, instruction) form is
 	// unaffected.
-	ai_classify.AddFunction(MakeVolatile(
-	    ScalarFunction({varchar, varchar_list}, varchar, AIClassifyFunction, AIKeyBind, nullptr, nullptr,
-	                   LogicalType::ANY)));
+	ai_classify.AddFunction(MakeVolatile(ScalarFunction({varchar, varchar_list}, varchar, AIClassifyFunction, AIKeyBind,
+	                                                    nullptr, nullptr, LogicalType::ANY)));
 	ai_classify.AddFunction(
 	    MakeVolatile(ScalarFunction({varchar, varchar_list, varchar}, varchar, AIClassifyFunction, AIKeyBind)));
-	ai_classify.AddFunction(
-	    MakeVolatile(ScalarFunction({varchar, LogicalType::ANY}, varchar, AIClassifyStructFunction, AIKeyBind,
-	                                nullptr, nullptr, LogicalType::ANY)));
+	ai_classify.AddFunction(MakeVolatile(ScalarFunction({varchar, LogicalType::ANY}, varchar, AIClassifyStructFunction,
+	                                                    AIKeyBind, nullptr, nullptr, LogicalType::ANY)));
 	loader.RegisterFunction(ai_classify);
 
 	// varargs=VARCHAR (not ANY) on each overload so the call still binds after AIScoreBind appends the input's
@@ -3109,19 +3111,19 @@ void RegisterAIFunctions(ExtensionLoader &loader) {
 	                                                 AIScoreBind, nullptr, nullptr, varchar)));
 	// ai_score(input, criteria, lo, hi): integer bounds -> BIGINT in [lo,hi] (rounded); float bounds -> DOUBLE.
 	// Overload resolution picks BIGINT for integer literals, DOUBLE otherwise (mixed widens to DOUBLE).
-	ai_score.AddFunction(MakeVolatile(ScalarFunction({varchar, varchar, LogicalType::BIGINT, LogicalType::BIGINT},
-	                                                 LogicalType::BIGINT, AIScoreFunction, AIScoreBind, nullptr, nullptr,
-	                                                 varchar)));
-	ai_score.AddFunction(MakeVolatile(ScalarFunction({varchar, varchar, LogicalType::DOUBLE, LogicalType::DOUBLE},
-	                                                 LogicalType::DOUBLE, AIScoreFunction, AIScoreBind, nullptr, nullptr,
-	                                                 varchar)));
+	ai_score.AddFunction(
+	    MakeVolatile(ScalarFunction({varchar, varchar, LogicalType::BIGINT, LogicalType::BIGINT}, LogicalType::BIGINT,
+	                                AIScoreFunction, AIScoreBind, nullptr, nullptr, varchar)));
+	ai_score.AddFunction(
+	    MakeVolatile(ScalarFunction({varchar, varchar, LogicalType::DOUBLE, LogicalType::DOUBLE}, LogicalType::DOUBLE,
+	                                AIScoreFunction, AIScoreBind, nullptr, nullptr, varchar)));
 	loader.RegisterFunction(ai_score);
 
 	loader.RegisterFunction(MakeVolatile(ScalarFunction("ai_agg", {varchar_list, varchar}, varchar, AIAggFunction)));
 
 	// Embeddings: no history, fixed path, local sentence-transformers by default.
-	loader.RegisterFunction(MakeVolatile(
-	    ScalarFunction("ai_embed", {varchar}, LogicalType::LIST(LogicalType::FLOAT), AIEmbedFunction)));
+	loader.RegisterFunction(
+	    MakeVolatile(ScalarFunction("ai_embed", {varchar}, LogicalType::LIST(LogicalType::FLOAT), AIEmbedFunction)));
 
 	// ai_image(path_or_url): mark a string as an image for the multimodal AI functions (pure transform).
 	loader.RegisterFunction(ScalarFunction("ai_image", {varchar}, varchar, AIImageFunction));
@@ -3134,27 +3136,26 @@ void RegisterAIFunctions(ExtensionLoader &loader) {
 	// varargs=ANY accepts the hidden history-key args AIKeyBind appends (one per column-ref in the prompt), so
 	// a MULTI-column prompt like ai_complete('p '||a.x||b.y) binds. AIPromptFunction tells the optional
 	// json_schema arg apart from keys via AIKeyBindData.key_start (declared-arg count), never by position.
-	ai_complete.AddFunction(
-	    MakeVolatile(ScalarFunction({varchar}, varchar, AIPromptFunction, AIKeyBind, nullptr, nullptr,
-	                                LogicalType::ANY)));
-	ai_complete.AddFunction(
-	    MakeVolatile(ScalarFunction({varchar, varchar}, varchar, AIPromptFunction, AIKeyBind, nullptr, nullptr,
-	                                LogicalType::ANY)));
+	ai_complete.AddFunction(MakeVolatile(
+	    ScalarFunction({varchar}, varchar, AIPromptFunction, AIKeyBind, nullptr, nullptr, LogicalType::ANY)));
+	ai_complete.AddFunction(MakeVolatile(
+	    ScalarFunction({varchar, varchar}, varchar, AIPromptFunction, AIKeyBind, nullptr, nullptr, LogicalType::ANY)));
 	loader.RegisterFunction(ai_complete);
 
 	// Usage / cost tracking
 	loader.RegisterFunction(TableFunction("ai_usage", {}, AIUsageFunction, AIUsageBind, AIUsageInit));
-	loader.RegisterFunction(MakeVolatile(ScalarFunction("ai_usage_reset", {}, LogicalType::BIGINT, AIUsageResetFunction)));
-	loader.RegisterFunction(MakeVolatile(ScalarFunction("ai_local_cache_clear", {}, LogicalType::BIGINT,
-	                                                    [](DataChunk &args, ExpressionState &, Vector &result) {
-		                                                    result.Reference(Value::BIGINT(static_cast<int64_t>(AILocalCacheClear())),
-		                                                                     count_t(args.size()));
-	                                                    })));
+	loader.RegisterFunction(
+	    MakeVolatile(ScalarFunction("ai_usage_reset", {}, LogicalType::BIGINT, AIUsageResetFunction)));
+	loader.RegisterFunction(MakeVolatile(ScalarFunction(
+	    "ai_local_cache_clear", {}, LogicalType::BIGINT, [](DataChunk &args, ExpressionState &, Vector &result) {
+		    result.Reference(Value::BIGINT(static_cast<int64_t>(AILocalCacheClear())), count_t(args.size()));
+	    })));
 
 	// History mode
-	loader.RegisterFunction(MakeVolatile(ScalarFunction("ai_history_reset", {}, LogicalType::BIGINT, AIHistoryResetFunction)));
 	loader.RegisterFunction(
-	    MakeVolatile(ScalarFunction("ai_history_mode", {LogicalType::BOOLEAN}, LogicalType::BOOLEAN, AIHistoryModeFunction)));
+	    MakeVolatile(ScalarFunction("ai_history_reset", {}, LogicalType::BIGINT, AIHistoryResetFunction)));
+	loader.RegisterFunction(MakeVolatile(
+	    ScalarFunction("ai_history_mode", {LogicalType::BOOLEAN}, LogicalType::BOOLEAN, AIHistoryModeFunction)));
 
 	// Turbo mode: adaptive (AIMD) concurrency
 	loader.RegisterFunction(
@@ -3163,33 +3164,35 @@ void RegisterAIFunctions(ExtensionLoader &loader) {
 	// Per-row adaptive boolean predicate over ai_filter leaves (inserted by the DUCKDB_AI_REORDER
 	// rewrite; also directly callable for testing). It embeds internally and orders per row. varargs
 	// (all VARCHAR): the n full prompts, then n predicate texts, then n input texts; arg 0 = tree.
-	loader.RegisterFunction(MakeVolatile(ScalarFunction("ai_function_with_embed", {varchar}, LogicalType::BOOLEAN, AIFilterWithEmbedFunction,
-	                           AIFilterWithEmbedBind, nullptr, nullptr, LogicalType::ANY, FunctionStability::VOLATILE)));
+	loader.RegisterFunction(MakeVolatile(ScalarFunction("ai_function_with_embed", {varchar}, LogicalType::BOOLEAN,
+	                                                    AIFilterWithEmbedFunction, AIFilterWithEmbedBind, nullptr,
+	                                                    nullptr, LogicalType::ANY, FunctionStability::VOLATILE)));
 
 	// Speculative variant: same node + arg contract, but row-adaptive partial pushdown -- pre-evaluates
 	// only likely-to-fail rows (MLP-gated) to prune before a join; likely-to-pass rows pass through for
 	// the pulled-up filter to re-check. Emitted at the pushed-down position by the semantic pull-up.
-	loader.RegisterFunction(MakeVolatile(ScalarFunction("speculative_ai_function_with_embed", {varchar}, LogicalType::BOOLEAN,
-	                           AIFilterWithEmbedFunction, AISpeculativeFilterWithEmbedBind, nullptr, nullptr,
-	                           LogicalType::ANY, FunctionStability::VOLATILE)));
+	loader.RegisterFunction(MakeVolatile(ScalarFunction(
+	    "speculative_ai_function_with_embed", {varchar}, LogicalType::BOOLEAN, AIFilterWithEmbedFunction,
+	    AISpeculativeFilterWithEmbedBind, nullptr, nullptr, LogicalType::ANY, FunctionStability::VOLATILE)));
 
 	// Self-labeling training data for the selectivity MLP
 	loader.RegisterFunction(
 	    TableFunction("ai_filter_training_data", {}, AITrainingFunction, AITrainingBind, AITrainingInit));
-	loader.RegisterFunction(MakeVolatile(ScalarFunction("ai_training_reset", {}, LogicalType::BIGINT, AITrainingResetFunction)));
+	loader.RegisterFunction(
+	    MakeVolatile(ScalarFunction("ai_training_reset", {}, LogicalType::BIGINT, AITrainingResetFunction)));
 
 	// Online selectivity model: training counters + reset
-	loader.RegisterFunction(TableFunction("ai_selectivity_stats", {}, AISelectivityStatsFunction, AISelectivityStatsBind,
-	                          AISelectivityStatsInit));
+	loader.RegisterFunction(TableFunction("ai_selectivity_stats", {}, AISelectivityStatsFunction,
+	                                      AISelectivityStatsBind, AISelectivityStatsInit));
 	loader.RegisterFunction(
 	    MakeVolatile(ScalarFunction("ai_selectivity_reset", {}, LogicalType::BIGINT, AISelectivityResetFunction)));
 
 	// Deterministic (no-LLM) hook over the cost-aware order planner, for testing.
 	loader.RegisterFunction(MakeVolatile(ScalarFunction(
-	    "ai_reorder_choose_leaf", {LogicalType::VARCHAR, LogicalType::LIST(LogicalType::FLOAT), LogicalType::LIST(LogicalType::FLOAT)},
+	    "ai_reorder_choose_leaf",
+	    {LogicalType::VARCHAR, LogicalType::LIST(LogicalType::FLOAT), LogicalType::LIST(LogicalType::FLOAT)},
 	    LogicalType::BIGINT, AIReorderChooseLeafFunction)));
 }
-
 
 //===--------------------------------------------------------------------===//
 // Factor-graph decomposition of a conjunctive folded node

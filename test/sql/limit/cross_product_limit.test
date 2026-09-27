@@ -1,5 +1,7 @@
 # name: test/sql/limit/cross_product_limit.test
 # description: LIMIT k above a CROSS PRODUCT caps the AI-bearing side's INPUT.
+# group: [limit]
+
 #
 #              A cross product has no join condition, so every row of one side pairs with every row
 #              of the other: the first k output rows need at most k rows from either side. Capping
@@ -19,7 +21,6 @@
 #              back -- every one of them still correct. Scoring such a query by row identity
 #              measures which rows an engine reached first, not whether it is right; see
 #              sembench/AGENTBENCH/eval_agentbench.py, which checks soundness and cardinality.
-# group: [aisql]
 
 require aisql
 

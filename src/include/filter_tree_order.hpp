@@ -22,8 +22,8 @@ enum class AITriState : uint8_t { TRI_FALSE = 0, TRI_TRUE = 1, TRI_UNKNOWN = 2 }
 
 struct AIFilterTreeNode {
 	AIFilterTreeType type;
-	idx_t leaf_index = 0;                             // LEAF: index into the prompt/embedding arrays
-	vector<unique_ptr<AIFilterTreeNode>> children;    // AND/OR: >=1; NOT: exactly 1
+	idx_t leaf_index = 0;                          // LEAF: index into the prompt/embedding arrays
+	vector<unique_ptr<AIFilterTreeNode>> children; // AND/OR: >=1; NOT: exactly 1
 
 	static unique_ptr<AIFilterTreeNode> Leaf(idx_t index);
 	static unique_ptr<AIFilterTreeNode> Op(AIFilterTreeType type, vector<unique_ptr<AIFilterTreeNode>> children);

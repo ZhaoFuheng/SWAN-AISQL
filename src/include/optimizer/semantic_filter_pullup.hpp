@@ -33,8 +33,7 @@ private:
 	//! Within a cluster subtree, move each AI-comparison predicate (ai_filter / ai_classify=/ai_score>/
 	//! ai_complete=) out into `pulled`, leaving one combined speculative_ai_function_with_embed pre-filter
 	//! per leaf FILTER they came from.
-	void ExtractAIFilters(unique_ptr<LogicalOperator> &op, vector<unique_ptr<Expression>> &pulled,
-	                      idx_t cluster_card);
+	void ExtractAIFilters(unique_ptr<LogicalOperator> &op, vector<unique_ptr<Expression>> &pulled, idx_t cluster_card);
 	//! Build one bound speculative_ai_function_with_embed over the AND of the pulled leaves (baking each
 	//! leaf's scalar-exact call prompt + meta; the node embeds predicate/input internally for the MLP
 	//! feature). Reads the leaves' expression pointers, so call it BEFORE the leaf exprs are moved away.

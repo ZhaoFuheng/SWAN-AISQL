@@ -1,7 +1,8 @@
 # name: test/sql/factor_join/factor_graph.test
 # description: n-ary factor graph: multiway AI-condition joins evaluate member/pair domains with
+# group: [factor_join]
+
 #              exact backward pruning; the cross product never materializes
-# group: [aisql]
 
 require aisql
 

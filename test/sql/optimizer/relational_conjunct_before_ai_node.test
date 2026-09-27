@@ -1,12 +1,13 @@
 # name: test/sql/optimizer/relational_conjunct_before_ai_node.test
 # description: The folded AI node must sit in its OWN filter above the relational remainder of a
+# group: [optimizer]
+
 #              WHERE clause, never beside it in one conjunction. DuckDB's filter evaluates a
 #              conjunction through an AdaptiveFilter that permutes (and randomly explores) conjunct
 #              order, so `ai_node AND id IN (...)` ran the LLM node first over every row whenever the
 #              IN-list was only an "optional" scan filter: 3,218 mock calls (2,200 real calls on
 #              MOVIE) for a 10-row answer. Both rewrite paths (pure ai_filter tree, mixed tree with a
 #              classify comparison) are pinned; reorder-off parity guards the result.
-# group: [aisql]
 
 require aisql
 

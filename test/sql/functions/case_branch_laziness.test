@@ -1,8 +1,9 @@
 # name: test/sql/functions/case_branch_laziness.test
 # description: CASE with a semantic operator per branch fires exactly ONE op per row: the
+# group: [functions]
+
 #              pre-issue machinery (scan-region hoist, speculative prefetch) must never eagerly
 #              evaluate a THEN branch or a non-first WHEN condition a row might not take.
-# group: [aisql]
 
 require aisql
 

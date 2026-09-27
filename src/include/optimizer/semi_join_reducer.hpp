@@ -49,7 +49,8 @@ private:
 		LogicalType right_type;
 	};
 
-	//! Does this operator's expressions or join conditions call a row-wise AI function (ai_filter/classify/score/prompt)?
+	//! Does this operator's expressions or join conditions call a row-wise AI function
+	//! (ai_filter/classify/score/prompt)?
 	static bool OperatorHasAIFunction(const LogicalOperator &op);
 	//! Does any node within this inner-join cluster carry an AI function (e.g. an AI predicate folded into a
 	//! join, or -- when check_leaves is set -- pushed down into a leaf's filter)?

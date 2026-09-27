@@ -1,6 +1,6 @@
 # name: test/sql/optimizer/reorder_fusion.test
 # description: AIPredicateRewrite folds AI boolean trees into ai_function_with_embed; results preserved
-# group: [aisql]
+# group: [optimizer]
 
 require aisql
 

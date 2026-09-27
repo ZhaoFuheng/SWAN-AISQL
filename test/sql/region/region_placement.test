@@ -1,6 +1,6 @@
 # name: test/sql/region/region_placement.test
 # description: AI Region placement (ai_factorize), factorized dedup call counts, LIMIT compose
-# group: [aisql]
+# group: [region]
 
 require aisql
 

@@ -36,6 +36,8 @@ public:
 
 public:
 	static LogicalAIFactorGraph *TryCast(LogicalOperator &op);
+	//! TryCast's test on a const operator.
+	static bool Is(const LogicalOperator &op);
 
 	vector<ColumnBinding> GetColumnBindings() override;
 	vector<TableIndex> GetTableIndex() const override;

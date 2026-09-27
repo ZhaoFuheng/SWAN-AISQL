@@ -93,9 +93,9 @@ bool AIPredicateRewrite::RewriteMixedFilter(unique_ptr<LogicalOperator> &filter_
 			subtrees.push_back(AIBuildMixedTree(*expr, leaves));
 		}
 	}
-	unique_ptr<AIFilterTreeNode> tree =
-	    subtrees.size() == 1 ? std::move(subtrees[0])
-	                         : AIFilterTreeNode::Op(AIFilterTreeType::AND_OP, std::move(subtrees));
+	unique_ptr<AIFilterTreeNode> tree = subtrees.size() == 1
+	                                        ? std::move(subtrees[0])
+	                                        : AIFilterTreeNode::Op(AIFilterTreeType::AND_OP, std::move(subtrees));
 	const string tree_str = AIFilterTreeSerialize(*tree);
 	const idx_t m = leaves.size();
 
@@ -264,8 +264,8 @@ void AIPredicateRewrite::RewriteCaseInExpression(unique_ptr<Expression> &expr) {
 		RewriteCaseInExpression(case_expr.ElseMutable());
 		return;
 	}
-	ExpressionIterator::EnumerateChildren(
-	    *expr, [&](unique_ptr<Expression> &child) { RewriteCaseInExpression(child); });
+	ExpressionIterator::EnumerateChildren(*expr,
+	                                      [&](unique_ptr<Expression> &child) { RewriteCaseInExpression(child); });
 }
 
 void AIPredicateRewrite::RewriteCaseInOperators(unique_ptr<LogicalOperator> &op) {

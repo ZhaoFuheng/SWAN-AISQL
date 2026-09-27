@@ -1,5 +1,7 @@
 # name: test/sql/semi_reduce/leaf_projection_reduction.test
 # description: Yannakakis semi-reduction lands BELOW an AI projection leaf (ai_complete / ai_classify
+# group: [semi_reduce]
+
 #              computed per row and then joined -- MMQA q1's "extract the director, join on title"),
 #              so the LLM computes only the rows the join keeps. Before: the reducer only descended
 #              below AI *filters*, so the SEMI landed above the projection and pruned rows already
@@ -7,7 +9,6 @@
 #              cannot reach the scan; only the reducer can shrink the AI input.
 #              Also: a leaf's AI stage is visible to the reducer regardless of ai_pullup.
 #              (The AI column must be consumed: an unreferenced projection is removed as unused.)
-# group: [aisql]
 
 require aisql
 

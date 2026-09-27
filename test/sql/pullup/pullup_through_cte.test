@@ -1,5 +1,7 @@
 # name: test/sql/pullup/pullup_through_cte.test
 # description: The semantic pull-up must descend through a materialized-CTE node. Such a node
+# group: [pullup]
+
 #              sits BETWEEN the cluster top and the join tree, and stopping there hid every AI
 #              filter below it -- the predicate then ran on its full base table instead of on the
 #              rows the joins leave (agent_bench Q26: the walk found 1 of 4 AI filters, and part
@@ -14,7 +16,6 @@
 #              1,425 -> 421 calls, results unchanged. What this file does guard is the
 #              CORRECTNESS half: parity with the stack disabled, and that a CTE body read by two
 #              references is never raided.
-# group: [aisql]
 
 require aisql
 

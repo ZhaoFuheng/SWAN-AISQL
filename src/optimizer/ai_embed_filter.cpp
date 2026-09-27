@@ -26,8 +26,8 @@ static void CollectPromptsByName(const Expression &expr, const char *fname, vect
 			prompts.push_back(fn.GetChildren()[0].get());
 		}
 	}
-	ExpressionIterator::EnumerateChildren(expr,
-	                                      [&](const Expression &child) { CollectPromptsByName(child, fname, prompts); });
+	ExpressionIterator::EnumerateChildren(
+	    expr, [&](const Expression &child) { CollectPromptsByName(child, fname, prompts); });
 }
 
 //! Prompts in `filter` worth embedding. The embedding only pays off when a selectivity consumer

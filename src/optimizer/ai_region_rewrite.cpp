@@ -65,8 +65,8 @@ static bool IsDedupableAICall(const Expression &expr) {
 	// tree, so it stays scalar -- but it's still input-deterministic and its calls serialize per-chunk above a
 	// join, so it benefits from the buffered concurrent batch too (AIDedupEvalScalar handles it). All are
 	// input-deterministic, so dedup+broadcast is result-identical.
-	return name == "ai_function_with_embed" || name == "ai_filter" || name == "ai_classify" ||
-	       name == "ai_score" || name == "ai_complete";
+	return name == "ai_function_with_embed" || name == "ai_filter" || name == "ai_classify" || name == "ai_score" ||
+	       name == "ai_complete";
 }
 
 static bool ContainsDedupableAICall(const Expression &expr) {
@@ -103,7 +103,7 @@ static bool SubtreeHasDynamicFilterScan(const LogicalOperator &op) {
 }
 
 bool AIRegionRewrite::HoistAICalls(unique_ptr<Expression> &expr, unique_ptr<LogicalOperator> &child_slot,
-                                  int64_t limit_k, bool lazy_guard) {
+                                   int64_t limit_k, bool lazy_guard) {
 	if (IsDedupableAICall(*expr)) {
 		// Under a LIMIT, only an ai_function_with_embed NODE can early-stop while deduping (the count-weighted
 		// stop in AIDedupEvaluate/AIFilterEvaluateBatch). A scalar AI call can't, and a blocking dedup would
@@ -161,9 +161,9 @@ static int64_t GetConstantLimit(const LogicalOperator &op) {
 	if (limit.limit_val.Type() != LimitNodeType::CONSTANT_VALUE) {
 		return -1;
 	}
-	const bool offset_ok = (limit.offset_val.Type() == LimitNodeType::CONSTANT_VALUE &&
-	                        limit.offset_val.GetConstantValue() == 0) ||
-	                       limit.offset_val.Type() == LimitNodeType::UNSET;
+	const bool offset_ok =
+	    (limit.offset_val.Type() == LimitNodeType::CONSTANT_VALUE && limit.offset_val.GetConstantValue() == 0) ||
+	    limit.offset_val.Type() == LimitNodeType::UNSET;
 	return offset_ok ? static_cast<int64_t>(limit.limit_val.GetConstantValue()) : -1;
 }
 

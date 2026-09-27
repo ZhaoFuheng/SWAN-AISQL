@@ -1,6 +1,6 @@
 # name: test/sql/pullup/join_cluster_passes.test
 # description: Stage-4 join-cluster passes: pull-up above joins, semi-reduction, push-below, semi-convert
-# group: [aisql]
+# group: [pullup]
 
 require aisql
 

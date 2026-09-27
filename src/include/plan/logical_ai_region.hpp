@@ -30,6 +30,8 @@ public:
 	//! Downcast helper replacing the fork's enum check: matches on the verification identifier,
 	//! safe across shared-library boundaries (no RTTI dependence).
 	static LogicalAIRegion *TryCast(LogicalOperator &op);
+	//! TryCast's test on a const operator.
+	static bool Is(const LogicalOperator &op);
 
 	vector<ColumnBinding> GetColumnBindings() override;
 	vector<TableIndex> GetTableIndex() const override;

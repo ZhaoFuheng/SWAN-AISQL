@@ -1,5 +1,7 @@
 # name: test/sql/semi_reduce/empty_neighbour_reduction.test
 # description: A join neighbour estimated at ZERO rows must still reduce. The reducer used to skip
+# group: [semi_reduce]
+
 #              those as a "degenerate cardinality estimate", which inverts the guard's purpose: an
 #              empty neighbour is where reduction is worth MOST, because the semi-join eliminates
 #              everything downstream. Skipping it left the AI predicate running on rows the join
@@ -21,7 +23,6 @@
 #              So agent_bench Q30 (54 -> 7 calls) is the real guard; this file pins the BEHAVIOUR
 #              -- an empty neighbour admits nothing, a narrow one admits exactly its keys -- and
 #              the parity check against the disabled stack.
-# group: [aisql]
 
 require aisql
 

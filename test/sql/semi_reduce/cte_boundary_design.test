@@ -1,5 +1,7 @@
 # name: test/sql/semi_reduce/cte_boundary_design.test
 # description: The CTE-boundary transformation, hand-written in SQL, proving the DESIGN before any
+# group: [semi_reduce]
+
 #              optimizer pass implements it:
 #
 #                  new_cte = relational body, reduced by the UNION of what the references demand,
@@ -26,7 +28,6 @@
 #                  the transitively-tight one both reach 2 calls, because the semantic part is
 #                  still INLINED and the reducer prunes it further in its own scope. So the
 #                  implementation owes correctness (the union) but not global tightness.
-# group: [aisql]
 
 require aisql
 

@@ -14,6 +14,14 @@ LogicalAIFactorGraph::LogicalAIFactorGraph(TableIndex result_index, unique_ptr<E
 	expressions.push_back(std::move(node));
 }
 
+bool LogicalAIFactorGraph::Is(const LogicalOperator &op) {
+	if (op.type != LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR) {
+		return false;
+	}
+	auto &ext = op.Cast<LogicalExtensionOperator>();
+	return ext.GetExtensionName() == "aisql" && ext.GetName() == "AI_FACTOR_GRAPH";
+}
+
 LogicalAIFactorGraph *LogicalAIFactorGraph::TryCast(LogicalOperator &op) {
 	if (op.type != LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR) {
 		return nullptr;

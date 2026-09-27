@@ -1,5 +1,7 @@
 # name: test/sql/region/wave_chunk_overflow.test
 # description: A wave may carry more unfired reps than one DataChunk holds, and must still be
+# group: [region]
+
 #              evaluated correctly. The unfired set is (remainder below the floor) + (new distinct
 #              reps from one input chunk), so it can reach (floor-1) + STANDARD_VECTOR_SIZE -- past
 #              a chunk's capacity. EmitFactorized therefore emits at most a chunk's worth and leaves
@@ -9,7 +11,6 @@
 #              The shape below builds exactly that: a first chunk of 2048 rows carrying only 50
 #              distinct keys (50 < floor, so no wave fires and 50 reps stay staged), then a chunk of
 #              2048 all-distinct keys -> 2098 unfired.
-# group: [aisql]
 
 require aisql
 
