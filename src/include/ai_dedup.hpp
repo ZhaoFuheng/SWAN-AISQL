@@ -21,19 +21,6 @@ class BoundFunctionExpression;
 class Expression;
 struct AIFilterTreeNode;
 
-//! Evaluate the AI-dedup call `eval_call` over the buffered child output `input`, appending one result
-//! Value per input row (in serial-scan order) to `result_out`. The LLM calls run as ONE global,
-//! deduplicated, fully-concurrent batch (no per-chunk barriers); the result is then broadcast to every
-//! row that shares an input. Backs PhysicalAIRegion::Finalize. v1 supports the ai_filter path (the call
-//! is a non-speculative ai_function_with_embed node); other AI functions are added via the same seam.
-//! `limit` (>= 0) pushes a plain LIMIT k into the dedup: distinct inputs are evaluated until the fan-out
-//! counts of the PASSING ones sum to >= k, then evaluation stops and the rest are broadcast as false (the
-//! LIMIT above keeps only k). -1 = evaluate every distinct input. Dedup keeps the count per input for the
-//! broadcast, so it knows each passing input's output-row contribution -- that is what makes the early-stop
-//! count-accurate (k OUTPUT rows, not k distinct inputs).
-void AIDedupEvaluate(ClientContext &context, const BoundFunctionExpression &eval_call, ColumnDataCollection &input,
-                     vector<Value> &result_out, int64_t limit = -1);
-
 //! If `call` is an ai_function_with_embed node, set its LIMIT (stop evaluating once this many rows pass);
 //! a no-op otherwise. Used by the AILimitPushdown optimizer pass to push a LIMIT k into the filter node.
 void AISetFilterLimit(Expression &call, int64_t limit);
@@ -44,7 +31,7 @@ void AISetSpeculativeStandDown(Expression &call);
 // Streaming-dedup seams (used by the streaming PhysicalAIRegion to fire AI in waves as distinct keys arrive)
 //===--------------------------------------------------------------------===//
 
-//! The child-output columns `eval_call` reads (its dedup key) -- the same columns AIDedupEvaluate keys on.
+//! The child-output columns `eval_call` reads (its dedup key).
 vector<idx_t> AIDedupKeyCols(const BoundFunctionExpression &eval_call);
 
 //! True iff `eval_call` is an ai_function_with_embed / speculative_ai_function_with_embed node (evaluated via

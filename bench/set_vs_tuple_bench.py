@@ -27,9 +27,7 @@ SLEEP = int(os.environ.get("SVT_SLEEP_MS", "100"))
 
 MODES = {
     "set": "",
-    "set-lazy": "SET ai_debug_graph_eval='lazy';",
-    "set-adaptive": "SET ai_debug_graph_eval='lazy-adaptive';",
-    "tuple": "SET ai_join_factorize='off'; SET ai_debug_speculative_threshold=0;",
+    "tuple": "SET ai_join_factorize='off'; SET ai_speculative=false;",
     "tuple+leaf": "SET ai_join_factorize='off';",
 }
 

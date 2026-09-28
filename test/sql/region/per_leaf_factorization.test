@@ -7,8 +7,8 @@
 #              leaf only for reps some undecided row still needs. Observable as call counts equal to
 #              per-side distinct counts. Single-side trees keep per-row reordering (asserted through the
 #              calls short-circuiting saves), since losing it would cost calls there.
-#              Every shape is parity-checked against the BLOCKING path (ai_debug_region_blocking=true:
-#              one tuple-keyed global evaluation, an independent implementation); the mock's verdict is
+#              Every shape is parity-checked against the SCALAR path (ai_factorize='off': the node
+#              evaluated per chunk, an independent implementation); the mock's verdict is
 #              deterministic per prompt, so the two must agree row for row.
 
 require aisql
@@ -43,13 +43,13 @@ SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
 350
 
 statement ok
-SET ai_debug_region_blocking=true;
+SET ai_factorize = 'off';
 
 statement ok
 CREATE TABLE s1_block AS SELECT ka, kb FROM a CROSS JOIN b WHERE ai_filter('[p=50] fine? '||ta) AND ai_filter('[p=50] fine? '||tb);
 
 statement ok
-SET ai_debug_region_blocking=false;
+RESET ai_factorize;
 
 query I
 SELECT count(*) FROM ((SELECT * FROM s1_leaf EXCEPT ALL SELECT * FROM s1_block) UNION ALL (SELECT * FROM s1_block EXCEPT ALL SELECT * FROM s1_leaf));
@@ -115,14 +115,14 @@ SELECT (SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage()) = (SEL
 true
 
 statement ok
-SET ai_debug_region_blocking=true;
+SET ai_factorize = 'off';
 
 statement ok
 CREATE TABLE s3_block AS SELECT a.ka, b.kb FROM a JOIN link l ON l.ka = a.ka JOIN b ON b.kb = l.kb
                          WHERE ai_filter('[p=50] fine? '||ta) AND ai_filter('[p=50] fine? '||tb);
 
 statement ok
-SET ai_debug_region_blocking=false;
+RESET ai_factorize;
 
 query I
 SELECT count(*) FROM ((SELECT * FROM s3_leaf EXCEPT ALL SELECT * FROM s3_block) UNION ALL (SELECT * FROM s3_block EXCEPT ALL SELECT * FROM s3_leaf));
@@ -153,13 +153,13 @@ SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT < 600 FROM ai_usage();
 true
 
 statement ok
-SET ai_debug_region_blocking=true;
+SET ai_factorize = 'off';
 
 statement ok
 CREATE TABLE s4_block AS SELECT ka FROM a WHERE ai_filter('[p=50] fine? '||ta) AND ai_filter('[p=30] great? '||ta);
 
 statement ok
-SET ai_debug_region_blocking=false;
+RESET ai_factorize;
 
 query I
 SELECT count(*) FROM ((SELECT * FROM s4_leaf EXCEPT ALL SELECT * FROM s4_block) UNION ALL (SELECT * FROM s4_block EXCEPT ALL SELECT * FROM s4_leaf));
@@ -174,13 +174,13 @@ statement ok
 CREATE TABLE s5_leaf AS SELECT ka, kb FROM a CROSS JOIN bn WHERE ai_filter('[p=50] fine? '||ta) AND ai_filter('[p=50] fine? '||tb);
 
 statement ok
-SET ai_debug_region_blocking=true;
+SET ai_factorize = 'off';
 
 statement ok
 CREATE TABLE s5_block AS SELECT ka, kb FROM a CROSS JOIN bn WHERE ai_filter('[p=50] fine? '||ta) AND ai_filter('[p=50] fine? '||tb);
 
 statement ok
-SET ai_debug_region_blocking=false;
+RESET ai_factorize;
 
 query I
 SELECT count(*) FROM ((SELECT * FROM s5_leaf EXCEPT ALL SELECT * FROM s5_block) UNION ALL (SELECT * FROM s5_block EXCEPT ALL SELECT * FROM s5_leaf));

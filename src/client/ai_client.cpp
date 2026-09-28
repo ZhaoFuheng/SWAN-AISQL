@@ -85,7 +85,6 @@ static AIConfig BuildDefaultConfig() {
 		c.model = GetEnvOr("AI_MODEL", "gpt-5.6-luna");
 		c.reasoning_effort = GetEnvOr("AI_REASONING_EFFORT", "");
 		c.hedge = GetEnvOr("AI_HEDGE", "on") != "off" && GetEnvOr("AI_HEDGE", "on") != "0";
-		c.http_keepalive = GetEnvOr("AI_HTTP_KEEPALIVE", "on") != "off";
 		c.prefix_cache = GetEnvOr("AI_PREFIX_CACHE", "on") != "off";
 		c.api_key = GetEnvOr("AI_API_KEY", "");
 		c.timeout_ms = std::atoi(GetEnvOr("AI_TIMEOUT_MS", "60000").c_str());
@@ -116,10 +115,6 @@ static AIConfig BuildDefaultConfig() {
 			dbg += "spec,";
 		}
 		c.debug_log = dbg;
-		const string stream = GetEnvOr("DUCKDB_AI_STREAM_DEDUP", "");
-		c.region_streaming = !(stream == "off" || stream == "0");
-		auto wave = std::atoi(GetEnvOr("DUCKDB_AI_STREAM_WAVE", "0").c_str());
-		c.wave_size = wave > 0 ? static_cast<idx_t>(wave) : 0;
 		c.embed_url = GetEnvOr("AI_EMBED_URL", "http://localhost:4002");
 		c.embed_model = GetEnvOr("AI_EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2");
 		const string embed_images = GetEnvOr("AI_EMBED_IMAGES", "");
@@ -127,11 +122,6 @@ static AIConfig BuildDefaultConfig() {
 		c.embed_concurrency = embed_conc > 0 ? static_cast<idx_t>(embed_conc) : 4;
 		auto embed_imgs = std::atoi(GetEnvOr("AI_EMBED_BATCH_IMAGES", "8").c_str());
 		c.embed_batch_images = embed_imgs > 0 ? static_cast<idx_t>(embed_imgs) : 8;
-		c.embed_slice = static_cast<idx_t>(std::atoi(GetEnvOr("AI_EMBED_SLICE", "100").c_str()));
-		const string slice_text = GetEnvOr("AI_EMBED_SLICE_TEXT", "");
-		c.embed_slice_text = !(slice_text == "0" || slice_text == "off" || slice_text == "false");
-		const string warm_gate = GetEnvOr("AI_WARM_GATE", "");
-		c.warm_gate = !(warm_gate == "0" || warm_gate == "off" || warm_gate == "false");
 		c.embed_images = !(embed_images == "off" || embed_images == "0" || embed_images == "false");
 		auto agg_budget = std::atoll(GetEnvOr("AI_AGG_CHAR_BUDGET", "48000").c_str());
 		c.agg_char_budget = agg_budget > 0 ? static_cast<idx_t>(agg_budget) : 48000;
@@ -148,7 +138,6 @@ static AIConfig BuildDefaultConfig() {
 		c.typesafe_model = GetEnvOr("AI_TYPESAFE_MODEL", "jev-latest");
 		c.typesafe_api_key = GetEnvOr("TYPESAFE_API_KEY", "");
 		c.typesafe_threshold = std::atof(GetEnvOr("AI_TYPESAFE_THRESHOLD", "0.5").c_str());
-		c.typesafe_score_argmax = GetEnvOr("AI_TYPESAFE_SCORE_MODE", "expected") == "argmax";
 		c.typesafe_price_input = std::atof(GetEnvOr("AI_TYPESAFE_PRICE_INPUT", "0.042").c_str());
 		return c;
 	}();
@@ -675,23 +664,10 @@ static bool ParseSystemOneAnswer(const string &text, const AIConfig &config, con
 				ok = true;
 			}
 		} else if (request.question == AIRequest::Question::SCORE) {
-			// `score` is the probability-weighted level; argmax mode takes the most probable level from
-			// `probabilities` instead. Level 0 is the function's `lo`; the scalar/leaf then clamp and round
-			// exactly as for a chat answer.
+			// `score` is the probability-weighted level (the most probable level scored worse on MOVIE q9).
+			// Level 0 is the function's `lo`; the scalar/leaf then clamp and round exactly as for a chat answer.
 			yyjson_val *s = yyjson_obj_get(q, "score");
-			double level = s && yyjson_is_num(s) ? yyjson_get_num(s) : -1;
-			yyjson_val *probs = yyjson_obj_get(q, "probabilities");
-			if (config.typesafe_score_argmax && probs && yyjson_is_obj(probs)) {
-				double best = -1;
-				size_t pi, pmax;
-				yyjson_val *pk, *pv;
-				yyjson_obj_foreach(probs, pi, pmax, pk, pv) {
-					if (yyjson_is_num(pv) && yyjson_get_num(pv) > best) {
-						best = yyjson_get_num(pv);
-						level = std::atof(yyjson_get_str(pk));
-					}
-				}
-			}
+			const double level = s && yyjson_is_num(s) ? yyjson_get_num(s) : -1;
 			if (level >= 0) {
 				out = "{\"result\":" + std::to_string(request.score_lo + level) + "}";
 				ok = true;
@@ -790,7 +766,7 @@ static constexpr idx_t CONN_POOL_MAX_IDLE = 64; // per URL; > concurrency + hedg
 
 static duckdb::unique_ptr<duckdb_httplib::Client> NewConn(const string &url, const AIConfig &config) {
 	auto client = duckdb::make_uniq<duckdb_httplib::Client>(url);
-	client->set_keep_alive(config.http_keepalive);
+	client->set_keep_alive(true); // pooled per endpoint: a fresh handshake per call is ~a minute at suite scale
 	return client;
 }
 
@@ -798,7 +774,7 @@ static duckdb::unique_ptr<duckdb_httplib::Client> NewConn(const string &url, con
 //! a stale keep-alive socket (retry on a fresh one) or a real transport error.
 struct ConnLease {
 	ConnLease(const string &url_p, const AIConfig &config_p) : url(url_p), config(config_p) {
-		if (config.http_keepalive) {
+		{
 			std::lock_guard<std::mutex> lock(ConnPoolMutex());
 			auto it = ConnPool().find(url);
 			if (it != ConnPool().end() && !it->second.empty()) {
@@ -827,8 +803,8 @@ struct ConnLease {
 		reused = false;
 	}
 	~ConnLease() {
-		if (!healthy || !config.http_keepalive || !client) {
-			return; // drop: broken socket, or pooling disabled
+		if (!healthy || !client) {
+			return; // drop a broken socket
 		}
 		std::lock_guard<std::mutex> lock(ConnPoolMutex());
 		auto &idle = ConnPool()[url];

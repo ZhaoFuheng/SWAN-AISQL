@@ -37,7 +37,7 @@ ENV_COMMON = {
     "AI_EMBED_URL": os.environ.get("BENCH_EMBED", "http://localhost:4009"),
     "AI_EMBED_MODEL": "sentence-transformers/all-MiniLM-L6-v2",
     "AI_MAX_CONCURRENCY": os.environ.get("BENCH_CONCURRENCY", "20"),
-    "AI_SPECULATIVE_THRESHOLD": "0",
+    "AI_SPECULATIVE": "off",
     "AI_DEDUP_DEBUG": "1",
     "DUCKDB_AI_LIMIT": "off",  # this bench isolates scan regions; the (default-on) limit pass would early-stop the defer shapes
 
@@ -73,7 +73,7 @@ SHAPES = [
 ]
 
 FLAGS = ("DUCKDB_AI_DEDUP", "DUCKDB_AI_LIMIT", "DUCKDB_AI_REORDER", "DUCKDB_SEMANTIC_PULLUP",
-         "DUCKDB_AI_STREAM_DEDUP", "DUCKDB_AI_GROUP_JOIN", "DUCKDB_AI_SCAN_REGION", "DUCKDB_YANNAKAKIS")
+         "DUCKDB_AI_GROUP_JOIN", "DUCKDB_AI_SCAN_REGION", "DUCKDB_YANNAKAKIS")
 DBG = re.compile(
     r"\[stream-dedup\] distinct=(\d+) rows=(\d+) waves=(\d+) first_wave_at_rows=(\d+) passed=(-?\d+) "
     r"limit=(-?\d+) floor=(\d+) min_full_wave=(\d+) last_flush=(\d+)")

@@ -36,22 +36,18 @@ InsertionOrderPreservingMap<string> PhysicalAIRegion::ParamsToString() const {
 	return result;
 }
 
-// Streaming is the default execution model; SET ai_debug_region_blocking=true falls back to blocking.
-static bool AIRegionStreamingEnabled() {
-	return AIConfig::Get().region_streaming;
-}
-
 // The AISQLMapData cardinality floor: a factorized batch is fired once this many NEW distinct reps have
-// accumulated, so every LLM batch saturates concurrency. Default = 5 * AI_MAX_CONCURRENCY (the LLM concurrency,
-// default 20 -> floor 100). Overridable via DUCKDB_AI_STREAM_WAVE.
+// accumulated, so every LLM batch saturates concurrency: 5 x the LLM concurrency (default 20 -> floor 100).
 static idx_t AIRegionWaveSize() {
-	const auto &config = AIConfig::Get();
-	return config.wave_size > 0 ? config.wave_size : 5 * config.max_concurrency;
+	return 5 * AIConfig::Get().max_concurrency;
 }
 
-// Waves the region may keep in flight at once (ai_debug_wave_overlap; 1 = synchronous).
+// Waves the region keeps in flight at once. A wave's LLM batch is only as wide as the DISTINCT PROMPTS its
+// reps carry; above a join that repeats one side's prompt across a chunk that can be a single call, leaving
+// the pool idle behind a blocking wave. Overlapping waves refills the pool without speculating on any extra
+// call (agent_bench Q17 295 s -> 88 s, Q19 867 s -> 686 s; results and calls unchanged).
 static idx_t AIRegionWaveOverlap() {
-	return MaxValue<idx_t>(AIConfig::Get().wave_overlap, 1);
+	return 8;
 }
 
 // One wave's work. PREPARED on the Sink thread (the map is single-owner), EVALUATED anywhere, APPLIED back
@@ -80,7 +76,6 @@ struct AIRegionStreamState {
 	vector<Value> rep_result; //! per rep: result Value (BOOLEAN on the node path, return-type on the scalar path)
 	vector<char> rep_decided; //! per rep: has a wave evaluated it?
 	bool is_node = false;     //! folded node (-> `leaf`) vs plain scalar AI call (-> `map`)
-	bool active = false;      //! streaming enabled (else the blocking Finalize runs)
 	// Diagnostics (ai_debug_log='region'): wave shape + early-teardown signals.
 	idx_t waves = 0;
 	idx_t rows_at_first_wave = 0;
@@ -119,15 +114,12 @@ public:
 	AIRegionLocalSinkState(ClientContext &context, const PhysicalAIRegion &op, const vector<LogicalType> &child_types)
 	    : buffer(BufferAllocator::Get(context), child_types) {
 		buffer.InitializeAppend(append_state);
-		if (AIRegionStreamingEnabled()) {
-			auto &fn = op.eval_call->Cast<BoundFunctionExpression>();
-			stream.active = true;
-			stream.is_node = AIDedupIsFilterNode(fn);
-			if (stream.is_node) {
-				stream.leaf = make_uniq<AILeafRegionState>(context, fn, child_types, op.limit);
-			} else {
-				stream.map = make_uniq<AISQLMapChunk>(context, child_types, AIDedupKeyCols(fn));
-			}
+		auto &fn = op.eval_call->Cast<BoundFunctionExpression>();
+		stream.is_node = AIDedupIsFilterNode(fn);
+		if (stream.is_node) {
+			stream.leaf = make_uniq<AILeafRegionState>(context, fn, child_types, op.limit);
+		} else {
+			stream.map = make_uniq<AISQLMapChunk>(context, child_types, AIDedupKeyCols(fn));
 		}
 	}
 	ColumnDataCollection buffer;
@@ -215,10 +207,6 @@ static void AIRegionDrainAll(const PhysicalAIRegion &op, AIRegionStreamState &st
 SinkResultType PhysicalAIRegion::Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const {
 	auto &lstate = input.local_state.Cast<AIRegionLocalSinkState>();
 	auto &st = lstate.stream;
-	if (!st.active) {
-		lstate.buffer.Append(lstate.append_state, chunk); // blocking path (kill-switch)
-		return SinkResultType::NEED_MORE_INPUT;
-	}
 	// Buffer every row for emission, then fold it.
 	lstate.buffer.Append(lstate.append_state, chunk);
 	if (st.leaf) {
@@ -280,7 +268,7 @@ SinkCombineResultType PhysicalAIRegion::Combine(ExecutionContext &context, Opera
 	// order its rows just entered `buffer`. Empty locals contribute nothing.
 	const bool has_rows = lstate.stream.leaf ? lstate.stream.leaf->RowCount() > 0
 	                                         : (lstate.stream.map && lstate.stream.map->RowCount() > 0);
-	if (lstate.stream.active && has_rows) {
+	if (has_rows) {
 		gstate.segments.push_back(std::move(lstate.stream));
 	}
 	return SinkCombineResultType::FINISHED;
@@ -289,12 +277,6 @@ SinkCombineResultType PhysicalAIRegion::Combine(ExecutionContext &context, Opera
 SinkFinalizeType PhysicalAIRegion::Finalize(Pipeline &pipeline, Event &event, ClientContext &context,
                                             OperatorSinkFinalizeInput &input) const {
 	auto &gstate = input.global_state.Cast<AIRegionGlobalSinkState>();
-	if (gstate.segments.empty()) {
-		// Blocking path: one global, deduplicated, fully-concurrent evaluation over every buffered row.
-		AIDedupEvaluate(context, eval_call->Cast<BoundFunctionExpression>(), gstate.buffer, gstate.results, limit);
-		gstate.finalized.store(true);
-		return SinkFinalizeType::READY;
-	}
 	gstate.results.reserve(gstate.buffer.Count());
 	int64_t passed_total = 0;
 	for (auto &st : gstate.segments) {

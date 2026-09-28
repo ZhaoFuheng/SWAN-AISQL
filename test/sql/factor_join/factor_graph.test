@@ -88,27 +88,6 @@ SELECT count(*) = 2 * (SELECT count(*) FROM graph_result) FROM dup_result;
 ----
 true
 
-# lazy (need-driven streaming) evaluation: identical results, no cross product either
-statement ok
-SET ai_debug_graph_eval='lazy';
-
-statement ok
-CREATE TABLE lazy_result AS SELECT * FROM ta, tb, tc
-WHERE ai_filter('unary ok? ' || x)
-  AND ai_filter('edge1 ok? ' || x || ' ' || y)
-  AND ai_filter('edge2 ok? ' || y || ' ' || z);
-
-query I
-SELECT count(*) FROM (
-  (SELECT * FROM lazy_result EXCEPT ALL SELECT * FROM graph_result)
-  UNION ALL
-  (SELECT * FROM graph_result EXCEPT ALL SELECT * FROM lazy_result));
-----
-0
-
-statement ok
-SET ai_debug_graph_eval='staged';
-
 # 2-way folded shape (unary + edge over two sides) also routes through the graph
 query II
 EXPLAIN SELECT * FROM ta, tb

@@ -6,7 +6,7 @@ cardinality effect (selective / 1:1 / expansive), since that is what decides the
 
 Configs (all with DUCKDB_AI_REORDER=1):
   push_down     -- filters stay at the base scans (DuckDB default placement)
-  pull_up       -- DUCKDB_SEMANTIC_PULLUP=1 + AI_SPECULATIVE_THRESHOLD=0: filters lifted above the
+  pull_up       -- DUCKDB_SEMANTIC_PULLUP=1 + AI_SPECULATIVE=off: filters lifted above the
                    join; the leaf pre-filter passes every row through (== a pure pull-up / placeholder)
   speculative   -- DUCKDB_SEMANTIC_PULLUP=1 (gate 0.5): the leaf pre-filter MLP-prunes likely-fail rows
 
@@ -146,20 +146,14 @@ USE_CASES = [
 
 CONFIGS = [
     ("push_down", {"DUCKDB_AI_REORDER": "1"}),
-    # pure pull-up: filters lifted above the join, NO speculative leaf node (threshold 0 -> not emitted).
-    ("pull_up", {"DUCKDB_AI_REORDER": "1", "DUCKDB_SEMANTIC_PULLUP": "1", "AI_SPECULATIVE_THRESHOLD": "0"}),
-    # ours (recommended SWAN config): pull-up + the speculative leaf node WHEN IT HELPS (default gate 0.5,
-    # auto-bypassed for selective joins via AI_SPECULATIVE_MIN_FANOUT) + the streaming AI-dedup operator
-    # ALWAYS on (evaluates each distinct input once over the join output, no per-chunk barriers).
+    # pure pull-up: filters lifted above the join, NO speculative leaf node.
+    ("pull_up", {"DUCKDB_AI_REORDER": "1", "DUCKDB_SEMANTIC_PULLUP": "1", "AI_SPECULATIVE": "off"}),
+    # ours (the SWAN default): pull-up + the speculative leaf node (gate 0.5; the semi-join reduction has
+    # already pruned the leaf relationally) + the streaming AI region (each distinct input once over the join
+    # output, no per-chunk barriers).
     ("ours", {"DUCKDB_AI_REORDER": "1", "DUCKDB_SEMANTIC_PULLUP": "1", "DUCKDB_AI_DEDUP": "1"}),
-    # ours_always: same as ours but ALWAYS emit the speculative leaf node (drop the MIN_FANOUT bypass). Valid
-    # once Yannakakis reduces the base relationally first -- tests whether the fanout gate is now obsolete.
-    # (Run the whole bench with DUCKDB_YANNAKAKIS=1 in the env so every config reduces the base first.)
-    ("ours_always", {"DUCKDB_AI_REORDER": "1", "DUCKDB_SEMANTIC_PULLUP": "1", "DUCKDB_AI_DEDUP": "1",
-                     "AI_SPECULATIVE_ALWAYS": "1"}),
 ]
-PULLUP_KEYS = ("DUCKDB_SEMANTIC_PULLUP", "AI_SPECULATIVE_THRESHOLD", "DUCKDB_AI_REORDER", "DUCKDB_AI_DEDUP",
-               "AI_SPECULATIVE_ALWAYS")
+PULLUP_KEYS = ("DUCKDB_SEMANTIC_PULLUP", "AI_SPECULATIVE", "DUCKDB_AI_REORDER", "DUCKDB_AI_DEDUP")
 
 
 def _duck(script, env_extra):

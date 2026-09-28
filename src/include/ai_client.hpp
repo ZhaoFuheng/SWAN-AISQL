@@ -87,39 +87,14 @@ struct AIConfig {
 	string typesafe_model;               // AI_TYPESAFE_MODEL (default jev-latest)
 	string typesafe_api_key;             // TYPESAFE_API_KEY
 	double typesafe_threshold = 0.5;     // Noul probability >= threshold -> true
-	bool typesafe_score_argmax = false;  // AI_TYPESAFE_SCORE_MODE=argmax: a Score answers its most probable level
-	                                     // instead of the probability-weighted one (default 'expected')
 	double typesafe_price_input = 0.042; // USD per 1M input tokens (output tokens are free)
-	//! AI Region execution knobs (bridged from ai_debug_* settings): streaming sink on/off,
-	//! wave-size override (0 = derived floor of 5x concurrency), debug log channels (csv).
-	bool region_streaming = true;
-	idx_t wave_size = 0;
-	//! Waves the region may keep in flight at once (1 = fire synchronously, the original behaviour).
-	//! A wave's LLM batch is only as wide as the DISTINCT PROMPTS its reps carry; where a join repeats
-	//! one side's prompt across a chunk that can be a single call, leaving the pool idle behind a
-	//! blocking wave. Overlapping waves refills the pool without speculating on any extra call.
-	idx_t wave_overlap = 8;
 	//! Embedding requests in flight at once and image items per request (AI_EMBED_CONCURRENCY /
 	//! AI_EMBED_BATCH_IMAGES; SET ai_embed_concurrency / ai_embed_batch_images). A CPU CLIP server
 	//! encodes ~0.2 s/image in one 32-image batch but ~0.11 s/image across 4-8 concurrent small
 	//! requests, and no request may outlive the client timeout (a 500-image request took 80 s).
 	idx_t embed_concurrency = 4;
 	idx_t embed_batch_images = 8;
-	//! Rows the leaf region ingests per slice before it embeds, decides and fires (AI_EMBED_SLICE;
-	//! SET ai_debug_embed_slice; 0 = the whole chunk). Slicing lets the first wave launch after the
-	//! first slice's features instead of after the chunk's: 500 CLIP image embeds are ~80 s of Sink
-	//! time during which nothing was in flight.
-	idx_t embed_slice = 100;
-	//! Slice text-only regions too (AI_EMBED_SLICE_TEXT; SET ai_debug_embed_slice_text, default on). Their
-	//! embeds are cheap, so the value is the warm gate below: agent_bench Q17 237 -> 156 calls for +4-7 s,
-	//! Q19 +5 s, nothing else moved. Off restores one batched embed + one fire per chunk.
-	bool embed_slice_text = true;
-	//! Warm gate (AI_WARM_GATE; SET ai_debug_warm_gate): after a region's first slice is decided cold and
-	//! fired, wait until every leaf has a batch of verdicts and the model has trained on them before
-	//! deciding further slices, so they are ordered by a model that knows this query's pass rates. The
-	//! wait only lasts while waves are in flight. Without it every slice is decided while the first wave
-	//! is still in flight (ECOMM two-image query: 787-992 calls cold vs a steady 788 with the gate).
-	bool warm_gate = true;
+	//! Debug log channels (csv: region, spec, yann, leaftexts, mock).
 	string debug_log;
 	//! Local cache (layer 1): process-global response caches (chat + embed) serving repeats
 	//! within and across queries in this process. In-batch single-flight dedup is unaffected.
@@ -132,9 +107,6 @@ struct AIConfig {
 	//! 2s, after 50 samples) fires a duplicate attempt; first response wins. Bounded extra
 	//! calls (~1% + retriggers), counted honestly in llm_calls and reported as hedged_calls.
 	bool hedge = true;
-	//! Reuse HTTP connections across requests (keep-alive pool per endpoint URL). Off restores a
-	//! fresh TCP (and TLS) handshake per call -- ~a minute of pure setup at 18k-call suite scale.
-	bool http_keepalive = true;
 	//! Explicit provider prefix caching (breakpoints emitted when a request carries a
 	//! prompt_prefix). Default ON: the server cache canonicalizes cache-control fields out of its
 	//! key, so split bodies replay against plain recorded entries. AI_PREFIX_CACHE=off opts out.
@@ -148,16 +120,6 @@ struct AIConfig {
 	//! both engines key the same recorded sample. Never a default: the envelope is what makes a
 	//! verdict reliable, so every other bench keeps it.
 	bool prompt_variant_plain = false;
-	//! ai_debug_trust_image_estimate: let speculative all-image rows use the estimate (gate +
-	//! embeds) instead of the always-evaluate safety rule. Experiment knob; default off.
-	bool trust_image_estimate = false;
-	//! ai_debug_graph_eval=='lazy': factor-graph evaluation uses the need-driven streaming
-	//! scheduler (no stage barriers) instead of the staged unary/edge passes.
-	bool graph_eval_lazy = true;
-	//! ai_debug_graph_eval=='lazy-adaptive': lazy scheduling with observed-selectivity priority
-	//! ordering of the frontier (per-member adaptive; the graph-level analogue of per-tuple
-	//! filter reordering).
-	bool graph_eval_adaptive = true;
 	//! ai_agg map-reduce: max characters of items packed into one LLM call before splitting.
 	idx_t agg_char_budget;
 	//! Fallback pricing (USD per 1M tokens) used only when the proxy does not

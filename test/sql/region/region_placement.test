@@ -77,9 +77,9 @@ SELECT bool_and(ok) FROM (
 ----
 true
 
-# blocking fallback produces identical results
+# the scalar path (no region) produces identical results
 statement ok
-SET ai_debug_region_blocking = true;
+SET ai_factorize = 'off';
 SELECT ai_local_cache_clear();
 
 query I
@@ -88,7 +88,7 @@ SELECT count(*) FROM docs WHERE ai_filter('nice? '||d);
 1300
 
 statement ok
-SET ai_debug_region_blocking = false;
+RESET ai_factorize;
 
 statement ok
 CALL ai_mock_stop();

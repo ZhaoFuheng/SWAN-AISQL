@@ -1,5 +1,5 @@
 # name: test/sql/region/wave_overlap.test
-# description: Overlapping region waves (ai_debug_wave_overlap) change only SCHEDULING, never results or
+# description: Overlapping region waves (eight in flight) change only SCHEDULING, never results or
 # group: [region]
 
 #              call counts. A wave's LLM batch is only as wide as the distinct PROMPTS its reps carry, so
@@ -25,9 +25,6 @@ statement ok
 CREATE TABLE fan AS SELECT (range % 2500) AS k FROM range(40000);
 
 statement ok
-SET ai_debug_wave_overlap=1;
-
-statement ok
 SELECT ai_usage_reset();
 
 statement ok
@@ -37,9 +34,6 @@ query I
 SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
 ----
 2500
-
-statement ok
-SET ai_debug_wave_overlap=8;
 
 statement ok
 SELECT ai_usage_reset();
@@ -79,9 +73,6 @@ statement ok
 CREATE TABLE small AS SELECT range AS b FROM range(120);
 
 statement ok
-SET ai_debug_wave_overlap=1;
-
-statement ok
 SELECT ai_usage_reset();
 
 statement ok
@@ -95,9 +86,6 @@ query I
 SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
 ----
 1120
-
-statement ok
-SET ai_debug_wave_overlap=8;
 
 statement ok
 SELECT ai_usage_reset();
@@ -130,9 +118,6 @@ true
 # ordinary query error (future::get() rethrows it on the Sink thread), with the other in-flight wave
 # joined during teardown rather than left writing into freed buffers. k=2000 lands in the first wave
 # (keys 0..2047 fill the first chunk), launched asynchronously while the second is still pending.
-statement ok
-SET ai_debug_wave_overlap=8;
-
 statement error
 SELECT count(*) FROM fan WHERE ai_filter('[p=50] q '||CASE WHEN k = 2000 THEN error('boom-in-wave') ELSE k::VARCHAR END);
 ----
@@ -151,9 +136,6 @@ SELECT count(*) FROM fan;
 # registry across concurrently running waves: every distinct prompt is still paid for exactly once.
 statement ok
 RESET threads;
-
-statement ok
-SET ai_debug_wave_overlap=8;
 
 statement ok
 SELECT ai_usage_reset();

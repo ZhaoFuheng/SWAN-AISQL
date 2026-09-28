@@ -35,8 +35,6 @@ public:
 
 private:
 	Optimizer &optimizer;
-	//! When set (via DUCKDB_YANNAKAKIS), reduce every cluster regardless of AI filters (benchmark mode).
-	bool force = false;
 	//! When set (via DUCKDB_SEMANTIC_PULLUP), also treat an ai_filter pushed down INTO a cluster leaf
 	//! as a reason to reduce (the semantic filter still feeds off the joins, before it is pulled up).
 	bool check_leaves = true;

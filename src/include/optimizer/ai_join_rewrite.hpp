@@ -40,10 +40,6 @@ private:
 	//! whose AI call reads columns from exactly one side, push the region onto that side (the projection's
 	//! expressions are inlined into the call; consumers are rebound through the projection). No-op otherwise.
 	void TryPushBelowJoin(unique_ptr<LogicalOperator> &op, unique_ptr<LogicalOperator> &root);
-	//! Factor mode: replace Filter(#region) -> AIRegion(pred) -> CrossProduct(L, R) (a pulled-up
-	//! two-side AI join condition) with a LogicalAIFactorJoin -- the cross product is never
-	//! materialized; only passing pairs are emitted. No-op unless the pattern matches exactly.
-	bool TryFactorJoin(unique_ptr<LogicalOperator> &op);
 	bool TryFactorGraph(unique_ptr<LogicalOperator> &op);
 	void TryMarkExistential(LogicalOperator &op);
 	//! Depth-first sweep for duplicate-insensitive consumers (DISTINCT / min/max/DISTINCT-agg GROUP BY) whose

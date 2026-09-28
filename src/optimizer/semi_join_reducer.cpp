@@ -492,8 +492,8 @@ void SemiJoinReducer::ReduceTree(unique_ptr<LogicalOperator> &op, bool ai_above)
 	// An AI function in this operator makes the whole subtree "below an AI filter".
 	const bool below_ai = ai_above || OperatorHasAIFunction(*op);
 	if (IsClusterNode(*op)) {
-		// Reduce this cluster when an AI filter sits above it, is embedded in its joins, or force is on.
-		const bool reduce = force || ai_above || ClusterHasAIFunction(*op);
+		// Reduce this cluster when an AI filter sits above it or is embedded in its joins.
+		const bool reduce = ai_above || ClusterHasAIFunction(*op);
 		vector<std::reference_wrapper<unique_ptr<LogicalOperator>>> leaves;
 		vector<Edge> edges;
 		GatherCluster(op, leaves, edges);
@@ -513,12 +513,10 @@ void SemiJoinReducer::ReduceTree(unique_ptr<LogicalOperator> &op, bool ai_above)
 
 unique_ptr<LogicalOperator> SemiJoinReducer::Optimize(unique_ptr<LogicalOperator> op) {
 	// ai_semi_reduce (default true): reduce joins feeding semantic operators. The pipeline-wide
-	// early-out already skips pure-relational plans; ai_debug_semi_reduce_force reduces every
-	// cluster regardless of AI presence (A/B benchmarking).
+	// early-out already skips pure-relational plans.
 	if (!AIBoolSetting(optimizer.context, "ai_semi_reduce", true)) {
 		return op;
 	}
-	force = AIBoolSetting(optimizer.context, "ai_debug_semi_reduce_force", false);
 	// A leaf's own AI stage (an ai_filter pushed down into it, or an AI projection feeding the join) counts
 	// regardless of the pull-up flag: the reduction shrinks that leaf's LLM input either way.
 	check_leaves = true;

@@ -194,30 +194,19 @@ void SemanticFilterPullup::ExtractAIFilters(unique_ptr<LogicalOperator> &op, vec
 		// UNDER-estimates join cardinality, so we bypass only on a strong reduction signal: estimated fanout
 		// (join output / leaf input) below AI_SPECULATIVE_MIN_FANOUT (default 0.3). When bypassed we leave
 		// NOTHING at the leaf (== pure pull-up); the pulled-up predicate is still result-complete.
+		// A speculative pre-filter spends LLM calls only on rows the join keeps: the semi-join reduction has
+		// already pruned the leaf relationally, so no fan-out gate is needed. ai_speculative=false leaves
+		// nothing at the leaf (pure pull-up); the pulled-up predicate is complete either way.
 		unique_ptr<Expression> spec;
-		if (!leaves.empty()) {
-			const idx_t leaf_card = op->children.empty() ? op->EstimateCardinality(optimizer.context)
-			                                             : op->children[0]->EstimateCardinality(optimizer.context);
-			const double fanout = leaf_card ? static_cast<double>(cluster_card) / static_cast<double>(leaf_card) : 1.0;
-			const double min_fanout = AIDoubleSetting(optimizer.context, "ai_debug_speculative_min_fanout", 0.3);
-			// At threshold 0 the speculative gate passes every row through (pure pull-up) but the node still
-			// embeds/predicts each row -- pure overhead. Read the same AI_SPECULATIVE_THRESHOLD the node binds
-			// (default 0.5) and skip emitting it entirely when it is <= 0; the pulled-up filter is complete.
-			const double spec_threshold = AIDoubleSetting(optimizer.context, "ai_debug_speculative_threshold", 0.5);
-			// The fanout gate exists because a speculative leaf pre-filter would spend LLM calls on rows a
-			// selective join discards. But Yannakakis now reduces the base RELATIONALLY before this node, so the
-			// leaf already sees only join-surviving rows -- making the gate obsolete. AI_SPECULATIVE_ALWAYS=1
-			// drops the fanout gate to measure that (the threshold<=0 "pure pull-up" bypass still applies).
-			const bool always_spec = AIBoolSetting(optimizer.context, "ai_debug_speculative_always", false);
-			const bool bypass = (!always_spec && fanout < min_fanout) || spec_threshold <= 0.0;
+		if (!leaves.empty() && AIBoolSetting(optimizer.context, "ai_speculative", true)) {
 			if (AIConfig::Get().debug_log.find("spec") != string::npos) {
-				fprintf(stderr, "[spec-debug] leaf_card=%llu cluster_card=%llu fanout=%.3f min=%.2f thr=%.2f -> %s\n",
-				        (unsigned long long)leaf_card, (unsigned long long)cluster_card, fanout, min_fanout,
-				        spec_threshold, bypass ? "BYPASS (pure pull-up)" : "emit speculative");
+				fprintf(stderr, "[spec-debug] leaf_card=%llu cluster_card=%llu -> emit speculative\n",
+				        (unsigned long long)(op->children.empty()
+				                                 ? op->EstimateCardinality(optimizer.context)
+				                                 : op->children[0]->EstimateCardinality(optimizer.context)),
+				        (unsigned long long)cluster_card);
 			}
-			if (!bypass) {
-				spec = BuildSpeculativeCall(leaves); // reads leaves' pointers -> must precede the move below
-			}
+			spec = BuildSpeculativeCall(leaves); // reads leaves' pointers -> must precede the move below
 		}
 		// Pull the AI predicates up (they run above the join); everything else stays, plus the pre-filter.
 		vector<unique_ptr<Expression>> keep;

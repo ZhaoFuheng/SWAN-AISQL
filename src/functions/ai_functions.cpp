@@ -1328,6 +1328,10 @@ static void AIEmbedFunction(DataChunk &args, ExpressionState &state, Vector &res
 // from embedding-based selectivity estimates so the expensive LLM calls short-circuit early. Inserted
 // by the DUCKDB_AI_REORDER optimizer rewrite; also directly callable (tree as a literal) for testing.
 //===--------------------------------------------------------------------===//
+//! Speculative gate: a row whose estimated P(pass) reaches this passes through to the pulled-up predicate
+//! unevaluated; below it the leaf is evaluated (and pruned when false) before the join.
+static constexpr double AI_SPECULATIVE_THRESHOLD = 0.5;
+
 struct AIFilterWithEmbedBindData : public FunctionData {
 	AIFilterWithEmbedBindData(shared_ptr<AIFilterTreeNode> tree, string tree_str, idx_t leaf_count,
 	                          bool speculative = false, double threshold = 0.5, int64_t limit = -1, string meta = "",
@@ -1447,14 +1451,8 @@ static unique_ptr<FunctionData> AIFilterWithEmbedBindImpl(BindScalarFunctionInpu
 		throw BinderException("ai_function_with_embed: expected 1 tree + 3*" + std::to_string(leaf_count) +
 		                      " texts (+ optional meta_str), got " + std::to_string(arguments.size()) + " args");
 	}
-	// Speculative node: P(pass) gate threshold from AI_SPECULATIVE_THRESHOLD (default 0.5). 0 -> never
-	// prune (all pass-through, == the old placeholder); 1 -> always evaluate (full pushdown).
-	double threshold = 0.5;
-	if (speculative) {
-		if (const char *t = std::getenv("AI_SPECULATIVE_THRESHOLD")) {
-			threshold = std::atof(t);
-		}
-	}
+	// Speculative node: a row whose estimated P(pass) reaches the gate passes through unevaluated.
+	const double threshold = AI_SPECULATIVE_THRESHOLD;
 	shared_ptr<AIFilterTreeNode> tree = std::move(parsed);
 	auto wrappers = AILeafWrappers(input.GetClientContext(), meta, leaf_count);
 	return make_uniq<AIFilterWithEmbedBindData>(std::move(tree), tree_str, leaf_count, speculative, threshold,
@@ -2256,8 +2254,7 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 						break;
 					}
 				}
-				const bool trust_image = AIConfig::Get().trust_image_estimate;
-				const bool embed_images = images_ok || (bind_data.speculative && (row_estimable || trust_image));
+				const bool embed_images = images_ok || (bind_data.speculative && row_estimable);
 				vector<string> texts;
 				vector<idx_t> tleaf;
 				for (idx_t l = 0; l < n; l++) {
@@ -2355,8 +2352,7 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 					// only effect.
 					// Image leaves stay excluded here even when they embed (CLIP): a zero-shot image
 					// estimate is not calibrated enough to un-prune a join input on; the reorder still
-					// uses the feature for ordering, which cannot change a result. ai_debug_trust_image_estimate
-					// opts in (bench/image_trust_bench.py measures what that costs).
+					// uses the feature for ordering, which cannot change a result.
 					bool estimable = false;
 					for (idx_t l = 0; l < n; l++) {
 						if (leaf_values[row][l] == AITriState::TRI_UNKNOWN && !AITextHasImage(prompt[row][l])) {
@@ -2365,8 +2361,7 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 						}
 					}
 					const bool warming = cold && bind_data.threshold > 0.0;
-					if ((estimable || AIConfig::Get().trust_image_estimate) && !warming &&
-					    AIFilterTreeEstimateSelectivity(tree, p_row) >= bind_data.threshold) {
+					if (estimable && !warming && AIFilterTreeEstimateSelectivity(tree, p_row) >= bind_data.threshold) {
 						row_result[row] = 1; // pass-through (true); no LLM, no label
 						note_pass(row);
 						if (resolved.fetch_add(1) + 1 >= rep_count) {
@@ -2690,7 +2685,7 @@ static void AICollectRefCols(const Expression &e, std::set<idx_t> &cols) {
 	ExpressionIterator::EnumerateChildren(e, [&](const Expression &c) { AICollectRefCols(c, cols); });
 }
 
-// The child-output columns the AI call reads -- its dedup key (streaming operator + AIDedupEvaluate share it).
+// The child-output columns the AI call reads -- its dedup key.
 vector<idx_t> AIDedupKeyCols(const BoundFunctionExpression &eval_call) {
 	std::set<idx_t> key_col_set;
 	for (auto &child : eval_call.GetChildren()) {
@@ -2908,21 +2903,6 @@ void AIDedupFireWave(ClientContext &context, const BoundFunctionExpression &eval
 	                      out_result, remaining_limit, &wave_weights);
 }
 
-// Whole-collection caller of AIDedupFireWave (blocking path): evaluate all distinct reps at once and map each
-// representative's boolean to a Value (NULL where the input was NULL).
-static vector<Value> AIDedupEvalFilterNode(ClientContext &context, const BoundFunctionExpression &eval_call,
-                                           ColumnDataCollection &reps, const string &query_text, int64_t limit,
-                                           const vector<idx_t> &rep_counts) {
-	vector<char> out, valid;
-	AIDedupFireWave(context, eval_call, reps, query_text, limit, rep_counts, out, valid);
-	vector<Value> rep_values;
-	rep_values.reserve(out.size());
-	for (idx_t r = 0; r < out.size(); r++) {
-		rep_values.push_back(valid[r] ? Value::BOOLEAN(out[r] != 0) : Value(LogicalType::BOOLEAN));
-	}
-	return rep_values;
-}
-
 // Evaluate any other scalar AI function (ai_classify / ai_score / ai_complete / plain ai_filter) over the
 // distinct representatives by running the function itself on the representative chunks -- each chunk is one
 // AIBatchComplete batch (deduped, fixed-concurrency), so a fan-out with <= STANDARD_VECTOR_SIZE distinct
@@ -2984,98 +2964,6 @@ void AIDedupFireWaveScalarFactorized(ClientContext &context, const BoundFunction
 	executor.ExecuteExpression(factorized, result);
 	for (idx_t i = 0; i < factorized.size(); i++) {
 		out_values.push_back(result.GetValue(i));
-	}
-}
-
-static vector<Value> AIDedupEvalScalar(ClientContext &context, const BoundFunctionExpression &eval_call,
-                                       ColumnDataCollection &reps) {
-	vector<Value> rep_values;
-	AIDedupFireWaveScalar(context, eval_call, reps, rep_values);
-	return rep_values;
-}
-
-void AIDedupEvaluate(ClientContext &context, const BoundFunctionExpression &eval_call, ColumnDataCollection &input,
-                     vector<Value> &result_out, int64_t limit) {
-	const string query_text = context.GetCurrentQuery();
-	const bool is_filter_node = AIDedupIsFilterNode(eval_call);
-
-	// The answer depends only on the columns the call reads: deduplicate the buffered join output by those
-	// RAW input columns and evaluate ONE representative per distinct input, then broadcast. A join fan-out
-	// repeats each input many times with the same answer, so this evaluates the distinct docs only (e.g.
-	// 100) instead of every fanned-out row (e.g. 9900). Result-identical: same input columns -> same answer.
-	const vector<idx_t> key_cols = AIDedupKeyCols(eval_call);
-
-	auto &allocator = BufferAllocator::Get(context);
-	ColumnDataCollection reps(allocator, input.Types()); // distinct representative rows, first-seen order
-	ColumnDataAppendState rep_app;
-	reps.InitializeAppend(rep_app);
-	std::unordered_map<string, idx_t> key_to_rep;
-	vector<idx_t> row_rep; // buffered row (scan order) -> representative ordinal
-
-	DataChunk in_chunk, rep_chunk;
-	in_chunk.Initialize(allocator, input.Types());
-	rep_chunk.Initialize(allocator, input.Types());
-	auto flush = [&]() {
-		if (rep_chunk.size() > 0) {
-			reps.Append(rep_app, rep_chunk);
-			rep_chunk.Reset();
-		}
-	};
-	ColumnDataScanState scan;
-	input.InitializeScan(scan);
-	while (input.Scan(scan, in_chunk)) {
-		for (idx_t row = 0; row < in_chunk.size(); row++) {
-			string key;
-			for (const idx_t kc : key_cols) {
-				const Value v = in_chunk.data[kc].GetValue(row);
-				key.push_back(v.IsNull() ? '\x00' : '\x01'); // keep NULL distinct from the empty string
-				if (!v.IsNull()) {
-					key += v.ToString();
-				}
-				key.push_back('\x1f');
-			}
-			auto it = key_to_rep.find(key);
-			if (it != key_to_rep.end()) {
-				row_rep.push_back(it->second); // a fanned-out duplicate: reuse its representative
-				continue;
-			}
-			const idx_t rep = key_to_rep.size();
-			row_rep.push_back(rep);
-			key_to_rep.emplace(std::move(key), rep);
-			const idx_t rc = rep_chunk.size();
-			rep_chunk.SetChildCardinality(rc + 1); // sized BEFORE the write (vectors carry size)
-			for (idx_t col = 0; col < in_chunk.ColumnCount(); col++) {
-				rep_chunk.data[col].SetValue(rc, in_chunk.data[col].GetValue(row));
-			}
-			if (rep_chunk.size() == STANDARD_VECTOR_SIZE) {
-				flush();
-			}
-		}
-		in_chunk.Reset();
-	}
-	flush();
-
-	if (std::getenv("AI_DEDUP_DEBUG")) {
-		fprintf(stderr, "[dedup] limit=%lld distinct_reps=%zu is_filter_node=%d\n", (long long)limit, key_to_rep.size(),
-		        is_filter_node ? 1 : 0);
-	}
-	// Fan-out count per representative (how many buffered rows it broadcasts to) -- the weight that makes a
-	// pushed LIMIT count OUTPUT rows, not distinct inputs. reps are 0..key_to_rep.size()-1 in first-seen order.
-	vector<idx_t> rep_counts(key_to_rep.size(), 0);
-	for (const idx_t rep : row_rep) {
-		rep_counts[rep]++;
-	}
-	// Evaluate the distinct representatives (reps scan order == first-seen == representative ordinal). The
-	// filter-node path early-stops at the pushed LIMIT (count-weighted); the scalar path evaluates every
-	// representative (still correct: the LIMIT above keeps k -- a scalar early-stop is a later refinement).
-	const vector<Value> rep_values =
-	    is_filter_node ? AIDedupEvalFilterNode(context, eval_call, reps, query_text, limit, rep_counts)
-	                   : AIDedupEvalScalar(context, eval_call, reps);
-
-	// Broadcast each representative's answer to every row that shared its input.
-	result_out.reserve(result_out.size() + row_rep.size());
-	for (const idx_t rep : row_rep) {
-		result_out.push_back(rep_values[rep]);
 	}
 }
 

@@ -23,7 +23,6 @@
 #include "duckdb/planner/logical_operator_visitor.hpp"
 #include "duckdb/planner/operator/logical_aggregate.hpp"
 #include "plan/logical_ai_region.hpp"
-#include "plan/logical_ai_factor_join.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/planner/operator/logical_distinct.hpp"
 #include "duckdb/planner/operator/logical_projection.hpp"
@@ -296,9 +295,6 @@ void AIJoinRewrite::Rewrite(unique_ptr<LogicalOperator> &op, unique_ptr<LogicalO
 		return;
 	}
 	TryMarkExistential(*op);
-	if (factor_mode && TryFactorJoin(op)) {
-		return;
-	}
 	TryPushBelowJoin(op, root);
 }
 
@@ -540,69 +536,6 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 	}
 	graph->ResolveOperatorTypes();
 	op = std::move(graph);
-	return true;
-}
-
-bool AIJoinRewrite::TryFactorJoin(unique_ptr<LogicalOperator> &op) {
-	// Match: Filter(sole predicate == #region output) over AIRegion over CrossProduct.
-	if (op->type != LogicalOperatorType::LOGICAL_FILTER || op->expressions.size() != 1 || op->children.size() != 1) {
-		return false;
-	}
-	auto *region = LogicalAIRegion::TryCast(*op->children[0]);
-	if (!region || region->limit >= 0 || region->children.size() != 1 ||
-	    region->children[0]->type != LogicalOperatorType::LOGICAL_CROSS_PRODUCT) {
-		return false;
-	}
-	auto &pred_ref = *op->expressions[0];
-	if (pred_ref.GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF) {
-		return false;
-	}
-	auto &colref = pred_ref.Cast<BoundColumnRefExpression>();
-	if (colref.Binding().table_index != region->region_index || colref.Binding().column_index.GetIndex() != 0) {
-		return false;
-	}
-	auto &cross = *region->children[0];
-	if (cross.children.size() != 2) {
-		return false;
-	}
-	// v1 evaluates the predicate with a plain ExpressionExecutor: only a simple AI call works
-	// (the folded ai_function_with_embed node needs its batch machinery -> pushdown handles it).
-	if (region->expressions[0]->GetExpressionClass() == ExpressionClass::BOUND_FUNCTION) {
-		const auto &fname = region->expressions[0]->Cast<BoundFunctionExpression>().Function().GetName();
-		if (fname.StartsWith("ai_function_with_embed") || fname.StartsWith("speculative_ai_")) {
-			return false;
-		}
-	}
-	// The predicate must read BOTH sides (a single-side predicate is the push-below's case).
-	vector<ColumnBinding> refs;
-	std::function<void(const Expression &)> collect = [&](const Expression &e) {
-		if (e.GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
-			refs.push_back(e.Cast<BoundColumnRefExpression>().Binding());
-			return;
-		}
-		ExpressionIterator::EnumerateChildren(e, collect);
-	};
-	collect(*region->expressions[0]);
-	const auto left_bindings = cross.children[0]->GetColumnBindings();
-	const auto right_bindings = cross.children[1]->GetColumnBindings();
-	bool reads_left = false, reads_right = false;
-	for (auto &b : refs) {
-		if (std::find(left_bindings.begin(), left_bindings.end(), b) != left_bindings.end()) {
-			reads_left = true;
-		} else if (std::find(right_bindings.begin(), right_bindings.end(), b) != right_bindings.end()) {
-			reads_right = true;
-		} else {
-			return false; // references something outside the cross -> not our shape
-		}
-	}
-	if (!reads_left || !reads_right) {
-		return false;
-	}
-	auto factor = make_uniq<LogicalAIFactorJoin>(region->region_index, std::move(region->expressions[0]));
-	factor->children.push_back(std::move(cross.children[0]));
-	factor->children.push_back(std::move(cross.children[1]));
-	factor->ResolveOperatorTypes();
-	op = std::move(factor);
 	return true;
 }
 

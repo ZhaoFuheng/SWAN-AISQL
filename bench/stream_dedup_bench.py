@@ -2,9 +2,8 @@
 """Does STREAMING the AI-dedup operator overlap LLM calls with input (and early-tear-down under a LIMIT)?
 
 The AI-dedup operator used to be a pipeline breaker: buffer the WHOLE join output, then fire every distinct
-LLM call once (first call waits for full materialization). Streaming (default; DUCKDB_AI_STREAM_DEDUP=off falls
-back to blocking) dedups into an AISQLMapChunk as rows arrive and fires the LLM calls in WAVES once
-~DUCKDB_AI_STREAM_WAVE new distinct keys accumulate -- overlapping AI latency with the join -- and, under a
+LLM call once (first call waits for full materialization). Streaming (always; the scalar path is the reference) dedups into an AISQLMapChunk as rows arrive and fires the LLM calls in WAVES once
+~5 x concurrency new distinct keys accumulate -- overlapping AI latency with the join -- and, under a
 pushed LIMIT, returns FINISHED once the passing outputs reach k (so the join's tail is never materialized).
 
 Two shapes where the AI fires IN the dedup (genuine fan-out above the join):
@@ -43,7 +42,7 @@ ENV_COMMON = {
     "AI_MAX_CONCURRENCY": os.environ.get("BENCH_CONCURRENCY", "20"),
     "AI_MAX_RETRIES": "8",
     "AI_TIMEOUT_MS": "120000",
-    "AI_SPECULATIVE_THRESHOLD": "0",  # pure pull-up (no speculative leaf) so the AI node sits above the join
+    "AI_SPECULATIVE": "off",  # pure pull-up (no speculative leaf) so the AI node sits above the join
     "AI_DEDUP_DEBUG": "1",            # emit the [stream-dedup] diagnostics line
 }
 DOCS = int(os.environ.get("SD_DOCS", "200"))
@@ -106,12 +105,13 @@ QUERIES = [
 ]
 ONLY = set(s for s in os.environ.get("SD_ONLY", "").split(",") if s)
 
-# streaming is the DEFAULT; blocking is the kill-switch. Pull-up + reorder always on so the AI node is above the join.
+# The region always streams. The "blocking" reference evaluates the node per chunk on the scalar path (no
+# region); pull-up + reorder always on so the AI node is above the join.
 CFGS = {
-    "blocking":  {"DUCKDB_SEMANTIC_PULLUP": "1", "DUCKDB_AI_REORDER": "1", "DUCKDB_AI_STREAM_DEDUP": "off"},
+    "blocking":  {"DUCKDB_SEMANTIC_PULLUP": "1", "DUCKDB_AI_REORDER": "1", "DUCKDB_AI_DEDUP": "off"},
     "streaming": {"DUCKDB_SEMANTIC_PULLUP": "1", "DUCKDB_AI_REORDER": "1"},
 }
-FLAGS = ("DUCKDB_AI_DEDUP", "DUCKDB_AI_LIMIT", "DUCKDB_AI_REORDER", "DUCKDB_SEMANTIC_PULLUP", "DUCKDB_AI_STREAM_DEDUP")
+FLAGS = ("DUCKDB_AI_DEDUP", "DUCKDB_AI_LIMIT", "DUCKDB_AI_REORDER", "DUCKDB_SEMANTIC_PULLUP")
 
 
 def _duck(script, env_extra):

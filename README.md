@@ -200,7 +200,6 @@ shows the live values.
 | `ai_concurrency` | integer ≥ 1 | `20` | in-flight LLM requests, process-wide (`AI_MAX_CONCURRENCY`) |
 | `ai_max_retries` | integer ≥ 0 | `6` | retries per request on 429/503/529 or a transient failure, exponential backoff (`AI_MAX_RETRIES`) |
 | `ai_hedge` | `true` / `false` | `true` | duplicate a call still unanswered past the observed p99 latency; first answer wins (`AI_HEDGE`) |
-| `ai_http_keepalive` | `true` / `false` | `true` | reuse HTTP connections across requests (`AI_HTTP_KEEPALIVE`) |
 | `ai_prefix_cache` | `true` / `false` | `true` | explicit provider prompt caching for factor-graph pair prompts (`AI_PREFIX_CACHE`) |
 | `ai_local_cache` | `true` / `false` | `true` | in-process response cache for chat + embeddings |
 | `ai_local_cache_scope` | `query` / `cross_query` | `query` | `query`: one query never serves another (the benchmark rule); `cross_query`: process lifetime |
@@ -219,7 +218,6 @@ shows the live values.
 | `ai_typesafe_model` | model id | `jev-latest` | (`AI_TYPESAFE_MODEL`) |
 | `ai_typesafe_api_key` | string | *(empty)* | (`TYPESAFE_API_KEY`) |
 | `ai_typesafe_threshold` | 0.0 – 1.0 | `0.5` | Noul probability at or above which `ai_filter` is true (`AI_TYPESAFE_THRESHOLD`) |
-| `ai_typesafe_score_mode` | `expected` / `argmax` | `expected` | what a Score answers: the probability-weighted level or the most probable one (`AI_TYPESAFE_SCORE_MODE`); MOVIE q9 scored 0.759 vs 0.720 with argmax |
 
 **Optimizer** — every stage is result-preserving; each can be switched off independently
 
@@ -228,6 +226,7 @@ shows the live values.
 | `ai_inline_ai_ctes` | `true` / `false` | `true` | inline CTEs that contain AI functions so pruning and pull-up can reach the predicate |
 | `ai_semi_reduce` | `true` / `false` | `true` | Yannakakis semi-join reduction before any AI evaluation |
 | `ai_pullup` | `true` / `false` | `true` | lift semantic filters above the joins (`DUCKDB_SEMANTIC_PULLUP`) |
+| `ai_speculative` | `true` / `false` | `true` | speculative pre-filter at a pulled-up predicate's leaf: rows the selectivity model expects to fail are evaluated and pruned before the join, the rest pass through to the lifted predicate (`AI_SPECULATIVE`) |
 | `ai_reorder` | `true` / `false` | `true` | ordering of AI predicates with learned selectivity + speculative evaluation (`DUCKDB_AI_REORDER`) |
 | `ai_factorize` | `off` / `filters` / `all` | `all` | AI region placement: none / above AI filters only / every AI call (`DUCKDB_AI_DEDUP`, `DUCKDB_AI_SCAN_REGION`) |
 | `ai_join_factorize` | `off` / `pushdown` / `factor` | `factor` | AI-condition joins: expand / push the region below the join / factor graph over the pair domain (`DUCKDB_AI_GROUP_JOIN`) |
@@ -238,24 +237,8 @@ shows the live values.
 | setting | values | default | what it does |
 |---|---|---|---|
 | `ai_debug_log` | csv of `region`, `spec`, `yann`, `leaftexts`, `mock` | *(empty)* | stderr diagnostics per subsystem (`region` prints the leaf-region timers) |
-| `ai_debug_wave_overlap` | integer ≥ 1 | `8` | region waves kept in flight at once (1 = synchronous) |
-| `ai_debug_wave_size` | integer | `0` | override the region wave floor (0 = 5 × `ai_concurrency`) |
-| `ai_debug_embed_slice` | integer | `100` | rows the region ingests per slice before it embeds, decides and fires (`AI_EMBED_SLICE`; 0 = the whole chunk) |
-| `ai_debug_embed_slice_text` | `true` / `false` | `true` | slice text-only regions too (`AI_EMBED_SLICE_TEXT`); `false` slices only regions with an image predicate |
-| `ai_debug_warm_gate` | `true` / `false` | `true` | after a region's first slice is decided cold, wait until every predicate has a batch of verdicts and the model has trained before deciding more rows (`AI_WARM_GATE`) |
-| `ai_debug_region_blocking` | `true` / `false` | `false` | disable the region's streaming sink (materialize, then evaluate) |
-| `ai_debug_graph_eval` | `staged` / `lazy` / `lazy-adaptive` | `lazy-adaptive` | factor-graph scheduler |
-| `ai_debug_no_train` | `true` / `false` | `false` | freeze the selectivity model (no training from verdicts) |
-| `ai_debug_mlp_seed` | integer | `0` | seed for the selectivity model's init and warm-up picks |
 | (env) `AI_MLP_FIFO` / `AI_MLP_MIN_TRAIN` | integer | `256` / `16` | the selectivity model's training window (most recent labelled examples) and the examples a step needs; read once at load |
-| `ai_debug_speculative_always` | `true` / `false` | `true` | drop the speculative fan-out gate |
-| `ai_debug_speculative_min_fanout` | 0.0 – 1.0 | `0.3` | minimum fan-out to add a speculative node |
-| `ai_debug_speculative_threshold` | 0.0 – 1.0 | `0.5` | speculative pass-through threshold |
-| `ai_debug_trust_image_estimate` | `true` / `false` | `false` | let speculative all-image rows trust the estimate instead of always evaluating |
 | `ai_debug_prompt_variant` | `strict` / `soft` / `plain` | `strict` | `ai_filter` system prompt; `plain` sends the bare prompt (cross-engine, prompt-identical comparisons) |
-| `ai_debug_semi_reduce_force` | `true` / `false` | `false` | semi-reduce every join cluster, AI or not (A/B benchmarking) |
-| `ai_debug_embed_filter` | `true` / `false` | `false` | embedding pre-filter pass |
-| `ai_debug_agg_distinct` | `true` / `false` | `false` | allow `ai_agg` over DISTINCT inputs (changes the multiset) |
 
 Embedding-server environment (`serve/ai_embed_server.py`): `AI_EMBED_MODEL` (text model), `AI_EMBED_IMAGE_MODEL`
 (CLIP model; empty = text only), `AI_EMBED_DEVICE` (default `cpu`), `AI_EMBED_PORT`, `AI_EMBED_BACKEND` (`st` / `mlx`).

@@ -28,16 +28,16 @@ CREATE TABLE t AS SELECT CASE WHEN i < 2048 THEN (i % 50) ELSE i END AS k FROM r
 statement ok
 CREATE TABLE stream_res AS SELECT k FROM t WHERE ai_filter('[p=50] is '||t.k::VARCHAR||' interesting?');
 
-# Same query through the blocking path (one global evaluation) -- an independent implementation, so
+# Same query through the scalar path (no region) -- an independent implementation, so
 # agreement is evidence about the streaming path rather than about a shared helper.
 statement ok
-SET ai_debug_region_blocking=true;
+SET ai_factorize = 'off';
 
 statement ok
 CREATE TABLE block_res AS SELECT k FROM t WHERE ai_filter('[p=50] is '||t.k::VARCHAR||' interesting?');
 
 statement ok
-SET ai_debug_region_blocking=false;
+RESET ai_factorize;
 
 # every row decided the same way by both paths
 query I

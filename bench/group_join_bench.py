@@ -38,7 +38,7 @@ ENV_COMMON = {
     "AI_EMBED_URL": os.environ.get("BENCH_EMBED", "http://localhost:4009"),
     "AI_EMBED_MODEL": "sentence-transformers/all-MiniLM-L6-v2",
     "AI_MAX_CONCURRENCY": os.environ.get("BENCH_CONCURRENCY", "20"),
-    "AI_SPECULATIVE_THRESHOLD": "0",  # no speculative leaf -> the AI region forms cleanly above the join
+    "AI_SPECULATIVE": "off",  # no speculative leaf -> the AI region forms cleanly above the join
     "AI_DEDUP_DEBUG": "1",            # emit the [stream-dedup] line (region-buffered rows = materialization)
     "DUCKDB_SEMANTIC_PULLUP": "1",
     "DUCKDB_AI_REORDER": "1",
@@ -79,7 +79,7 @@ HAND_CLASSIFY = (f"WITH surv AS (SELECT DISTINCT a.x AS k FROM a SEMI JOIN b ON 
                  f"SELECT j.x AS x, m.c AS c FROM (SELECT a.x FROM a JOIN b ON a.x = b.y) j JOIN m ON j.x = m.k")
 
 FLAGS = ("DUCKDB_AI_DEDUP", "DUCKDB_AI_LIMIT", "DUCKDB_AI_REORDER", "DUCKDB_SEMANTIC_PULLUP",
-         "DUCKDB_AI_STREAM_DEDUP", "DUCKDB_AI_GROUP_JOIN", "DUCKDB_YANNAKAKIS")
+         "DUCKDB_AI_GROUP_JOIN", "DUCKDB_YANNAKAKIS")
 DBG = re.compile(r"\[stream-dedup\] distinct=(\d+) rows=(\d+)")
 
 

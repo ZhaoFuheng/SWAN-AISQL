@@ -65,7 +65,7 @@ static bool IsDedupableAICall(const Expression &expr) {
 	// ai_function_with_embed: the combined reorder node in a Filter above the join. classify/score/prompt:
 	// scalar AI calls in a Projection above the join. Plain ai_filter: a SINGLE ai_filter never forms a reorder
 	// tree, so it stays scalar -- but it's still input-deterministic and its calls serialize per-chunk above a
-	// join, so it benefits from the buffered concurrent batch too (AIDedupEvalScalar handles it). All are
+	// join, so it benefits from the buffered concurrent batch too (AIDedupFireWaveScalar handles it). All are
 	// input-deterministic, so dedup+broadcast is result-identical.
 	return name == "ai_function_with_embed" || name == "ai_filter" || name == "ai_classify" || name == "ai_score" ||
 	       name == "ai_complete";
@@ -111,7 +111,7 @@ bool AIRegionRewrite::HoistAICalls(unique_ptr<Expression> &expr, unique_ptr<Logi
 	bool is_node = false;
 	if (IsDedupableAICall(*expr)) {
 		// Under a LIMIT, only an ai_function_with_embed NODE can early-stop while deduping (the count-weighted
-		// stop in AIDedupEvaluate/AIFilterEvaluateBatch). A scalar AI call can't, and a blocking dedup would
+		// stop in AIFilterEvaluateBatch). A scalar AI call can't, and a blocking dedup would
 		// defeat the limit's streaming early-stop -- so leave the scalar in place to stream to the limit.
 		const auto &name = expr->Cast<BoundFunctionExpression>().Function().GetName();
 		is_node = name == "ai_function_with_embed" || name == "speculative_ai_function_with_embed";
@@ -254,51 +254,6 @@ void AIRegionRewrite::Rewrite(unique_ptr<LogicalOperator> &op, int64_t limit_k) 
 	}
 }
 
-// Record the (aggregate table_index, column) that each ai_agg reads its list argument from.
-static void CollectAiAggListRefs(const Expression &e, std::set<std::pair<idx_t, idx_t>> &refs) {
-	if (e.GetExpressionType() == ExpressionType::BOUND_FUNCTION) {
-		auto &fn = e.Cast<BoundFunctionExpression>();
-		if (fn.Function().GetName() == "ai_agg" && !fn.GetChildren().empty() &&
-		    fn.GetChildren()[0]->GetExpressionType() == ExpressionType::BOUND_COLUMN_REF) {
-			const auto &b = fn.GetChildren()[0]->Cast<BoundColumnRefExpression>().Binding();
-			refs.emplace(b.table_index.index, b.column_index.GetIndex());
-		}
-	}
-	ExpressionIterator::EnumerateChildren(e, [&](const Expression &c) { CollectAiAggListRefs(c, refs); });
-}
-
-static void CollectAiAggListRefsOp(const LogicalOperator &op, std::set<std::pair<idx_t, idx_t>> &refs) {
-	for (auto &e : op.expressions) {
-		CollectAiAggListRefs(*e, refs);
-	}
-	for (auto &c : op.children) {
-		CollectAiAggListRefsOp(*c, refs);
-	}
-}
-
-// Set DISTINCT on each list()/array_agg() aggregate whose output an ai_agg consumes, so the LLM sees each
-// distinct item once. A join fan-out (or repeated group members) would otherwise feed duplicate documents
-// into the one aggregate call -- extra tokens and duplicate-document bias. Changes ai_agg output by design.
-static void ApplyAiAggDistinct(LogicalOperator &op, const std::set<std::pair<idx_t, idx_t>> &refs) {
-	if (op.type == LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY) {
-		auto &agg = op.Cast<LogicalAggregate>();
-		for (idx_t k = 0; k < agg.expressions.size(); k++) {
-			if (agg.expressions[k]->GetExpressionType() != ExpressionType::BOUND_AGGREGATE) {
-				continue;
-			}
-			auto &ae = agg.expressions[k]->Cast<BoundAggregateExpression>();
-			const auto name = ae.Function().GetName();
-			if ((name == "list" || name == "array_agg") && !ae.IsDistinct() &&
-			    refs.count({agg.aggregate_index.index, k}) > 0) {
-				ae.GetAggregateTypeMutable() = AggregateType::DISTINCT;
-			}
-		}
-	}
-	for (auto &c : op.children) {
-		ApplyAiAggDistinct(*c, refs);
-	}
-}
-
 //! Positional-map integrity across the hoist: inserting a region under one side of a join APPENDS
 //! its result column to that side's output, SHIFTING every later column's position in ancestor
 //! outputs. FILTER/ORDER_BY projection maps are positional, so each is snapshotted (its child's
@@ -373,16 +328,6 @@ unique_ptr<LogicalOperator> AIRegionRewrite::Optimize(unique_ptr<LogicalOperator
 	SnapshotPositionalMaps(*op, map_snaps);
 	Rewrite(op, -1);
 	RemapPositionalMaps(*op, map_snaps);
-	// ai_agg(list(x)) -> ai_agg(list(DISTINCT x)) is NOT universally result-preserving: it changes the MULTISET
-	// the LLM aggregates (a "how many mention X" task would answer differently). So it stays OPT-IN -- applied
-	// only when DUCKDB_AI_DEDUP is EXPLICITLY set (and not off), never by the scalar default.
-	if (AIBoolSetting(optimizer.context, "ai_debug_agg_distinct", false)) {
-		std::set<std::pair<idx_t, idx_t>> agg_refs;
-		CollectAiAggListRefsOp(*op, agg_refs);
-		if (!agg_refs.empty()) {
-			ApplyAiAggDistinct(*op, agg_refs);
-		}
-	}
 	return op;
 }
 

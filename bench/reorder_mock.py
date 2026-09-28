@@ -2,7 +2,7 @@
 """Call-count-only reorder comparison on the govreport selected queries, against the in-process mock
 (deterministic verdict per prompt, $0, minutes). Per query, three fresh processes:
   OFF        SET ai_reorder=false            -- written order, no DP
-  ON-tuple   ai_debug_region_blocking=true   -- the old tuple-batch per-row JIT DP (July baseline's algorithm)
+  ON-tuple   ai_factorize='off'               -- the node on the scalar path: tuple-batch per-row JIT DP (July baseline's algorithm)
   ON-leaf    default                          -- the per-leaf region (new)
 The id-set checksum must agree across all three (result-preserving); the calls are the comparison.
 CAVEAT: mock verdicts are hash-based, so the selectivity model cannot learn them -- on the mock neither
@@ -15,7 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 BIN = os.path.abspath(os.path.join(HERE, "../build/release/duckdb"))
 manifest = json.load(open(f"{HERE}/manifest.json")); selected = json.load(open(f"{HERE}/selected.json"))
 LOAD = f"CREATE TABLE govreport AS SELECT id, summary, source FROM read_csv('{HERE}/govreport_summary.csv', header=true);"
-VARIANTS = [("OFF", "SET ai_reorder=false;"), ("ON-tuple", "SET ai_debug_region_blocking=true;"), ("ON-leaf", "")]
+VARIANTS = [("OFF", "SET ai_reorder=false;"), ("ON-tuple", "SET ai_factorize='off';"), ("ON-leaf", "")]
 
 def run(sql, setting):
     script = f"CALL ai_mock_start(); {setting}\n{LOAD}\nSELECT ai_usage_reset();\n.mode json\nCREATE TABLE r AS {sql}\nSELECT md5(string_agg(id::VARCHAR, ',' ORDER BY id)) AS ids FROM r;\nSELECT (sum(llm_calls)-sum(embed_calls))::BIGINT AS calls FROM ai_usage();\n"

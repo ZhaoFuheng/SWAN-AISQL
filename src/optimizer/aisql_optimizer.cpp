@@ -6,7 +6,6 @@
 // fork; stages land incrementally:
 //   [4] SemiJoinReducer + SemanticFilterPullup + cleanup re-run     (join-cluster passes)
 //   [2] AIPredicateRewrite (reorder/CASE-WHEN folding)              (this stage)
-//   [2] AIEmbedFilter (opt-in)                                      (this stage)
 //   [3] AIRegionRewrite                                             (region operator stage)
 //   [3/6] AIJoinRewrite (pushdown / factor)                         (region + factor stages)
 //   [2] AILimitPushdown (last; region half inert until Stage 3)     (this stage)
@@ -26,7 +25,6 @@
 #include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/planner/logical_operator_visitor.hpp"
 
-#include "optimizer/ai_embed_filter.hpp"
 #include "optimizer/ai_limit_pushdown.hpp"
 #include "optimizer/ai_predicate_rewrite.hpp"
 #include "optimizer/ai_region_rewrite.hpp"
@@ -188,13 +186,6 @@ static void AisqlOptimizePlan(OptimizerExtensionInput &input, unique_ptr<Logical
 	{
 		AIPredicateRewrite ai_predicate_rewrite(optimizer);
 		plan = ai_predicate_rewrite.Optimize(std::move(plan));
-	}
-
-	// Embedding pre-filter (opt-in via ai_debug_embed_filter). After the reorder so it finds no
-	// bare ai_filters when the reorder already folded them.
-	{
-		AIEmbedFilter ai_embed_filter(optimizer);
-		plan = ai_embed_filter.Optimize(std::move(plan));
 	}
 
 	// AI Region placement (ai_factorize: off/filters/all): fold AI calls into factorized

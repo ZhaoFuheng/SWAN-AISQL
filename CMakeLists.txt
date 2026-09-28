@@ -31,7 +31,6 @@ set(EXTENSION_SOURCES
     src/optimizer/ai_cte_demand.cpp
     src/optimizer/ai_predicate_rewrite.cpp
     src/optimizer/ai_filter_tree_build.cpp
-    src/optimizer/ai_embed_filter.cpp
     src/optimizer/ai_limit_pushdown.cpp
     src/optimizer/ai_region_rewrite.cpp
     src/rep/ai_sql_map_chunk.cpp
@@ -40,8 +39,6 @@ set(EXTENSION_SOURCES
     src/optimizer/semi_join_reducer.cpp
     src/optimizer/semantic_filter_pullup.cpp
     src/optimizer/ai_join_rewrite.cpp
-    src/plan/logical_ai_factor_join.cpp
-    src/exec/physical_ai_factor_join.cpp
     src/plan/logical_ai_factor_graph.cpp
     src/exec/physical_ai_factor_graph.cpp)
 

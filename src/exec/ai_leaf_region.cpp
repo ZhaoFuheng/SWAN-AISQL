@@ -13,24 +13,10 @@
 
 namespace duckdb {
 
-// Does the node's expression evaluate ai_image() anywhere? (The call sits inside the region's own leaf
-// expressions, so the child chunk carries plain paths, never the sentinel.)
-static bool ExpressionHasAIImage(const Expression &expr) {
-	if (expr.GetExpressionClass() == ExpressionClass::BOUND_FUNCTION &&
-	    expr.Cast<BoundFunctionExpression>().Function().GetName() == "ai_image") {
-		return true;
-	}
-	bool found = false;
-	ExpressionIterator::EnumerateChildren(
-	    expr, [&](const Expression &child) { found = found || ExpressionHasAIImage(child); });
-	return found;
-}
-
 AILeafRegionState::AILeafRegionState(ClientContext &context, const BoundFunctionExpression &eval_call,
                                      const vector<LogicalType> &child_types_p, int64_t limit)
     : context(context), call(eval_call), tree(AILeafTree(eval_call)), n(AILeafCount(eval_call)), limit(limit),
-      query_text(context.GetCurrentQuery()), child_types(child_types_p), leaves(n),
-      has_image_leaf(ExpressionHasAIImage(eval_call)), landed(n, 0) {
+      query_text(context.GetCurrentQuery()), child_types(child_types_p), leaves(n), landed(n, 0) {
 	for (idx_t l = 0; l < n; l++) {
 		leaves[l].key_cols = AILeafKeyCols(eval_call, l);
 		leaves[l].stage.Initialize(Allocator::Get(context), child_types);
@@ -86,16 +72,15 @@ void AILeafRegionState::FlushStage(idx_t l) {
 
 bool AILeafRegionState::Append(DataChunk &chunk, idx_t fire_floor, idx_t fire_overlap) {
 	const idx_t count = chunk.size();
-	const auto &cfg = AIConfig::Get();
-	const idx_t configured = cfg.embed_slice;
+	// Rows ingested per slice before the region embeds, decides and fires. Slicing lets the first wave
+	// launch after the first slice's features instead of the chunk's (500 CLIP image embeds are ~80 s of
+	// Sink time), and lets this query's own verdicts order the later rows: text regions too (agent_bench
+	// Q17 237 -> 156 calls for +4-7 s).
+	constexpr idx_t kSliceRows = 100;
 	constexpr idx_t kGateLabels = 20; // one trainer batch per leaf
 	for (idx_t begin = 0; begin < count;) {
-		// Slice regions with an image leaf (slow embeds; and the slices let this query's own verdicts order
-		// the later rows), or any region when asked; otherwise a text-only region takes the rest of the
-		// chunk in one go (one batched embed per leaf, one fire).
-		const bool slicing = configured > 0 && (has_image_leaf || cfg.embed_slice_text);
-		const idx_t slice = slicing ? MinValue<idx_t>(configured, count - begin) : count - begin;
-		if (begin > 0 && n >= 2 && cfg.warm_gate && fire_floor > 0) {
+		const idx_t slice = MinValue<idx_t>(kSliceRows, count - begin);
+		if (begin > 0 && n >= 2 && fire_floor > 0) {
 			// Warm gate: the first slice was decided cold and fired; before deciding more rows, wait until
 			// every leaf has a batch of verdicts (the rows that survived the first leaf have visited the
 			// second) and the model has trained on them. Waits only while a wave is in flight -- verdicts

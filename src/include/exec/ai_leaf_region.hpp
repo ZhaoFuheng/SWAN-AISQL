@@ -43,7 +43,7 @@ public:
 	AILeafRegionState(ClientContext &context, const BoundFunctionExpression &eval_call,
 	                  const vector<LogicalType> &child_types, int64_t limit);
 
-	//! Fold a child chunk in slices of ai_debug_embed_slice rows: each slice is deduped, its new reps get
+	//! Fold a child chunk in slices of 100 rows: each slice is deduped, its new reps get
 	//! texts + predictions (one batched embed per leaf), each new row picks its first leaf and, when
 	//! fire_floor > 0, ready waves are fired before the next slice is touched -- so the first wave launches
 	//! after the first slice's features, the remaining embeds overlap the in-flight waves, and later slices
@@ -129,11 +129,7 @@ private:
 	int64_t passed = 0;
 	idx_t waves = 0;
 	vector<unique_ptr<AILeafWave>> inflight;
-	idx_t overlap = 1; //! waves kept in flight (set by Fire/Finish; 1 = inline under a LIMIT)
-	//! Whether a leaf embeds images (decided from the node's expression at construction). With
-	//! ai_debug_embed_slice_text off, only such regions ingest slice-wise: their embeds are the slow part
-	//! (~0.1 s per image), a text chunk embeds in milliseconds.
-	bool has_image_leaf = false;
+	idx_t overlap = 1;    //! waves kept in flight (set by Fire/Finish; 1 = inline under a LIMIT)
 	vector<idx_t> landed; //! verdicts landed per leaf (the warm gate waits for a batch on every leaf)
 	//! Sink-thread time accounting (seconds), see TimingSummary.
 	double t_embed = 0, t_refresh = 0, t_decide = 0, t_drain = 0, t_warm_gate = 0;

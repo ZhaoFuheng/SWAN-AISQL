@@ -19,15 +19,14 @@ namespace duckdb {
 //! calls run once per distinct input over the whole join output instead of fragmented across the 2048-row
 //! chunks the join streams up.
 //!
-//! Streaming by default (ai_debug_region_blocking=true falls back to one global evaluation in Finalize). A
-//! folded NODE is held per leaf (exec/ai_leaf_region.hpp: |A| + |B| reps, per-row leaf order, leaf waves in
-//! prompt currency); a plain SCALAR call folds into an AISQLMapChunk on its key columns and fires a WAVE once
-//! >= ai_debug_wave_size (default 5 x ai_concurrency) new distinct reps have accumulated. In practice a wave is one
+//! Streaming: a folded NODE is held per leaf (exec/ai_leaf_region.hpp: |A| + |B| reps, per-row leaf order, leaf waves
+//! in prompt currency); a plain SCALAR call folds into an AISQLMapChunk on its key columns and fires a WAVE once
+//! >= 5 x ai_concurrency new distinct reps have accumulated. In practice a wave is one
 //! input chunk's worth of new reps, because a wave drains everything pending and every chunk clears the floor.
 //!
 //! A wave's LLM batch is only as wide as the DISTINCT PROMPTS its reps carry, not its rep count: above a
 //! join that repeats one side's prompt across a whole chunk, a wave can collapse to a single call. So up to
-//! ai_debug_wave_overlap waves (default 8) run concurrently -- prepared on the Sink thread (the map is
+//! eight waves run concurrently -- prepared on the Sink thread (the map is
 //! single-owner), evaluated on a background thread, applied back on the Sink thread, drained in Combine --
 //! which keeps the request pool fed without speculating on any call the tree would not have made. The
 //! process-wide chat gate still caps requests in flight at ai_concurrency. Under a pushed LIMIT waves stay

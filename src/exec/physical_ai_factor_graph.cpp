@@ -197,7 +197,7 @@ static void EvaluateDomain(ClientContext &context, const Expression &sub_node, c
 }
 
 //===--------------------------------------------------------------------===//
-// Lazy (need-driven streaming) evaluation -- ai_debug_graph_eval='lazy'
+// Lazy (need-driven streaming) evaluation
 //
 // The graph is the single source of truth: results write back to MEMBERS and PAIRS, deletions
 // prune the dispatch frontier, and tuples are never materialized (they are enumerated from the
@@ -665,7 +665,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 	// A unit's score is its expected pruning payoff: P(fail) x the unknown pairs its member's
 	// death would cancel (spread over the member's remaining pairs on that edge). Selection
 	// stays strictly behind the same need gate, so adaptivity can only REDUCE calls, never add.
-	const bool adaptive = AIConfig::Get().graph_eval_adaptive;
+	const bool adaptive = true;
 	vector<idx_t> un_evals(k1, 0), un_passes(k1, 0);
 	vector<idx_t> ed_evals(ne, 0), ed_passes(ne, 0);
 	vector<vector<idx_t>> me_evals_s(ne), me_passes_s(ne), me_evals_t(ne), me_passes_t(ne);
@@ -1319,7 +1319,7 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 	bool lazy_done = false;
 	{
 		vector<idx_t> parent_edge_of_side, side_level;
-		if (AIConfig::Get().graph_eval_lazy && OrientForest(op, sink, parent_edge_of_side, side_level)) {
+		if (OrientForest(op, sink, parent_edge_of_side, side_level)) {
 			LazyFactorGraphEvaluation(context, op, sink, query_text, parent_edge_of_side, side_level, live, edge_pass);
 			lazy_done = true;
 		}
