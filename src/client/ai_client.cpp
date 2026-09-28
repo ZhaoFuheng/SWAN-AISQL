@@ -718,7 +718,7 @@ enum class AICallOutcome : uint8_t {
 	OK,        // 2xx with a parseable body
 	THROTTLED, // 429 / 503 / 529 -> back off, retry, and shrink concurrency
 	TRANSIENT, // network error / 5xx / unparseable body -> back off and retry (not a rate signal)
-	ERROR      // permanent failure (4xx other than throttle) -> not retried
+	PERMANENT  // permanent failure (4xx other than throttle) -> not retried  (not ERROR: a Windows macro)
 };
 
 //! Read a Retry-After / retry-after-ms hint (in ms) from a throttle response; -1 if absent.
@@ -853,7 +853,7 @@ struct ConnLease {
 static AIResult DoSingleRequest(const AIConfig &config, const AIRequest &request, idx_t query_index,
                                 AICallOutcome &outcome, int32_t &retry_after_ms, string &error) {
 	ChatGatePermit gate_permit; // global in-flight cap, held for this attempt only
-	outcome = AICallOutcome::ERROR;
+	outcome = AICallOutcome::PERMANENT;
 	retry_after_ms = -1;
 	error.clear();
 	AIResult result;
@@ -1233,7 +1233,7 @@ static AIResult DoRequestWithRetry(const AIConfig &config, const AIRequest &requ
 		if (limiter && outcome == AICallOutcome::OK) {
 			limiter->OnSuccess();
 		}
-		if (outcome == AICallOutcome::ERROR) {
+		if (outcome == AICallOutcome::PERMANENT) {
 			NoteCallFailure(config, request, query_index, error); // permanent (4xx, no connection possible)
 		}
 		return result; // OK or permanent error (neutral to the AIMD window)
