@@ -14,79 +14,145 @@ That yields one cost rule and one correctness rule, and every stage below is an 
 
 ---
 
-## 1. Two currencies
+## 1. Vocabulary
+
+* **AI call** — `ai_filter`, `ai_classify`, `ai_score` or `ai_complete`: one LLM request per
+  distinct input.
+* **Leaf** — a boolean predicate built around exactly one AI call: `ai_filter(p)`,
+  `ai_classify(x) = 'a'`, `ai_score(x) * 10 > 5`, `lower(ai_complete(x)) IN ('yes', 'true')`, a
+  `CASE` over the same call twice. The call is asked once and the surrounding expression is
+  applied to its answer. Besides the call, a leaf may only read constants.
+* **Node** — a WHERE clause's AND/OR/NOT tree over its leaves, folded into one operator argument.
+  A node carries the tree and its leaves; it does **not** fix the order they are evaluated in.
+* **Region** — the operator that switches currency (§2): rows in, one dictionary of distinct
+  inputs per leaf, verdicts out, fanned back to the rows.
+* **Factor graph** — the region's form for a semantic join: one dictionary per join side, and the
+  node's leaves split into per-side checks and per-pair checks.
+
+---
+
+## 2. Two currencies
 
 Relational operators move **rows**. AI evaluation consumes **distinct values**.
 
-The AI region operator folds its input into a dictionary of distinct inputs plus multiplicities,
-fires the LLM once per dictionary entry, and fans the results back out by count. Switching to
-distinct-value currency as early and as widely as possible is the single biggest lever in the
-system: a join fan-out that repeats a row 50 times would otherwise repeat its prompt 50 times.
+The region folds its input into a dictionary of distinct inputs plus multiplicities, fires the LLM
+once per dictionary entry, and fans the results back out by count. Switching to distinct-value
+currency as early and as widely as possible is the single biggest lever in the system: a join
+fan-out that repeats a row 50 times would otherwise repeat its prompt 50 times.
 
 Three consequences follow.
 
 * **Batching is denominated in prompts, not rows.** The region evaluates in *waves* of new distinct
   inputs and keeps several waves in flight, so the request pool is never idle behind the
   operator's own bookkeeping, and it never speculates on a call the query would not have made.
-* **Dictionaries are kept per predicate.** A folded node with several AI predicates keeps one
-  dictionary per predicate on that predicate's own columns. Where the predicates read different
-  join sides the dictionary is the *sum* of the sides, not their *product*. Ordering is still
-  decided per row, over the predicates' predicted pass rates and costs; a later predicate is asked
-  exactly for the inputs that still need it.
+* **Dictionaries are kept per leaf.** A node with several leaves keeps one dictionary per leaf on
+  that leaf's own columns. Where the leaves read different join sides the dictionary is the *sum*
+  of the sides, not their *product*. A later leaf is asked exactly for the inputs that still need
+  it, in the order decided per row at run time (§4).
 * **A semantic join never materialises its cross product.** The factor graph keeps one dictionary
   per side and enumerates only surviving pairs, so intermediate size is bounded by the pair domain
   that is still live, not by `|A| × |B|`.
 
 ---
 
-## 2. Pipeline
+## 3. Plan-time pipeline
 
-Ordered so that **all relational pruning happens before any semantic decision**, and semantic
-placement happens before physical factorisation.
+These are plan rewrites, in the order they run. They decide *how many* distinct inputs exist and
+*what* each predicate is evaluated on. None of them decides the evaluation order — that is a
+run-time decision (§4). The stages are ordered so that **all relational pruning happens before any
+semantic decision**, and semantic placement happens before physical factorisation.
 
 ```
-  pre-optimize hook   inline AI-bearing CTEs            (boundary removal)
+  pre-optimize hook   inline AI-bearing CTEs                                        (boundary removal)
   --- DuckDB built-ins run here: filter pushdown, join order, column pruning ---
-  1  semi-join reduce  prune base tables by join keys; the SEMI lands below the leaf's AI stage
-                       (an ai_filter or an AI projection), so the LLM sees reduced rows   (relational)
-  2  pull-up           lift AI filters above the joins                             (semantic placement)
-     cleanup           re-run column pruning / build side after 1-2 reshaped the plan
-  3  reorder           order the AI predicates by learned selectivity, fold them into one node
-  4  region            row currency -> distinct-value currency (per-predicate dictionaries)
-  5  join factorize    factor graph for AI-condition joins (pair domain, never the cross product)
-  6  limit / exists    consumer-aware early termination
+  1  semi-join reduce  prune each base table by its join neighbours' keys, below the leaf's
+                       AI stage (an ai_filter or an AI projection), so the LLM sees reduced rows
+  2  pull-up           lift the AI predicates above the joins, leaving a speculative pre-filter
+                       at the leaf                                              (semantic placement)
+     cleanup           re-run column pruning / build-side choice after 1-2 reshaped the plan
+  3  fold              group a filter's AI predicates into one node (tree + leaves)
+  4  region            place the node, or a lone AI call, in a region: row -> distinct-value currency
+  5  join factorize    a node over a cross product becomes a factor graph (pair domain, never the product)
+  6  limit / exists    push a LIMIT k or an EXISTS into the region or graph: stop once k survivors are known
 ```
 
-**Why this order.** 1 and 2 decide *how many distinct inputs exist*; 3 decides *in what order* the
-predicates run; 4 and 5 decide *how* they are evaluated; 6 decides *when to stop*. Reversing any
-adjacent pair loses information the later stage needs — reordering before reduction, for
-instance, would cost-model against un-pruned cardinalities.
+**Why this order.** 1 and 2 decide *how many distinct inputs exist*; 3 decides *which predicates
+travel together*; 4 and 5 decide *what they are evaluated on*; 6 decides *when to stop*. Each stage
+matches the shape the previous one produced: the region wants one node in a filter of its own, the
+factor graph wants a node over a cross product, the limit push-down wants a region or graph whose
+result feeds nothing but the LIMIT. Reversing any adjacent pair loses that shape.
 
-**A leaf is any boolean expression with one AI call in it.** `ai_filter(p)`, `ai_classify(x) = 'a'`,
-`ai_score(x) * 10 > 5`, `lower(ai_complete(x)) IN ('yes', 'true')`, a `CASE` over the same call
-twice: each is one leaf, asked once, whose wrapper is applied to the answer. Every stage sees the
-same leaf, so a predicate spelled around the call is lifted, reordered, factorised and pushed
-exactly like a bare one. The only inputs a leaf may have besides its call are constants.
+**Every spelling of a predicate is the same leaf.** Because a leaf is *any* boolean expression around
+one AI call, a predicate written as `lower(ai_complete(x)) IN ('yes', 'true')` is lifted, folded,
+factorised and pushed exactly like a bare `ai_filter(p)`; the wrapper travels with the leaf and is
+applied to the answer.
 
 **The folded node gets a filter of its own.** When a WHERE clause mixes AI predicates with
-relational ones, the folded AI node is installed in its own filter *above* the relational
-remainder. DuckDB evaluates a conjunction through an adaptive filter that permutes conjunct order,
-so leaving the two side by side could run the LLM node first over every row; a separate filter
-makes the cheap-first order structural.
+relational ones, the node is installed in its own filter *above* the relational remainder. DuckDB
+evaluates a conjunction through an adaptive filter that permutes conjunct order, so leaving the two
+side by side could run the LLM node first over every row; a separate filter makes the cheap-first
+order structural.
 
-**Selectivity is learned, not assumed.** The reorder's predictions come from a small model trained
-in-process on the verdicts the query itself produces. Its feature for a predicate is the
-embedding of the predicate text, the embedding of the row's input, and their cosine; text inputs
-use a sentence encoder, image inputs a CLIP dual encoder so that an `ai_image` predicate is
-compared with its image in one joint space. A query starts cold — the first rows are ordered by
-cost alone — and warms as its own verdicts land: the region ingests in slices, and after the first
-slice it waits until every predicate has a batch of verdicts before ordering the rest. The model is
-process-global and keeps training across queries; the predicate text being part of the feature is
-what lets it generalise across predicates rather than forget.
+**Speculative pre-filter.** When the pull-up lifts a predicate above a join it leaves a copy at the
+leaf that only *prunes*: a row the selectivity model expects to fail is evaluated there and dropped
+before the join; every other row passes through unevaluated to the lifted predicate, which is
+complete on its own. The semi-join reduction has already pruned the leaf relationally, so this spends
+calls only on rows the join would keep. `ai_speculative` switches it off for parity runs.
 
 ---
 
-## 3. Boundary rule: relational pruning must cross CTE boundaries
+## 4. Run time: the order is decided per row
+
+Nothing in the plan fixes which predicate runs first. The node carries the tree; the operator that
+holds it chooses, per input, which leaf to ask next, so the expensive calls short-circuit as early as
+the data allows.
+
+* **In a region**, each row picks its next leaf by an exact minimum-expected-cost search over the
+  tree, using the leaf's predicted pass rate and its prompt cost. A leaf is asked only for the
+  distinct inputs that some still-undecided row needs, and a verdict landing on one distinct input
+  re-decides every row that shares it. Where every row of a join fan-out fails the first leaf, the
+  second leaf is never asked.
+* **In a factor graph**, the scheduler picks the next member or pair to check from the pass rates it
+  has observed so far in the query, preferring checks whose failure cancels the most pairs. A
+  per-side check tends to go first: one failed member removes every pair it would have formed.
+  Within a pair, the leaves run in the node's order and stop at the first false answer.
+* **A LIMIT stops the operator, not the scan.** Once the region or graph has confirmed enough
+  passing rows for the pushed `LIMIT k` (counted by fan-out, so k *output* rows), it stops asking.
+
+**Selectivity is learned, not assumed.** The region's predictions come from a small model trained
+in-process on the verdicts the query itself produces. Its feature for a leaf is the embedding of the
+predicate text, the embedding of the row's input, and their cosine; text inputs use a sentence
+encoder, image inputs a CLIP dual encoder so that an `ai_image` predicate is compared with its image
+in one joint space. A query starts cold — the first rows are ordered by cost alone — and warms as its
+own verdicts land: the region ingests in slices, and after the first slice it waits until every leaf
+has a batch of verdicts before ordering the rest. The model is process-global and keeps training
+across queries; the predicate text being part of the feature is what lets it generalise across
+predicates rather than forget.
+
+**A worked example.**
+
+```sql
+SELECT r.id FROM reviews r JOIN products p USING (product_id)
+WHERE p.category = 'camera'
+  AND ai_filter('mentions battery life: ' || r.text)
+  AND ai_classify(r.text, ['positive', 'negative']) = 'negative'
+LIMIT 10;
+```
+
+1. *Semi-join reduce*: `reviews` is reduced to the reviews of camera products before any call.
+2. *Pull-up*: both AI predicates are lifted above the join; a speculative copy stays at `reviews`.
+3. *Fold*: the two predicates become one node with two leaves — the `ai_filter`, and the
+   `ai_classify` comparison whose wrapper (`= 'negative'`) is applied to the answer.
+4. *Region*: the node is placed in a region above the join, with one dictionary per leaf keyed on
+   `r.text`, so a review joined to several products is asked once.
+5. *Limit*: the `LIMIT 10` is pushed into the region.
+6. *Run time*: per review, the search asks the cheaper or more selective leaf first (cold: by cost;
+   warm: by the model's pass rates); the other leaf is asked only for reviews that survived; the
+   region stops once ten reviews have passed both.
+
+---
+
+## 5. Boundary rule: relational pruning must cross CTE boundaries
 
 A materialised CTE is an optimisation barrier. DuckDB materialises any CTE referenced more than
 once, and a semantic filter sealed inside one runs on its **full base table** no matter how
@@ -110,7 +176,7 @@ that other references also read would silently drop the filter for those referen
 
 ---
 
-## 4. Duplication safety
+## 6. Duplication safety
 
 Plan duplication is routine — CTE inlining copies a body per reference, and the semi-join reducer
 deep-copies a neighbour as its build side. `LogicalOperator::Copy` serialises and re-binds, so:
@@ -127,7 +193,7 @@ deep-copies a neighbour as its build side. `LogicalOperator::Copy` serialises an
 
 ---
 
-## 5. Caching and accounting
+## 7. Caching and accounting
 
 Three layers, each with one job:
 
@@ -154,9 +220,9 @@ reliable.
 **TypeSafe System One backend (optional).** `ai_filter`, `ai_classify` and a bounded integer
 `ai_score` can be answered by a TypeSafe Noul / Choice / Score instead of a chat completion (a Score
 takes the rubric's levels, low to high, and answers the probability-weighted level, mapped back onto
-the function's scale). The function only annotates its request; the
-client decides the route per request, re-encodes the typed answer as the chat envelope, and keys the
-cache with a distinct marker, so parsers, the reorder node and the selectivity model are untouched.
+the function's scale). The function only annotates its request; the client decides the route per
+request, re-encodes the typed answer as the chat envelope, and keys the cache with a distinct
+marker, so parsers, the folded node and the selectivity model are untouched.
 
 **Accounting rule:** report chat calls only (embeddings are latency, not the metric under study),
 count true requests for any system being compared, and keep caches query-scoped so one query's
@@ -164,7 +230,21 @@ work can never subsidise the next.
 
 ---
 
-## 6. Measured state (2026-09-26)
+## 8. What is configurable
+
+Each plan stage has one setting: `ai_inline_ai_ctes` (the pre-optimize hook), `ai_semi_reduce` (1),
+`ai_pullup` and `ai_speculative` (2), `ai_reorder` (3, the fold and the run-time ordering it enables),
+`ai_factorize` (4), `ai_join_factorize` (5) and `ai_limit` (6). Their purpose is the parity tests and
+A/B runs; the defaults are the measured composition. Everything that was
+measured to be right — wave overlap, the wave floor, the ingest slice, the warm gate, the speculative
+gate, connection reuse — is a constant in the code, not a knob. The remaining settings name the
+endpoints, models, keys and concurrency of the LLM, embedding and TypeSafe backends. Two debug
+settings stay: `ai_debug_log` (diagnostics per subsystem) and `ai_debug_prompt_variant` (the
+cross-engine protocol above).
+
+---
+
+## 9. Measured state (2026-09-26)
 
 All numbers are from the recorded runs in `sembench/` (replayed answers, latency and cost; chat
 model `gpt-5.6-luna`; SWAN and LOTUS recorded back-to-back; the Jev column routes ai_filter, ai_classify
@@ -186,7 +266,7 @@ comparable. Per-query tables: `sembench/AGENTBENCH/results/agentbench_comparison
 
 ---
 
-## 7. What "clean" means here
+## 10. What "clean" means here
 
 A stage belongs in this pipeline only if it can state:
 

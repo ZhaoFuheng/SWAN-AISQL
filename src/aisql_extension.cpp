@@ -162,7 +162,7 @@ static void RegisterAISettings(DatabaseInstance &db) {
 	// Q22: 89 calls where 10 rows survive; Q26: 1,425 where 5 do). Inlining AI-bearing CTEs is
 	// what lets relational pushdown and the semi-join reduction reach the predicate -- it is
 	// boundary removal, not an optimisation in itself. Correct since the AIKeyBind idempotence
-	// fix (a duplicated AI subtree used to come back mis-bound). See DESIGN.md §3.
+	// fix (a duplicated AI subtree used to come back mis-bound). See DESIGN.md §5.
 	config.AddExtensionOption("ai_inline_ai_ctes",
 	                          "Inline CTEs containing AI functions so relational pruning and the "
 	                          "semantic pull-up can reach the predicate",

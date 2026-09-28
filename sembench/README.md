@@ -1,6 +1,6 @@
 # SemBench / agent_bench harnesses
 
-Recorded numbers to cite live in the memory index and in DESIGN.md §5; this file is the operating
+Recorded numbers to cite live in the memory index and in DESIGN.md §9; this file is the operating
 protocol. Rules, in order of how often they were broken:
 
 1. **Never rebuild the engine while a run is in flight** -- each query spawns a fresh CLI, so a
