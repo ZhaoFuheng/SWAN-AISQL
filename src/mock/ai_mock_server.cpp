@@ -204,6 +204,10 @@ string GenFromSchema(yyjson_val *schema, const string &seed) {
 
 struct MockServerState {
 	std::unique_ptr<duckdb_httplib::Server> server;
+	//! The listener thread. Joined in AIMockStop BEFORE the server is destroyed: is_running() turns false
+	//! while listen_after_bind() is still tearing down its task queue, so destroying the server on that
+	//! signal alone freed it under the listener (a silent crash in the next test file on Windows).
+	std::thread listener;
 	int port = 0;
 	// endpoints to restore on stop
 	string saved_base_url;
@@ -471,7 +475,7 @@ int AIMockStart() {
 	auto *srv = server.get();
 	Mock().server = std::move(server);
 	Mock().port = port;
-	std::thread([srv]() { srv->listen_after_bind(); }).detach();
+	Mock().listener = std::thread([srv]() { srv->listen_after_bind(); });
 	while (!srv->is_running()) {
 		std::this_thread::yield();
 	}
@@ -494,8 +498,8 @@ bool AIMockStop() {
 		return false;
 	}
 	Mock().server->stop();
-	while (Mock().server->is_running()) {
-		std::this_thread::yield();
+	if (Mock().listener.joinable()) {
+		Mock().listener.join(); // listen_after_bind() has returned: the task queue is drained and destroyed
 	}
 	Mock().server.reset();
 	Mock().port = 0;

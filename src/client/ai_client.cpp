@@ -157,13 +157,6 @@ static AIConfig &ConfigInstance() {
 	return config;
 }
 
-static std::atomic<bool> &EmbedImagesUnsupportedLatch();
-
-void AIConfig::ResetToDefaults() {
-	ConfigInstance() = BuildDefaultConfig();
-	EmbedImagesUnsupportedLatch().store(false);
-}
-
 const AIConfig &AIConfig::Get() {
 	return ConfigInstance();
 }
@@ -2004,6 +1997,37 @@ uint64_t AIHistoryReset() {
 	const uint64_t cleared = History().size();
 	History().clear();
 	return cleared;
+}
+
+// Every process-wide piece of client state the mock resets between test files (see AIConfig::ResetToDefaults
+// in ai_client.hpp). Defined last so every function-local-static accessor above is visible.
+void AIConfig::ResetToDefaults() {
+	ConfigInstance() = BuildDefaultConfig();
+	EmbedImagesUnsupportedLatch().store(false);
+	TurboState().store(-1);
+	{
+		std::lock_guard<std::mutex> lock(TokratioMutex());
+		TokratioEma() = 4.0;
+		TokratioSamples() = 0;
+	}
+	{
+		std::lock_guard<std::mutex> lock(LatMutex());
+		LatRing().clear();
+		LatPos() = 0;
+	}
+	{
+		std::lock_guard<std::mutex> lock(PrefixMutex());
+		PrefixStates().clear(); // a prefix primed by an earlier file must start COLD again
+	}
+	{
+		std::lock_guard<std::mutex> lock(TrainingMutex());
+		Training().clear();
+	}
+	{
+		std::lock_guard<std::mutex> lock(HistoryMutex());
+		History().clear();
+		HistoryEnabled().store(false);
+	}
 }
 
 } // namespace duckdb
