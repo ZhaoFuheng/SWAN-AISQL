@@ -306,8 +306,10 @@ struct GraphStreamPool {
 	bool stop = false;
 	vector<std::thread> threads;
 	string query_text;
+	optional_ptr<ClientContext> context;
 
-	void Start(idx_t n, string qt) {
+	void Start(ClientContext &ctx, idx_t n, string qt) {
+		context = &ctx;
 		query_text = std::move(qt);
 		for (idx_t w = 0; w < n; w++) {
 			threads.emplace_back([this]() {
@@ -324,8 +326,8 @@ struct GraphStreamPool {
 					}
 					bool valid = false;
 					const bool value =
-					    AIFactorEvalUnit(task.sub_node->Cast<BoundFunctionExpression>(), task.prompts, query_text,
-					                     valid, task.prefixes.empty() ? nullptr : &task.prefixes,
+					    AIFactorEvalUnit(*context, task.sub_node->Cast<BoundFunctionExpression>(), task.prompts,
+					                     query_text, valid, task.prefixes.empty() ? nullptr : &task.prefixes,
 					                     task.expected_reuse) &&
 					    valid;
 					{
@@ -831,7 +833,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 	// bake per unit through per-domain executors (vectorized expression evaluation over a
 	// one-row chunk); identical prompt vectors share one call via the single-flight table.
 	GraphStreamPool pool;
-	pool.Start(batch_cap, query_text);
+	pool.Start(context, batch_cap, query_text);
 	vector<unique_ptr<ExpressionExecutor>> side_exec(k1), edge_exec(ne);
 	vector<unique_ptr<DataChunk>> side_row(k1), edge_row(ne);
 	std::unordered_map<string, vector<GraphStreamPool::Done>> parked; // key -> units awaiting the winner

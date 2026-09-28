@@ -12,7 +12,12 @@
 #include "duckdb/planner/expression/bound_case_expression.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "duckdb/planner/expression/bound_operator_expression.hpp"
+#include "duckdb/planner/expression/bound_reference_expression.hpp"
 #include "duckdb/planner/expression_iterator.hpp"
+#include "duckdb/common/serializer/binary_deserializer.hpp"
+#include "duckdb/common/serializer/binary_serializer.hpp"
+#include "duckdb/common/serializer/memory_stream.hpp"
+#include "duckdb/common/types/blob.hpp"
 
 #include <cmath>
 
@@ -378,6 +383,116 @@ static bool AIDetectSameCallEqualities(const Expression &expr, const Expression 
 	return true;
 }
 
+//===----------------------------------------------------------------------===//
+// Wrapped leaves: any boolean expression whose only row-varying input is one ai_* call
+//===----------------------------------------------------------------------===//
+
+// Meta kind char of an AI call (F for ai_filter, else the comparable kind), or 0 for anything else.
+static char AILeafCallKind(const Expression &e) {
+	return AIIsFilterLeaf(e) ? 'F' : AIComparableKind(e);
+}
+
+// Collect the AI calls in `expr` without descending into them (a call's prompt is opaque here).
+static void AICollectAICalls(const Expression &expr, vector<const Expression *> &out) {
+	if (AILeafCallKind(expr)) {
+		out.push_back(&expr);
+		return;
+	}
+	ExpressionIterator::EnumerateChildren(expr, [&](const Expression &child) { AICollectAICalls(child, out); });
+}
+
+// Everything around the call must be row-constant and cheap: constants, non-volatile functions (comparisons
+// and casts are functions), operators, conjunctions and CASE. A column reference, subquery, parameter,
+// aggregate, window or lambda disqualifies the expression -- its value is not in the leaf's argument layout.
+static bool AIWrapperIsCheap(const Expression &expr) {
+	if (AILeafCallKind(expr)) {
+		return true;
+	}
+	switch (expr.GetExpressionClass()) {
+	case ExpressionClass::BOUND_CONSTANT:
+	case ExpressionClass::BOUND_OPERATOR:
+	case ExpressionClass::BOUND_CONJUNCTION:
+	case ExpressionClass::BOUND_CASE:
+		break;
+	case ExpressionClass::BOUND_FUNCTION:
+		if (expr.Cast<BoundFunctionExpression>().Function().GetStability() == FunctionStability::VOLATILE) {
+			return false;
+		}
+		break;
+	default:
+		return false;
+	}
+	bool cheap = true;
+	ExpressionIterator::EnumerateChildren(expr, [&](const Expression &child) {
+		if (cheap && !AIWrapperIsCheap(child)) {
+			cheap = false;
+		}
+	});
+	return cheap;
+}
+
+// Replace every occurrence of `call` by a reference to column 0 of the call's type (the answer).
+static void AIReplaceAICall(unique_ptr<Expression> &expr, const Expression &call) {
+	if (Expression::Equals(*expr, call)) {
+		expr = make_uniq<BoundReferenceExpression>(Identifier("result"), call.GetReturnType(), 0);
+		return;
+	}
+	ExpressionIterator::EnumerateChildren(*expr, [&](unique_ptr<Expression> &child) { AIReplaceAICall(child, call); });
+}
+
+// `expr` is a wrapped leaf when it is boolean, every AI call inside it is the SAME call, and the rest is
+// cheap. One call asked once, then the wrapper decides the leaf -- `lower(ai_complete(x)) IN ('yes','true')`
+// desugars to an OR of two comparisons and would otherwise be two leaves (or none). A boolean tree over
+// ai_filter alone stays a tree of plain leaves, so existing plan shapes are unchanged.
+static bool AIDetectWrappedLeaf(const Expression &expr, AIMixedLeaf &out) {
+	if (expr.GetReturnType().id() != LogicalTypeId::BOOLEAN) {
+		return false;
+	}
+	vector<const Expression *> calls;
+	AICollectAICalls(expr, calls);
+	if (calls.empty() || calls[0] == &expr) {
+		return false;
+	}
+	for (auto *call : calls) {
+		if (!Expression::Equals(*calls[0], *call)) {
+			return false;
+		}
+	}
+	const char kind = AILeafCallKind(*calls[0]);
+	const auto type = expr.GetExpressionType();
+	const bool tree_node = type == ExpressionType::CONJUNCTION_AND || type == ExpressionType::CONJUNCTION_OR ||
+	                       type == ExpressionType::OPERATOR_NOT;
+	if (kind == 'F' && tree_node) {
+		return false;
+	}
+	if (!AIWrapperIsCheap(expr)) {
+		return false;
+	}
+	auto wrapper = expr.Copy();
+	AIReplaceAICall(wrapper, *calls[0]);
+	out = AIMixedLeaf {kind, 'w', calls[0], nullptr, {}};
+	out.wrapper = std::move(wrapper);
+	return true;
+}
+
+string AISerializeExpression(const Expression &expr) {
+	MemoryStream stream;
+	BinarySerializer::Serialize(expr, stream);
+	const string bytes(const_char_ptr_cast(stream.GetData()), stream.GetPosition());
+	return Blob::ToBase64(string_t(bytes));
+}
+
+unique_ptr<Expression> AIDeserializeExpression(ClientContext &context, const string &base64) {
+	string bytes = Blob::FromBase64(string_t(base64));
+	MemoryStream stream(data_ptr_cast(&bytes[0]), bytes.size());
+	BinaryDeserializer deserializer(stream);
+	deserializer.Set<ClientContext &>(context);
+	deserializer.Begin();
+	auto expr = Expression::Deserialize(deserializer);
+	deserializer.End();
+	return expr;
+}
+
 bool AIDetectMixedLeaf(const Expression &expr, AIMixedLeaf &out) {
 	if (AIIsFilterLeaf(expr)) {
 		out = AIMixedLeaf {'F', 0, &expr, nullptr, {}};
@@ -411,7 +526,7 @@ bool AIDetectMixedLeaf(const Expression &expr, AIMixedLeaf &out) {
 				return true;
 			}
 		}
-		return false; // a comparison, but not a bakeable AI one
+		return AIDetectWrappedLeaf(expr, out); // a comparison around the call, e.g. lower(ai_complete(x)) = 'yes'
 	}
 	// Set membership: `ai_classify(x) IN (...)` desugars to OR of same-call equalities.
 	{
@@ -443,7 +558,7 @@ bool AIDetectMixedLeaf(const Expression &expr, AIMixedLeaf &out) {
 			}
 		}
 	}
-	return false;
+	return AIDetectWrappedLeaf(expr, out);
 }
 
 bool AIIsMixedBoolean(const Expression &expr) {
@@ -484,7 +599,7 @@ idx_t AICountMixedLeaves(const Expression &expr) {
 bool AIAnyNonFilterLeaf(const Expression &expr) {
 	AIMixedLeaf leaf;
 	if (AIDetectMixedLeaf(expr, leaf)) {
-		return leaf.kind != 'F';
+		return leaf.kind != 'F' || leaf.op == 'w'; // a wrapped ai_filter is not a plain leaf either
 	}
 	bool any = false;
 	ExpressionIterator::EnumerateChildren(expr, [&](const Expression &child) {
@@ -504,10 +619,13 @@ static bool SameMixedLeaf(const AIMixedLeaf &a, const AIMixedLeaf &b) {
 	if (!a.ai_call || !b.ai_call || !a.ai_call->Equals(*b.ai_call)) {
 		return false;
 	}
-	if ((a.cst == nullptr) != (b.cst == nullptr)) {
+	if ((a.cst == nullptr) != (b.cst == nullptr) || (a.wrapper == nullptr) != (b.wrapper == nullptr)) {
 		return false;
 	}
 	if (a.cst && !a.cst->Equals(*b.cst)) {
+		return false;
+	}
+	if (a.wrapper && !a.wrapper->Equals(*b.wrapper)) {
 		return false;
 	}
 	for (idx_t i = 0; i < a.cst_set.size(); i++) {
@@ -569,13 +687,18 @@ bool AIBuildMixedLeafArgs(ClientContext &context, const vector<AIMixedLeaf> &lea
 	for (idx_t j = 0; j < m; j++) {
 		auto &leaf = leaves[j];
 		auto &children = leaf.ai_call->Cast<BoundFunctionExpression>().GetChildren();
+		// Wrapped leaf: the value slot carries the serialized wrapper (base64: no ';', ':' or '@', so the
+		// token still splits like the others); the feature text names the wrapper over `result`.
+		const bool wrapped = leaf.op == 'w';
+		const string wrapper_text = wrapped ? leaf.wrapper->ToString() : string();
 		if (leaf.kind == 'F') {
-			// ai_filter(p): call prompt is p; feature = AISplitPrompt(p); meta = "F".
+			// ai_filter(p): call prompt is p; feature = AISplitPrompt(p) -- the plain question even when
+			// wrapped, since that text is also the typed backend's question; meta = "F".
 			call_prompts[j] = children[0]->Copy();
 			auto split = AISplitPrompt(context, *children[0]);
 			feat_pred[j] = std::move(split.first);
 			feat_input[j] = std::move(split.second);
-			metas[j] = "F";
+			metas[j] = wrapped ? "F:wrap:" + AISerializeExpression(*leaf.wrapper) : "F";
 			continue;
 		}
 		// key_start = count of DECLARED args (excludes AIKeyBind's hidden history keys). v1 handles 2-arg
@@ -590,7 +713,9 @@ bool AIBuildMixedLeafArgs(ClientContext &context, const vector<AIMixedLeaf> &lea
 		// IN ('i') / NOT IN ('I'): the value is the ','-joined set of members; else the single constant.
 		const bool is_set = (leaf.op == 'i' || leaf.op == 'I');
 		string val;
-		if (is_set) {
+		if (wrapped) {
+			val = AISerializeExpression(*leaf.wrapper);
+		} else if (is_set) {
 			for (idx_t k = 0; k < leaf.cst_set.size(); k++) {
 				Value v;
 				try {
@@ -612,7 +737,7 @@ bool AIBuildMixedLeafArgs(ClientContext &context, const vector<AIMixedLeaf> &lea
 			}
 			val = leaf.kind == 'S' ? cst_val.ToString() : (cst_val.IsNull() ? string() : StringValue::Get(cst_val));
 		}
-		metas[j] = string(1, leaf.kind) + ":" + AIOpName(leaf.op) + ":" + val;
+		metas[j] = string(1, leaf.kind) + ":" + (wrapped ? "wrap" : AIOpName(leaf.op)) + ":" + val;
 
 		auto input = children[0]->Copy();
 		if (leaf.kind == 'C') {
@@ -636,8 +761,10 @@ bool AIBuildMixedLeafArgs(ClientContext &context, const vector<AIMixedLeaf> &lea
 			    Value(string("\n\nRespond with exactly one of the listed categories, verbatim."))));
 			call_prompts[j] = BuildConcat(context, std::move(parts));
 			feat_pred[j] = make_uniq<BoundConstantExpression>(Value(
-			    is_set ? ("Is the classification " + string(AIOpPhrase(leaf.op)) + " " + val + "? Categories: " + cats)
-			           : ("Is the classification '" + val + "'? Categories: " + cats)));
+			    wrapped ? ("Does the classification satisfy " + wrapper_text + "? Categories: " + cats)
+			    : is_set
+			        ? ("Is the classification " + string(AIOpPhrase(leaf.op)) + " " + val + "? Categories: " + cats)
+			        : ("Is the classification '" + val + "'? Categories: " + cats)));
 			feat_input[j] = std::move(input);
 		} else if (leaf.kind == 'S') {
 			string crit;
@@ -684,15 +811,17 @@ bool AIBuildMixedLeafArgs(ClientContext &context, const vector<AIMixedLeaf> &lea
 				metas[j] +=
 				    "@" + AIFormatBound(lo, is_int) + "," + AIFormatBound(hi, is_int) + "," + (is_int ? "i" : "d");
 			}
-			feat_pred[j] =
-			    make_uniq<BoundConstantExpression>(Value(string("Is the score ") + AIOpPhrase(leaf.op) + " " + val +
-			                                             (crit.empty() ? string() : " for: " + crit) + "?"));
+			feat_pred[j] = make_uniq<BoundConstantExpression>(
+			    Value((wrapped ? "Does the score satisfy " + wrapper_text
+			                   : string("Is the score ") + AIOpPhrase(leaf.op) + " " + val) +
+			          (crit.empty() ? string() : " for: " + crit) + "?"));
 			feat_input[j] = std::move(input);
 		} else { // 'M' ai_complete: raw completion compared to a literal (or set)
 			call_prompts[j] = input->Copy();
 			feat_pred[j] = make_uniq<BoundConstantExpression>(
-			    Value(is_set ? ("Is the completion " + string(AIOpPhrase(leaf.op)) + " " + val + "?")
-			                 : ("Is the completion '" + val + "'?")));
+			    Value(wrapped  ? ("Does the completion satisfy " + wrapper_text + "?")
+			          : is_set ? ("Is the completion " + string(AIOpPhrase(leaf.op)) + " " + val + "?")
+			                   : ("Is the completion '" + val + "'?")));
 			feat_input[j] = std::move(input);
 		}
 		if (!call_prompts[j]) {
@@ -707,6 +836,36 @@ bool AIBuildMixedLeafArgs(ClientContext &context, const vector<AIMixedLeaf> &lea
 		meta_str += metas[j];
 	}
 	return true;
+}
+
+unique_ptr<Expression> AIBuildMixedNode(ClientContext &context, const AIFilterTreeNode &tree,
+                                        const vector<AIMixedLeaf> &leaves, bool speculative) {
+	vector<unique_ptr<Expression>> call_prompts, feat_pred, feat_input;
+	string meta_str;
+	if (!AIBuildMixedLeafArgs(context, leaves, call_prompts, feat_pred, feat_input, meta_str)) {
+		return nullptr;
+	}
+	const idx_t m = leaves.size();
+	vector<unique_ptr<Expression>> args;
+	args.reserve(2 + 3 * m);
+	args.push_back(make_uniq<BoundConstantExpression>(Value(AIFilterTreeSerialize(tree))));
+	for (idx_t j = 0; j < m; j++) {
+		args.push_back(std::move(call_prompts[j]));
+	}
+	for (idx_t j = 0; j < m; j++) {
+		args.push_back(std::move(feat_pred[j]));
+	}
+	for (idx_t j = 0; j < m; j++) {
+		args.push_back(std::move(feat_input[j]));
+	}
+	args.push_back(make_uniq<BoundConstantExpression>(Value(meta_str)));
+	auto &catalog = Catalog::GetSystemCatalog(context);
+	auto &entry = catalog.GetEntry<ScalarFunctionCatalogEntry>(
+	    context, QualifiedName(catalog.GetName(), Identifier::DefaultSchema(),
+	                           speculative ? "speculative_ai_function_with_embed" : "ai_function_with_embed"));
+	FunctionBinder function_binder(context);
+	ErrorData error;
+	return function_binder.BindScalarFunction(entry, std::move(args), error);
 }
 
 } // namespace duckdb

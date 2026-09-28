@@ -1,0 +1,345 @@
+# name: test/sql/optimizer/wrapped_ai_leaf.test
+# description: Any boolean expression whose only row-varying input is ONE ai_* call is an AI leaf.
+# group: [optimizer]
+
+#              `lower(ai_complete(x)) IN ('yes','true')`, `ai_score(x) * 10 > 5`, `NOT (length(ai_complete(x)) = 2)`,
+#              a CASE over the same call twice, `ai_filter(p) = false`: each used to be invisible to the
+#              reorder, the pull-up and the factor graph (the call inside was answered, the wrapper stayed a
+#              plain filter). Now the leaf carries the wrapper and applies it to the answer, so every stage
+#              sees it: the DP reorder folds it, the pull-up lifts it (with its speculative pre-filter), the
+#              region hoists a lone one as a single-leaf node, and a pair predicate reaches the factor graph.
+#              Every block is a parity assertion against the stage disabled plus a call-count assertion that
+#              fails with the feature reverted (400 = both predicates on all 200 rows).
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SELECT ai_selectivity_reset();
+
+statement ok
+CREATE TABLE docs AS SELECT range AS id, 'doc number '||range::VARCHAR AS txt FROM range(200);
+
+statement ok
+CREATE TABLE qs AS SELECT range AS qid, 'q '||range::VARCHAR AS q FROM range(4);
+
+# --- set membership around ai_complete + ai_filter: one folded node with a wrapped leaf --------------
+query II
+EXPLAIN SELECT count(*) FROM docs WHERE lower(ai_complete('Return a single yes or no. [p=10] relevant? '||txt)) IN ('yes','true') AND ai_filter('[p=90] long? '||txt);
+----
+physical_plan	<REGEX>:(?s).*ai_function_with_embed\('A\(L0,L1\)'.*Does the completion satisfy.*lower\(result\).*
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM docs WHERE lower(ai_complete('Return a single yes or no. [p=10] relevant? '||txt)) IN ('yes','true') AND ai_filter('[p=90] long? '||txt);
+----
+13
+
+# the selective (10%) completion leaf short-circuits the filter leaf on rows it fails
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT < 400 FROM ai_usage();
+----
+true
+
+# parity, reorder off: same rows, both predicates on every row
+statement ok
+SET ai_reorder = false;
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM docs WHERE lower(ai_complete('Return a single yes or no. [p=10] relevant? '||txt)) IN ('yes','true') AND ai_filter('[p=90] long? '||txt);
+----
+13
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+400
+
+statement ok
+RESET ai_reorder;
+
+# the same node on the scalar path (no region): identical rows
+statement ok
+SET ai_factorize = 'off';
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM docs WHERE lower(ai_complete('Return a single yes or no. [p=10] relevant? '||txt)) IN ('yes','true') AND ai_filter('[p=90] long? '||txt);
+----
+13
+
+statement ok
+RESET ai_factorize;
+
+# --- arithmetic around ai_score --------------------------------------------------------------------
+query II
+EXPLAIN SELECT count(*) FROM docs WHERE ai_score(txt, 'quality') * 10 > 5 AND ai_filter('[p=90] long? '||txt);
+----
+physical_plan	<REGEX>:(?s).*ai_function_with_embed\('A\(L0,L1\)'.*Does the score satisfy.*
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM docs WHERE ai_score(txt, 'quality') * 10 > 5 AND ai_filter('[p=90] long? '||txt);
+----
+175
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT < 400 FROM ai_usage();
+----
+true
+
+statement ok
+SET ai_reorder = false;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM docs WHERE ai_score(txt, 'quality') * 10 > 5 AND ai_filter('[p=90] long? '||txt);
+----
+175
+
+statement ok
+RESET ai_reorder;
+
+# --- NOT over a function of the answer --------------------------------------------------------------
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM docs WHERE NOT (length(ai_complete('Return a single yes or no. [p=30] short? '||txt)) = 2) AND ai_filter('[p=90] long? '||txt);
+----
+51
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT < 400 FROM ai_usage();
+----
+true
+
+statement ok
+SET ai_reorder = false;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM docs WHERE NOT (length(ai_complete('Return a single yes or no. [p=30] short? '||txt)) = 2) AND ai_filter('[p=90] long? '||txt);
+----
+51
+
+statement ok
+RESET ai_reorder;
+
+# --- CASE over the SAME call twice (try_cast + comparison): still one leaf, one call per input --------
+query II
+EXPLAIN SELECT count(*) FROM docs WHERE CASE WHEN try_cast(ai_complete('Return a single yes or no. [p=50] n? '||txt) AS INTEGER) IS NULL THEN lower(ai_complete('Return a single yes or no. [p=50] n? '||txt)) = 'yes' ELSE false END AND ai_filter('[p=90] long? '||txt);
+----
+physical_plan	<REGEX>:(?s).*ai_function_with_embed\('A\(L0,L1\)'.*
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM docs WHERE CASE WHEN try_cast(ai_complete('Return a single yes or no. [p=50] n? '||txt) AS INTEGER) IS NULL THEN lower(ai_complete('Return a single yes or no. [p=50] n? '||txt)) = 'yes' ELSE false END AND ai_filter('[p=90] long? '||txt);
+----
+93
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT < 400 FROM ai_usage();
+----
+true
+
+statement ok
+SET ai_reorder = false;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM docs WHERE CASE WHEN try_cast(ai_complete('Return a single yes or no. [p=50] n? '||txt) AS INTEGER) IS NULL THEN lower(ai_complete('Return a single yes or no. [p=50] n? '||txt)) = 'yes' ELSE false END AND ai_filter('[p=90] long? '||txt);
+----
+93
+
+statement ok
+RESET ai_reorder;
+
+# --- a comparison around ai_filter itself ------------------------------------------------------------
+query II
+EXPLAIN SELECT count(*) FROM docs WHERE (ai_filter('[p=40] a? '||txt) = false) AND ai_filter('[p=90] long? '||txt);
+----
+physical_plan	<REGEX>:(?s).*ai_function_with_embed\('A\(L0,L1\)'.*
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM docs WHERE (ai_filter('[p=40] a? '||txt) = false) AND ai_filter('[p=90] long? '||txt);
+----
+114
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT < 400 FROM ai_usage();
+----
+true
+
+statement ok
+SET ai_reorder = false;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM docs WHERE (ai_filter('[p=40] a? '||txt) = false) AND ai_filter('[p=90] long? '||txt);
+----
+114
+
+statement ok
+RESET ai_reorder;
+
+# --- pull-up: a lone wrapped predicate under a join is lifted (speculative pre-filter at the leaf) and
+# --- hoisted as a single-leaf node region --------------------------------------------------------------
+statement ok
+CREATE TABLE picks AS SELECT range*20 AS id FROM range(10);
+
+query II
+EXPLAIN SELECT count(*) FROM docs JOIN picks USING (id) WHERE lower(ai_complete('Return a single yes or no. [p=40] relevant? '||txt)) IN ('yes','true');
+----
+physical_plan	<REGEX>:(?s).*ai_function_with_embed\('L0'.*speculative_ai_function_with_embed\('L0'.*Does the completion satisfy.*
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM docs JOIN picks USING (id) WHERE lower(ai_complete('Return a single yes or no. [p=40] relevant? '||txt)) IN ('yes','true');
+----
+4
+
+# only the 10 join survivors are asked
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+10
+
+statement ok
+SET ai_pullup = false;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM docs JOIN picks USING (id) WHERE lower(ai_complete('Return a single yes or no. [p=40] relevant? '||txt)) IN ('yes','true');
+----
+4
+
+statement ok
+RESET ai_pullup;
+
+# --- a wrapped PAIR predicate over a cross product reaches the factor graph ---------------------------
+statement ok
+CREATE TABLE d20 AS SELECT * FROM docs WHERE id < 20;
+
+query II
+EXPLAIN SELECT count(*) FROM d20 d, qs q WHERE lower(ai_complete('Return a single yes or no. [p=35] does '||d.txt||' answer '||q.q||'?')) IN ('yes','true');
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM d20 d, qs q WHERE lower(ai_complete('Return a single yes or no. [p=35] does '||d.txt||' answer '||q.q||'?')) IN ('yes','true');
+----
+32
+
+# one call per distinct pair
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+80
+
+statement ok
+SET ai_join_factorize = 'off';
+
+statement ok
+SET ai_pullup = false;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM d20 d, qs q WHERE lower(ai_complete('Return a single yes or no. [p=35] does '||d.txt||' answer '||q.q||'?')) IN ('yes','true');
+----
+32
+
+statement ok
+RESET ai_join_factorize;
+
+statement ok
+RESET ai_pullup;
+
+# --- a wrapper that raises on the answer (strict cast of 'yes'/'no') fails the query exactly as the
+# --- scalar does, instead of dropping rows or killing a worker thread ----------------------------------
+statement error
+SELECT count(*) FROM docs WHERE (ai_complete('Return a single yes or no. [p=50] n? '||txt))::INTEGER > 3 AND ai_filter('[p=90] long? '||txt);
+----
+<REGEX>:.*Could not convert string.*
+
+statement ok
+SET ai_reorder = false;
+
+statement error
+SELECT count(*) FROM docs WHERE (ai_complete('Return a single yes or no. [p=50] n? '||txt))::INTEGER > 3 AND ai_filter('[p=90] long? '||txt);
+----
+<REGEX>:.*Could not convert string.*
+
+statement ok
+RESET ai_reorder;
+
+# --- a column reference next to the call is NOT a leaf: the predicate stays a plain filter ------------
+query II
+EXPLAIN SELECT count(*) FROM docs WHERE lower(ai_complete('Return a single yes or no. [p=50] n? '||txt)) = txt AND ai_filter('[p=90] long? '||txt);
+----
+physical_plan	<!REGEX>:(?s).*ai_function_with_embed.*
+
+query I
+SELECT count(*) FROM docs WHERE lower(ai_complete('Return a single yes or no. [p=50] n? '||txt)) = txt AND ai_filter('[p=90] long? '||txt);
+----
+0
+
+statement ok
+CALL ai_mock_stop();

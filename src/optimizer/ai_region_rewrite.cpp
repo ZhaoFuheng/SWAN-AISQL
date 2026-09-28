@@ -10,6 +10,8 @@
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "duckdb/planner/expression_iterator.hpp"
+#include "filter_tree_order.hpp"
+#include "optimizer/ai_filter_tree_build.hpp"
 #include "duckdb/planner/operator/logical_aggregate.hpp"
 #include "duckdb/planner/bound_result_modifier.hpp" // BoundLimitNode / LimitNodeType
 #include "plan/logical_ai_region.hpp"
@@ -104,18 +106,36 @@ static bool SubtreeHasDynamicFilterScan(const LogicalOperator &op) {
 
 bool AIRegionRewrite::HoistAICalls(unique_ptr<Expression> &expr, unique_ptr<LogicalOperator> &child_slot,
                                    int64_t limit_k, bool lazy_guard) {
+	unique_ptr<Expression> unit; // what the region evaluates once per distinct input: `expr` itself, or a node
+	bool hoist_expr = false;
+	bool is_node = false;
 	if (IsDedupableAICall(*expr)) {
 		// Under a LIMIT, only an ai_function_with_embed NODE can early-stop while deduping (the count-weighted
 		// stop in AIDedupEvaluate/AIFilterEvaluateBatch). A scalar AI call can't, and a blocking dedup would
 		// defeat the limit's streaming early-stop -- so leave the scalar in place to stream to the limit.
 		const auto &name = expr->Cast<BoundFunctionExpression>().Function().GetName();
-		const bool is_node = name == "ai_function_with_embed" || name == "speculative_ai_function_with_embed";
+		is_node = name == "ai_function_with_embed" || name == "speculative_ai_function_with_embed";
 		if (limit_k >= 0 && !is_node) {
 			return false;
 		}
+		hoist_expr = true;
+	} else if (!lazy_guard) {
+		// On the join path a wrapped predicate (`lower(ai_complete(x)) IN (...)`) is hoisted whole, as a
+		// single-leaf node: the region answers the call once per distinct input and applies the wrapper, and
+		// the join cluster below sees a node the factor graph can take. Not bakeable -> fall through and hoist
+		// the call inside it. (On the scan path the call alone is hoisted, as for a bare scalar call: a lone
+		// predicate has nothing to order, so the node's per-row features would be pure overhead.)
+		AIMixedLeaf leaf;
+		if (AIDetectMixedLeaf(*expr, leaf) && leaf.op == 'w') {
+			vector<AIMixedLeaf> leaves {leaf};
+			unit = AIBuildMixedNode(optimizer.context, *AIFilterTreeNode::Leaf(0), leaves);
+			is_node = unit != nullptr;
+		}
+	}
+	if (hoist_expr || unit) {
 		const auto return_type = expr->GetReturnType();
 		const auto dedup_index = optimizer.binder.GenerateTableIndex();
-		auto dedup = make_uniq<LogicalAIRegion>(dedup_index, std::move(expr));
+		auto dedup = make_uniq<LogicalAIRegion>(dedup_index, hoist_expr ? std::move(expr) : std::move(unit));
 		dedup->limit = is_node ? limit_k : -1; // count-weighted early-stop only on the node path
 		dedup->children.push_back(std::move(child_slot));
 		dedup->ResolveOperatorTypes();

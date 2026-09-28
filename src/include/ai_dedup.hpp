@@ -108,9 +108,9 @@ void AIFactorPromptOperands(const Expression &call_prompt, vector<const Expressi
 //! leaf prompts: leaves run in order with conjunction short-circuit; each leaf call goes through
 //! the client (query cache, single-flight, hedging, the global concurrency gate). `valid` false
 //! on a failed call. Backs the streaming graph executor's worker tasks.
-bool AIFactorEvalUnit(const BoundFunctionExpression &sub_node, const vector<string> &leaf_prompts,
-                      const string &query_text, bool &valid, const vector<string> *leaf_prefixes = nullptr,
-                      idx_t expected_reuse = 0);
+bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub_node,
+                      const vector<string> &leaf_prompts, const string &query_text, bool &valid,
+                      const vector<string> *leaf_prefixes = nullptr, idx_t expected_reuse = 0);
 
 //! Clone a conjunctive folded node restricted to `leaf_ids`, remapping every column reference
 //! through `index_map` (combined layout -> evaluation-chunk layout). The clone is a plain

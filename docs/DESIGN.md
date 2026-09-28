@@ -62,6 +62,12 @@ predicates run; 4 and 5 decide *how* they are evaluated; 6 decides *when to stop
 adjacent pair loses information the later stage needs — reordering before reduction, for
 instance, would cost-model against un-pruned cardinalities.
 
+**A leaf is any boolean expression with one AI call in it.** `ai_filter(p)`, `ai_classify(x) = 'a'`,
+`ai_score(x) * 10 > 5`, `lower(ai_complete(x)) IN ('yes', 'true')`, a `CASE` over the same call
+twice: each is one leaf, asked once, whose wrapper is applied to the answer. Every stage sees the
+same leaf, so a predicate spelled around the call is lifted, reordered, factorised and pushed
+exactly like a bare one. The only inputs a leaf may have besides its call are constants.
+
 **The folded node gets a filter of its own.** When a WHERE clause mixes AI predicates with
 relational ones, the folded AI node is installed in its own filter *above* the relational
 remainder. DuckDB evaluates a conjunction through an adaptive filter that permutes conjunct order,
