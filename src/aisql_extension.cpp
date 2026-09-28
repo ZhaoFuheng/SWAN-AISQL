@@ -283,6 +283,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// already treats as a transport error and retries on a fresh connection.
 	signal(SIGPIPE, SIG_IGN);
 #endif
+	AIInstallCrashReporter();
 	RegisterAISettings(loader.GetDatabaseInstance());
 	// Stage 1 smoke function; replaced by the full AI function registration as porting proceeds.
 	auto version_fn = ScalarFunction("aisql_version", {}, LogicalType::VARCHAR,

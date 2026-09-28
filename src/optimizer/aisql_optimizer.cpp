@@ -17,6 +17,7 @@
 #include "optimizer/ai_cte_split.hpp"
 #include "optimizer/ai_cte_demand.hpp"
 
+#include "ai_client.hpp"
 #include "ai_settings.hpp"
 #include "duckdb/main/config.hpp"
 #include "duckdb/optimizer/optimizer_extension.hpp"
@@ -112,6 +113,7 @@ static bool MarkAICTEsInline(LogicalOperator &op) {
 }
 
 static void AisqlPreOptimizePlan(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
+	AINoteQuery(input.context.GetCurrentQuery());
 	if (!plan || !PlanHasAIFunction(*plan)) {
 		return;
 	}

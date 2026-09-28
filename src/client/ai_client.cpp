@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <csignal>
+#include <cstring>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -2028,6 +2030,46 @@ void AIConfig::ResetToDefaults() {
 		History().clear();
 		HistoryEnabled().store(false);
 	}
+}
+
+//===--------------------------------------------------------------------===//
+// Crash reporter: the last query noted by the optimizer, printed on a fatal signal
+//===--------------------------------------------------------------------===//
+static std::mutex &LastQueryMutex() {
+	static std::mutex value;
+	return value;
+}
+static constexpr size_t LAST_QUERY_BYTES = 512;
+static char *LastQueryBuffer() {
+	static char value[LAST_QUERY_BYTES] = {0}; // fixed storage: the handler must not allocate
+	return value;
+}
+
+void AINoteQuery(const string &query) {
+	std::lock_guard<std::mutex> lock(LastQueryMutex());
+	char *buf = LastQueryBuffer();
+	const size_t n = MinValue<size_t>(query.size(), LAST_QUERY_BYTES - 1);
+	std::memcpy(buf, query.data(), n);
+	buf[n] = '\0';
+}
+
+static void AICrashHandler(int sig) {
+	const char *what = sig == SIGSEGV ? "SIGSEGV" : sig == SIGABRT ? "SIGABRT" : sig == SIGFPE ? "SIGFPE" : "SIGILL";
+	fputs("[aisql] fatal signal ", stderr);
+	fputs(what, stderr);
+	fputs("; last query planned: ", stderr);
+	fputs(LastQueryBuffer(), stderr);
+	fputs("\n", stderr);
+	fflush(stderr);
+	signal(sig, SIG_DFL);
+	raise(sig);
+}
+
+void AIInstallCrashReporter() {
+	signal(SIGSEGV, AICrashHandler);
+	signal(SIGABRT, AICrashHandler);
+	signal(SIGFPE, AICrashHandler);
+	signal(SIGILL, AICrashHandler);
 }
 
 } // namespace duckdb

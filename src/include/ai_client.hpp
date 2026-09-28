@@ -286,6 +286,11 @@ struct AIEmbedResult {
 //! turbo) and no history. De-duplicated + query-scoped cached; output aligned 1:1 with `texts`.
 vector<AIEmbedResult> AIEmbedBatch(const vector<string> &texts, const string &query_text = "");
 
+//! Remember the query being planned (a bounded copy) and install fatal-signal handlers that print it:
+//! a crash in a CI test run is otherwise silent on Windows. The handler re-raises the signal.
+void AINoteQuery(const string &query);
+void AIInstallCrashReporter();
+
 //! Whether image leaves are embedded: ai_embed_images is on AND the embeddings server has not refused an
 //! image item (a text-only model answers image items with an error entry; the client latches that once
 //! per process so no later request pays for images it cannot get).
