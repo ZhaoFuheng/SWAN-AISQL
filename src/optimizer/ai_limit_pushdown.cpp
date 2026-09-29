@@ -58,7 +58,6 @@ static void StandDownSpeculativeBelow(LogicalOperator &op) {
 
 bool AILimitPushdown::ApplyLimit(LogicalOperator &filter_op, int64_t k) {
 	auto &filter = filter_op.Cast<LogicalFilter>();
-	auto &context = optimizer.context;
 
 	// The node's early-stop counts rows that pass the node's whole tree, so it equals the filter result
 	// ONLY when the node decides the entire filter. If any other predicate sits above the node it can cut

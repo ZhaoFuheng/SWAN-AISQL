@@ -35,6 +35,7 @@ set(EXTENSION_SOURCES
     src/optimizer/ai_region_rewrite.cpp
     src/rep/ai_sql_map_chunk.cpp
     src/exec/physical_ai_region.cpp
+    src/exec/ai_async_dispatcher.cpp
     src/exec/ai_leaf_region.cpp
     src/optimizer/semi_join_reducer.cpp
     src/optimizer/semantic_filter_pullup.cpp

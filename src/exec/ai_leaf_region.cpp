@@ -9,19 +9,21 @@
 
 #include <algorithm>
 #include <chrono>
-#include <thread>
 
 namespace duckdb {
 
 AILeafRegionState::AILeafRegionState(ClientContext &context, const BoundFunctionExpression &eval_call,
                                      const vector<LogicalType> &child_types_p, int64_t limit)
     : context(context), call(eval_call), tree(AILeafTree(eval_call)), n(AILeafCount(eval_call)), limit(limit),
-      query_text(context.GetCurrentQuery()), child_types(child_types_p), leaves(n), landed(n, 0) {
+      query_text(context.GetCurrentQuery()), child_types(child_types_p), leaves(n), landed(n, 0),
+      evaluator(make_uniq<AILeafUnitEvaluator>(eval_call)) {
 	for (idx_t l = 0; l < n; l++) {
 		leaves[l].key_cols = AILeafKeyCols(eval_call, l);
 		leaves[l].stage.Initialize(Allocator::Get(context), child_types);
 	}
 }
+
+AILeafRegionState::~AILeafRegionState() = default;
 
 vector<idx_t> AILeafRegionState::DistinctPerLeaf() const {
 	vector<idx_t> out;
@@ -70,39 +72,23 @@ void AILeafRegionState::FlushStage(idx_t l) {
 	leaf.stage_reps.clear();
 }
 
-bool AILeafRegionState::Append(DataChunk &chunk, idx_t fire_floor, idx_t fire_overlap) {
+bool AILeafRegionState::Append(DataChunk &chunk, idx_t limit_floor) {
 	const idx_t count = chunk.size();
-	// Rows ingested per slice before the region embeds, decides and fires. Slicing lets the first wave
-	// launch after the first slice's features instead of the chunk's (500 CLIP image embeds are ~80 s of
-	// Sink time), and lets this query's own verdicts order the later rows: text regions too (agent_bench
+	// Rows ingested per slice before the region embeds, decides and dispatches. Slicing lets the first
+	// calls start after the first slice's features instead of the chunk's (500 CLIP image embeds are ~80 s
+	// of ingest time), and lets this query's own verdicts order the later rows: text regions too (agent_bench
 	// Q17 237 -> 156 calls for +4-7 s).
 	constexpr idx_t kSliceRows = 100;
-	constexpr idx_t kGateLabels = 20; // one trainer batch per leaf
 	for (idx_t begin = 0; begin < count;) {
 		const idx_t slice = MinValue<idx_t>(kSliceRows, count - begin);
-		if (begin > 0 && n >= 2 && fire_floor > 0) {
-			// Warm gate: the first slice was decided cold and fired; before deciding more rows, wait until
-			// every leaf has a batch of verdicts (the rows that survived the first leaf have visited the
-			// second) and the model has trained on them. Waits only while a wave is in flight -- verdicts
-			// are coming -- so it is bounded by the first waves, and it costs nothing when they landed
-			// before the next slice was embedded.
-			auto warm = [&]() {
-				if (AISelectivityTrainSteps() == 0) {
-					return false;
-				}
-				for (idx_t l = 0; l < n; l++) {
-					if (landed[l] < kGateLabels) {
-						return false;
-					}
-				}
-				return true;
-			};
+		if (begin > 0 && limit < 0 && dispatcher && !Warm()) {
+			// Warm gate: before deciding more rows, wait for the calls already out -- verdicts are coming, and the
+			// model trains on them -- so the next slice is ordered by a model that knows this query's pass
+			// rates. Nothing new is dispatched while waiting, so the wait is bounded by one round of calls, and
+			// it costs nothing when they landed before the next slice was embedded.
 			const auto t0 = std::chrono::steady_clock::now();
-			while (!warm() && !inflight.empty()) {
-				ReapLanded();
-				if (!warm() && !inflight.empty()) {
-					std::this_thread::sleep_for(std::chrono::milliseconds(20));
-				}
+			while (!Warm() && dispatcher->Outstanding() > 0) {
+				WaitAndReap();
 			}
 			t_warm_gate += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 		}
@@ -110,7 +96,7 @@ bool AILeafRegionState::Append(DataChunk &chunk, idx_t fire_floor, idx_t fire_ov
 			return true;
 		}
 		begin += slice;
-		if (fire_floor > 0 && begin < count && Fire(fire_floor, fire_overlap)) {
+		if (begin < count && Pump(limit_floor)) {
 			return true;
 		}
 	}
@@ -213,6 +199,12 @@ void AILeafRegionState::DecideRow(uint32_t row) {
 		const bool open = rep.state != 3 && rep.valid;
 		const double fanout = MaxValue<double>(1.0, double(row_result.size()) / double(leaves[l].reps.size()));
 		cost[l] = open ? rep.cost / fanout : 1e30;
+		// A rep already pending or in flight will be answered anyway: waiting on it costs this row no call.
+		// Verdicts land one by one, so a row is often re-decided while its other leaf is still in flight;
+		// without this it could open a third leaf that the in-flight answer would have made unnecessary.
+		if (open && (rep.state == 1 || rep.state == 2)) {
+			cost[l] *= 1e-6;
+		}
 		any_open |= open;
 	}
 	const AITriState v = AIFilterTreeEval(*tree, values);
@@ -242,43 +234,103 @@ void AILeafRegionState::DecideRow(uint32_t row) {
 	}
 }
 
-unique_ptr<AILeafWave> AILeafRegionState::PrepareWave(idx_t l) {
-	auto &leaf = leaves[l];
-	auto wave = make_uniq<AILeafWave>();
-	wave->leaf = l;
-	const idx_t take = MinValue<idx_t>(leaf.pending.size(), STANDARD_VECTOR_SIZE);
-	for (idx_t i = 0; i < take; i++) {
-		const uint32_t rep_id = leaf.pending[i];
-		leaf.reps[rep_id].state = 2;
-		wave->reps.push_back(rep_id);
-		wave->texts.prompt.push_back(leaf.texts.prompt[rep_id]);
-		wave->texts.pred_text.push_back(leaf.texts.pred_text[rep_id]);
-		wave->texts.input_text.push_back(leaf.texts.input_text[rep_id]);
-		wave->texts.cost.push_back(leaf.texts.cost[rep_id]);
-		wave->texts.valid.push_back(leaf.texts.valid[rep_id]);
-	}
-	leaf.pending.erase(leaf.pending.begin(), leaf.pending.begin() + NumericCast<int64_t>(take));
-	if (waves == 0) {
-		t_first_wave = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
-		rows_at_first_wave = row_result.size();
-	}
-	waves++;
-	return wave;
+void AILeafRegionState::ApplyVerdict(idx_t l, uint32_t rep_id, bool value, bool valid) {
+	auto &rep = leaves[l].reps[rep_id];
+	rep.state = 3;
+	rep.valid = rep.valid && valid;
+	rep.verdict = value ? 1 : 0;
+	landed[l]++;
 }
 
-void AILeafRegionState::RunWave(AILeafWave &wave) {
-	AILeafEvaluate(context, call, wave.leaf, wave.texts, query_text, wave.out_result, wave.out_valid);
+bool AILeafRegionState::Warm() const {
+	if (n < 2) {
+		return true; // nothing to order
+	}
+	if (AISelectivityTrainSteps() == 0) {
+		return false;
+	}
+	for (idx_t l = 0; l < n; l++) {
+		if (landed[l] < GATE_LABELS) {
+			return false;
+		}
+	}
+	return true;
 }
 
-void AILeafRegionState::ApplyWave(AILeafWave &wave) {
-	auto &leaf = leaves[wave.leaf];
-	landed[wave.leaf] += wave.reps.size();
+void AILeafRegionState::DispatchPending(bool flush) {
+	if (limit >= 0) {
+		return;
+	}
+	// Warm: every pending rep goes at once. Cold: a leaf's reps go once a concurrency-wide batch is pending, so
+	// the first verdicts train the model before most rows are decided (agent_bench Q17 156 calls, not 237).
+	const idx_t floor = (flush || Warm()) ? 1 : MaxValue<idx_t>(AIConfig::Get().max_concurrency, 1);
+	vector<char> ready(n, 0);
+	for (idx_t l = 0; l < n; l++) {
+		ready[l] = (!leaves[l].pending.empty() && leaves[l].pending.size() >= floor) ? 1 : 0;
+		if (ready[l] && AIConfig::Get().debug_log.find("dispatch") != string::npos) {
+			fprintf(stderr, "[dispatch] t=%.2f leaf=%llu n=%llu rows=%llu floor=%llu flush=%d out=%llu\n",
+			        std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count(),
+			        (unsigned long long)l, (unsigned long long)leaves[l].pending.size(),
+			        (unsigned long long)row_result.size(), (unsigned long long)floor, (int)flush,
+			        (unsigned long long)(dispatcher ? dispatcher->Outstanding() : 0));
+		}
+	}
+	// Round-robin over the leaves, so a long backlog on one leaf does not queue another leaf's calls behind it.
+	for (idx_t i = 0;; i++) {
+		bool any = false;
+		for (idx_t l = 0; l < n; l++) {
+			auto &leaf = leaves[l];
+			if (!ready[l] || i >= leaf.pending.size()) {
+				continue;
+			}
+			any = true;
+			const uint32_t rep_id = leaf.pending[i];
+			auto &rep = leaf.reps[rep_id];
+			rep.state = 2;
+			if (!dispatcher) {
+				dispatcher = make_uniq<AIAsyncDispatcher>(AIConfig::Get().max_concurrency);
+			}
+			if (dispatched == 0) {
+				t_first_call = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
+				rows_at_first_call = row_result.size();
+			}
+			dispatched++;
+			const AILeafUnitEvaluator &eval = *evaluator;
+			ClientContext &ctx = context;
+			const string &qt = query_text;
+			dispatcher->Submit(
+			    (static_cast<idx_t>(l) << 32) | rep_id,
+			    [&eval, &ctx, &qt, l, prompt = leaf.texts.prompt[rep_id], pred = leaf.texts.pred_text[rep_id],
+			     feat = rep.feat]() { return Value::BOOLEAN(eval.Evaluate(ctx, l, prompt, pred, feat, qt)); });
+		}
+		if (!any) {
+			break;
+		}
+	}
+	for (idx_t l = 0; l < n; l++) {
+		if (ready[l]) {
+			leaves[l].pending.clear();
+		}
+	}
+}
+
+void AILeafRegionState::ReapLanded() {
+	if (!dispatcher) {
+		return;
+	}
+	vector<AIAsyncDispatcher::Landed> got;
+	dispatcher->Reap(got);
+	if (got.empty()) {
+		return;
+	}
+	// Record every landed verdict first, then re-decide the rows behind them: a row whose other leaf also
+	// landed in this batch resolves without being queued on it.
 	vector<uint32_t> waiters;
-	for (idx_t i = 0; i < wave.reps.size(); i++) {
-		auto &rep = leaf.reps[wave.reps[i]];
-		rep.state = 3;
-		rep.valid = rep.valid && wave.out_valid[i] != 0;
-		rep.verdict = wave.out_result[i] ? 1 : 0;
+	for (auto &g : got) {
+		const idx_t l = g.key >> 32;
+		const auto rep_id = static_cast<uint32_t>(g.key & 0xFFFFFFFFULL);
+		ApplyVerdict(l, rep_id, BooleanValue::Get(g.value), true);
+		auto &rep = leaves[l].reps[rep_id];
 		waiters.insert(waiters.end(), rep.waiters.begin(), rep.waiters.end());
 		rep.waiters.clear();
 		rep.waiters.shrink_to_fit();
@@ -286,72 +338,65 @@ void AILeafRegionState::ApplyWave(AILeafWave &wave) {
 	for (idx_t i = 0; i < waiters.size(); i++) {
 		DecideRow(waiters[i]);
 		// A verdict on a shared rep re-decides every row behind it (above a join: hundreds of thousands).
-		// Start the next leaf's calls as soon as a full batch is pending instead of after the last waiter.
-		if ((i & 4095) == 4095 && limit < 0) {
-			LaunchReady(STANDARD_VECTOR_SIZE);
+		// Start the next leaf's calls while the rest are still being re-decided.
+		if ((i & 4095) == 4095) {
+			DispatchPending();
 		}
 	}
 }
 
-void AILeafRegionState::LaunchReady(idx_t min_pending) {
-	for (idx_t l = 0; l < n && inflight.size() < MaxValue<idx_t>(overlap, 1); l++) {
-		while (leaves[l].pending.size() >= min_pending && inflight.size() < MaxValue<idx_t>(overlap, 1)) {
-			auto wave = PrepareWave(l);
-			auto *raw = wave.get();
-			raw->done = std::async(std::launch::async, [this, raw]() { RunWave(*raw); });
-			inflight.push_back(std::move(wave));
-		}
+void AILeafRegionState::WaitAndReap() {
+	t_wait += dispatcher->WaitAny();
+	waits++;
+	ReapLanded();
+}
+
+void AILeafRegionState::RunInlineWave(idx_t l) {
+	auto &leaf = leaves[l];
+	AILeafWave wave;
+	wave.leaf = l;
+	const idx_t take = MinValue<idx_t>(leaf.pending.size(), STANDARD_VECTOR_SIZE);
+	for (idx_t i = 0; i < take; i++) {
+		const uint32_t rep_id = leaf.pending[i];
+		leaf.reps[rep_id].state = 2;
+		wave.reps.push_back(rep_id);
+		wave.texts.prompt.push_back(leaf.texts.prompt[rep_id]);
+		wave.texts.pred_text.push_back(leaf.texts.pred_text[rep_id]);
+		wave.texts.input_text.push_back(leaf.texts.input_text[rep_id]);
+		wave.texts.cost.push_back(leaf.texts.cost[rep_id]);
+		wave.texts.valid.push_back(leaf.texts.valid[rep_id]);
+	}
+	leaf.pending.erase(leaf.pending.begin(), leaf.pending.begin() + NumericCast<int64_t>(take));
+	if (dispatched == 0) {
+		t_first_call = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
+		rows_at_first_call = row_result.size();
+	}
+	dispatched += take;
+	AILeafEvaluate(context, call, l, wave.texts, query_text, wave.out_result, wave.out_valid);
+	vector<uint32_t> waiters;
+	for (idx_t i = 0; i < wave.reps.size(); i++) {
+		ApplyVerdict(l, wave.reps[i], wave.out_result[i] != 0, wave.out_valid[i] != 0);
+		auto &rep = leaf.reps[wave.reps[i]];
+		waiters.insert(waiters.end(), rep.waiters.begin(), rep.waiters.end());
+		rep.waiters.clear();
+		rep.waiters.shrink_to_fit();
+	}
+	for (const auto row : waiters) {
+		DecideRow(row);
 	}
 }
 
-void AILeafRegionState::DrainOldest() {
-	auto wave = std::move(inflight.front());
-	inflight.erase(inflight.begin());
-	const auto t0 = std::chrono::steady_clock::now();
-	if (wave->done.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
-		drains_blocked++;
-	}
-	wave->done.get(); // rethrows the wave's exception on this thread
-	t_drain += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-	ApplyWave(*wave);
-}
-
-void AILeafRegionState::ReapLanded() {
-	for (idx_t i = 0; i < inflight.size();) {
-		if (inflight[i]->done.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-			auto wave = std::move(inflight[i]);
-			inflight.erase(inflight.begin() + NumericCast<int64_t>(i));
-			wave->done.get();
-			ApplyWave(*wave);
-			i = 0; // ApplyWave may have launched new waves: rescan
-			continue;
-		}
-		i++;
-	}
-}
-
-void AILeafRegionState::Drain() {
-	while (!inflight.empty()) {
-		DrainOldest();
-	}
-}
-
-bool AILeafRegionState::Fire(idx_t floor, idx_t overlap_p) {
-	overlap = overlap_p;
+bool AILeafRegionState::Pump(idx_t limit_floor) {
 	if (limit < 0) {
-		ReapLanded(); // landed verdicts move rows onto their next leaf before we look at what is pending
+		ReapLanded();
+		DispatchPending();
+		return false;
 	}
+	// Under a LIMIT the floor's job is to stop early: evaluate inline and re-check after every wave.
 	for (;;) {
-		// An idle pool is the one thing worse than a small wave: with nothing in flight, fire what a
-		// concurrency-wide batch can use. Above a join whose big side trickles the small leaf's reps
-		// (Q19: 180 customers behind 1.78M rows), waiting for a floor-sized batch of the first leaf
-		// idled the pool for the first ~1M rows of ingest.
-		const idx_t floor_now = (limit < 0 && inflight.empty())
-		                            ? MinValue<idx_t>(floor, MaxValue<idx_t>(AIConfig::Get().max_concurrency, 1))
-		                            : floor;
 		idx_t ready = n;
 		for (idx_t l = 0; l < n; l++) {
-			if (leaves[l].pending.size() >= floor_now) {
+			if (!leaves[l].pending.empty() && leaves[l].pending.size() >= limit_floor) {
 				ready = l;
 				break;
 			}
@@ -359,50 +404,44 @@ bool AILeafRegionState::Fire(idx_t floor, idx_t overlap_p) {
 		if (ready == n) {
 			return false;
 		}
-		auto wave = PrepareWave(ready);
-		if (limit >= 0) {
-			// Under a LIMIT the floor's job is to stop early: evaluate inline and re-check after every wave.
-			RunWave(*wave);
-			ApplyWave(*wave);
-			if (LimitMet()) {
-				return true;
-			}
-			continue;
-		}
-		auto *raw = wave.get();
-		raw->done = std::async(std::launch::async, [this, raw]() { RunWave(*raw); });
-		inflight.push_back(std::move(wave));
-		while (inflight.size() >= MaxValue<idx_t>(overlap, 1)) {
-			DrainOldest();
+		RunInlineWave(ready);
+		if (LimitMet()) {
+			return true;
 		}
 	}
 }
 
-void AILeafRegionState::Finish(idx_t overlap_p) {
-	overlap = overlap_p;
-	Drain();
+void AILeafRegionState::Drain() {
+	while (dispatcher && dispatcher->Outstanding() > 0) {
+		WaitAndReap();
+	}
+}
+
+void AILeafRegionState::Finish() {
 	if (LimitMet()) {
 		return;
 	}
-	// Invariant: every undecided row waits on a rep that is pending or in flight, so when both are empty
+	if (limit >= 0) {
+		Pump(1);
+		return;
+	}
+	// Invariant: every undecided row waits on a rep that is pending or outstanding, so when both are empty
 	// every row is decided.
 	for (;;) {
-		if (Fire(1, overlap)) {
+		ReapLanded();
+		DispatchPending(/*flush=*/true);
+		if (!dispatcher || dispatcher->Outstanding() == 0) {
 			return;
 		}
-		if (inflight.empty()) {
-			return;
-		}
-		DrainOldest();
+		WaitAndReap();
 	}
 }
 
 string AILeafRegionState::TimingSummary() const {
-	return StringUtil::Format(
-	    "embed=%.1fs refresh=%.1fs(%llu) decide=%.1fs warm_gate=%.1fs drain_wait=%.1fs(blocked %llu/%llu) "
-	    "first_wave=%.1fs@%llu rows",
-	    t_embed, t_refresh, refreshes, t_decide, t_warm_gate, t_drain, drains_blocked, waves, t_first_wave,
-	    rows_at_first_wave);
+	return StringUtil::Format("embed=%.1fs refresh=%.1fs(%llu) decide=%.1fs warm_gate=%.1fs wait=%.1fs(%llu) "
+	                          "calls=%llu first_call=%.1fs@%llu rows",
+	                          t_embed, t_refresh, refreshes, t_decide, t_warm_gate, t_wait, waits, dispatched,
+	                          t_first_call, rows_at_first_call);
 }
 
 void AILeafRegionState::Results(vector<Value> &out) const {

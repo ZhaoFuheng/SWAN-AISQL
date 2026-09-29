@@ -5,6 +5,7 @@
 #include "duckdb/common/types/column/column_data_collection.hpp"
 #include "duckdb/common/types/value.hpp"
 #include "ai_dedup.hpp"
+#include "exec/ai_async_dispatcher.hpp"
 #include "exec/ai_leaf_region.hpp"
 #include "ai_client.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
@@ -15,7 +16,6 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
-#include <future>
 #include <string>
 
 namespace duckdb {
@@ -36,56 +36,29 @@ InsertionOrderPreservingMap<string> PhysicalAIRegion::ParamsToString() const {
 	return result;
 }
 
-// The AISQLMapData cardinality floor: a factorized batch is fired once this many NEW distinct reps have
-// accumulated, so every LLM batch saturates concurrency: 5 x the LLM concurrency (default 20 -> floor 100).
+// Under a pushed LIMIT the region evaluates inline waves of at least this many new distinct reps (5 x the LLM
+// concurrency), re-checking the LIMIT after each. Without a LIMIT there is no floor: every distinct input is
+// dispatched as soon as it is known.
 static idx_t AIRegionWaveSize() {
 	return 5 * AIConfig::Get().max_concurrency;
 }
 
-// Waves the region keeps in flight at once. A wave's LLM batch is only as wide as the DISTINCT PROMPTS its
-// reps carry; above a join that repeats one side's prompt across a chunk that can be a single call, leaving
-// the pool idle behind a blocking wave. Overlapping waves refills the pool without speculating on any extra
-// call (agent_bench Q17 295 s -> 88 s, Q19 867 s -> 686 s; results and calls unchanged).
-static idx_t AIRegionWaveOverlap() {
-	return 8;
-}
-
-// One wave's work. PREPARED on the Sink thread (the map is single-owner), EVALUATED anywhere, APPLIED back
-// on the Sink thread -- so the only thing that crosses threads is this self-contained unit, and the waves
-// that run concurrently own disjoint rep ranges.
-struct AIRegionWave {
-	DataChunk factorized; //! the reps this wave owns (rep rows + trailing `__count`)
-	idx_t base = 0;       //! rep ordinal of factorized row 0
-	idx_t m = 0;          //! reps in this wave
-	vector<Value> values; //! the scalar call's results, one per rep
-	string query_text;    //! captured on the Sink thread: ClientContext is not ours to read from a worker
-	//! Only set when the wave runs in the background; carries its exception to whoever get()s it.
-	//! MUST STAY LAST: members destruct in reverse declaration order, so this future -- whose destructor
-	//! waits for the worker -- is destroyed FIRST, before the buffers that worker is still writing into.
-	//! That is what makes dropping an un-drained wave (an exception unwinding Sink) safe.
-	std::future<void> done;
-};
-
 // Streaming dedup state (single-owner). Lives in the local sink state during Sink; moved to the global sink
-// state in Combine (ParallelSink()==false guarantees exactly one local state, so the move is not a merge).
+// state in Combine.
 struct AIRegionStreamState {
 	//! Node (ai_function_with_embed) path: per-leaf dictionaries + per-row leaf order (see ai_leaf_region.hpp).
 	unique_ptr<AILeafRegionState> leaf;
 	//! Scalar path: one dictionary on the call's key columns.
 	unique_ptr<AISQLMapChunk> map;
 	vector<Value> rep_result; //! per rep: result Value (BOOLEAN on the node path, return-type on the scalar path)
-	vector<char> rep_decided; //! per rep: has a wave evaluated it?
+	vector<char> rep_decided; //! per rep: has it been evaluated?
 	bool is_node = false;     //! folded node (-> `leaf`) vs plain scalar AI call (-> `map`)
-	// Diagnostics (ai_debug_log='region'): wave shape + early-teardown signals.
-	idx_t waves = 0;
-	idx_t rows_at_first_wave = 0;
-	// Cardinality-floor validation: every floor-triggered (Sink) wave must carry >= floor distinct reps; only the
-	// final Finalize flush (the leftover tail) may be smaller. min_full_wave = smallest Sink wave (0 = none yet).
-	idx_t min_full_wave = 0;
-	idx_t last_flush_reps = 0;
-	//! Waves handed to background threads and not yet applied, oldest first. Drained in Combine, so a
-	//! segment never carries a live thread into the global state.
-	vector<unique_ptr<AIRegionWave>> inflight;
+	// Diagnostics (ai_debug_log='region').
+	idx_t calls = 0;
+	idx_t rows_at_first_call = 0;
+	//! Scalar path: each distinct input is evaluated on its own, asynchronously (asynchronous iteration). Held
+	//! by pointer so moving the state into the global sink state never moves the pool its workers run in.
+	unique_ptr<AIAsyncDispatcher> dispatcher;
 };
 
 //===--------------------------------------------------------------------===//
@@ -137,70 +110,89 @@ unique_ptr<LocalSinkState> PhysicalAIRegion::GetLocalSinkState(ExecutionContext 
 	return make_uniq<AIRegionLocalSinkState>(context.client, *this, std::move(child_types));
 }
 
-// Take ownership of the map's currently-unfired representatives as one wave. Sink-thread only: it mutates the
-// map and the per-segment diagnostics. Returns nullptr when there is nothing to fire.
-// `sink_wave` = fired from Sink because >= floor new reps accumulated (must carry >= floor reps); false = the
-// Finalize flush of the leftover tail (may be < floor). Split so the floor invariant is observable/verifiable.
-static unique_ptr<AIRegionWave> AIRegionPrepareWave(ClientContext &context, AIRegionStreamState &st, bool sink_wave) {
+// Emit the map's unfired representatives as factorized chunks (rep rows + trailing `__count`) and hand each
+// one to `consume(chunk, base)`, where `base` is the rep ordinal of the chunk's first row.
+template <class F>
+static void AIRegionEmitUnfired(ClientContext &context, AIRegionStreamState &st, F &&consume) {
 	auto &map = *st.map;
-	auto wave = make_uniq<AIRegionWave>();
-	wave->base = map.FiredCount();
-	// Emit the unfired reps as an explicit factorized chunk (rep rows + trailing `__count`) -- the AISQLMapData
-	// currency the AI function consumes. EmitFactorized() advances FiredCount() by what it emitted.
-	wave->factorized.Initialize(Allocator::Get(context), map.FactorizedTypes());
-	wave->m = map.EmitFactorized(wave->factorized);
-	if (wave->m == 0) {
-		return nullptr;
+	while (map.NewDistinctSince() > 0) {
+		DataChunk factorized;
+		factorized.Initialize(Allocator::Get(context), map.FactorizedTypes());
+		const idx_t base = map.FiredCount();
+		const idx_t m = map.EmitFactorized(factorized);
+		if (m == 0) {
+			return;
+		}
+		if (st.calls == 0) {
+			st.rows_at_first_call = map.RowCount();
+		}
+		st.calls += m;
+		consume(factorized, base);
 	}
-	if (st.waves == 0) {
-		st.rows_at_first_wave = map.RowCount();
-	}
-	st.waves++;
-	if (sink_wave) {
-		st.min_full_wave = st.min_full_wave == 0 ? wave->m : std::min(st.min_full_wave, wave->m);
-	} else {
-		st.last_flush_reps = wave->m;
-	}
-	wave->query_text = context.GetCurrentQuery();
-	return wave;
 }
 
-// Evaluate a prepared wave. Runs on the Sink thread or a background thread; touches only `wave`.
-static void AIRegionRunWave(const PhysicalAIRegion &op, ClientContext &context, AIRegionWave &wave) {
+// LIMIT path: evaluate every unfired rep inline, one factorized chunk at a time.
+static void AIRegionEvaluateInline(const PhysicalAIRegion &op, ClientContext &context, AIRegionStreamState &st) {
 	auto &fn = op.eval_call->Cast<BoundFunctionExpression>();
-	AIDedupFireWaveScalarFactorized(context, fn, wave.factorized, wave.values);
+	AIRegionEmitUnfired(context, st, [&](DataChunk &factorized, idx_t base) {
+		vector<Value> values;
+		AIDedupFireWaveScalarFactorized(context, fn, factorized, values);
+		for (idx_t j = 0; j < values.size(); j++) {
+			st.rep_decided[base + j] = 1;
+			st.rep_result[base + j] = values[j];
+		}
+	});
 }
 
-// Fold a finished wave's results back into the segment. Sink-thread only.
-static void AIRegionApplyWave(AIRegionStreamState &st, AIRegionWave &wave) {
-	for (idx_t j = 0; j < wave.m; j++) {
-		st.rep_decided[wave.base + j] = 1;
-		st.rep_result[wave.base + j] = wave.values[j];
+// Dispatch every unfired rep on its own: the scalar call over a one-row factorized chunk, the same prompt and
+// answer the batch would produce, but asked as soon as the input is known.
+static void AIRegionDispatch(const PhysicalAIRegion &op, ClientContext &context, AIRegionStreamState &st) {
+	if (!st.dispatcher) {
+		st.dispatcher = make_uniq<AIAsyncDispatcher>(AIConfig::Get().max_concurrency);
 	}
+	auto &fn = op.eval_call->Cast<BoundFunctionExpression>();
+	const auto types = st.map->FactorizedTypes();
+	AIRegionEmitUnfired(context, st, [&](DataChunk &factorized, idx_t base) {
+		for (idx_t j = 0; j < factorized.size(); j++) {
+			vector<Value> row;
+			row.reserve(factorized.ColumnCount());
+			for (idx_t c = 0; c < factorized.ColumnCount(); c++) {
+				row.push_back(factorized.data[c].GetValue(j));
+			}
+			st.dispatcher->Submit(base + j, [&fn, &context, types, row]() {
+				DataChunk one;
+				one.Initialize(Allocator::DefaultAllocator(), types);
+				one.SetChildCardinality(1);
+				for (idx_t c = 0; c < row.size(); c++) {
+					one.data[c].SetValue(0, row[c]);
+				}
+				vector<Value> values;
+				AIDedupFireWaveScalarFactorized(context, fn, one, values);
+				return values[0];
+			});
+		}
+	});
 }
 
-// Prepare + evaluate + apply, all inline. The LIMIT path and the Finalize tail use this.
-static void AIRegionFireOneWave(const PhysicalAIRegion &op, ClientContext &context, AIRegionStreamState &st,
-                                bool sink_wave) {
-	auto wave = AIRegionPrepareWave(context, st, sink_wave);
-	if (!wave) {
+// Apply every result that has landed (without blocking, or after waiting for at least one).
+static void AIRegionReap(AIRegionStreamState &st, bool wait) {
+	if (!st.dispatcher) {
 		return;
 	}
-	AIRegionRunWave(op, context, *wave);
-	AIRegionApplyWave(st, *wave);
+	if (wait) {
+		st.dispatcher->WaitAny();
+	}
+	vector<AIAsyncDispatcher::Landed> got;
+	st.dispatcher->Reap(got);
+	for (auto &g : got) {
+		st.rep_decided[g.key] = 1;
+		st.rep_result[g.key] = std::move(g.value);
+	}
 }
 
-// Wait for the oldest in-flight wave and apply it. get() rethrows whatever the wave threw, on this thread.
-static void AIRegionDrainOldest(const PhysicalAIRegion &op, AIRegionStreamState &st) {
-	auto wave = std::move(st.inflight.front());
-	st.inflight.erase(st.inflight.begin());
-	wave->done.get();
-	AIRegionApplyWave(st, *wave);
-}
-
-static void AIRegionDrainAll(const PhysicalAIRegion &op, AIRegionStreamState &st) {
-	while (!st.inflight.empty()) {
-		AIRegionDrainOldest(op, st);
+static void AIRegionDrainAll(AIRegionStreamState &st) {
+	while (st.dispatcher && st.dispatcher->Outstanding() > 0) {
+		AIRegionReap(st, /*wait=*/true);
 	}
 }
 
@@ -210,57 +202,41 @@ SinkResultType PhysicalAIRegion::Sink(ExecutionContext &context, DataChunk &chun
 	// Buffer every row for emission, then fold it.
 	lstate.buffer.Append(lstate.append_state, chunk);
 	if (st.leaf) {
-		if (st.leaf->Append(chunk, AIRegionWaveSize(), limit >= 0 ? 1 : AIRegionWaveOverlap())) {
+		if (st.leaf->Append(chunk, AIRegionWaveSize())) {
 			return SinkResultType::FINISHED; // LIMIT met while folding (rows landing on decided-TRUE reps)
 		}
-		if (st.leaf->Fire(AIRegionWaveSize(), limit >= 0 ? 1 : AIRegionWaveOverlap())) {
+		if (st.leaf->Pump(AIRegionWaveSize())) {
 			return SinkResultType::FINISHED;
 		}
 		return SinkResultType::NEED_MORE_INPUT;
 	}
-	const idx_t prev_rows = st.map->RowCount();
 	st.map->Append(chunk);
 	const idx_t distinct = st.map->DistinctCount();
 	if (st.rep_result.size() < distinct) {
 		st.rep_result.resize(distinct);
 		st.rep_decided.resize(distinct, 0);
 	}
-	// Fire a wave whenever enough new distinct reps have accumulated; early-stop once the LIMIT is met.
-	const idx_t wave = AIRegionWaveSize();
-	// A wave blocks Sink, and its LLM batch is only as wide as the DISTINCT PROMPTS its reps carry -- which,
-	// above a join that repeats one side across a chunk, can be one. Overlapping waves keeps the request pool
-	// fed from the reps already in hand instead of speculating on calls the tree may never need. Under a
-	// pushed LIMIT the floor's job is the opposite one (stop early), so that path stays inline.
-	const idx_t overlap = (limit >= 0) ? 1 : AIRegionWaveOverlap();
-	while (st.map->NewDistinctSince() >= wave) {
-		if (overlap == 1) {
-			AIRegionFireOneWave(*this, context.client, st, /*sink_wave=*/true);
-			continue;
+	if (limit >= 0) {
+		if (st.map->NewDistinctSince() >= AIRegionWaveSize()) {
+			AIRegionEvaluateInline(*this, context.client, st);
 		}
-		auto in_flight = AIRegionPrepareWave(context.client, st, /*sink_wave=*/true);
-		if (!in_flight) {
-			break;
-		}
-		auto &op = *this;
-		auto &client = context.client;
-		auto *raw = in_flight.get();
-		raw->done = std::async(std::launch::async, [&op, &client, raw]() { AIRegionRunWave(op, client, *raw); });
-		st.inflight.push_back(std::move(in_flight));
-		while (st.inflight.size() >= overlap) {
-			AIRegionDrainOldest(*this, st);
-		}
+		return SinkResultType::NEED_MORE_INPUT;
 	}
+	// Asynchronous iteration: apply what has landed, then ask for every new distinct input right away. The
+	// client's chat gate keeps ai_concurrency calls in flight; nothing waits for a batch to fill or finish.
+	AIRegionReap(st, /*wait=*/false);
+	AIRegionDispatch(*this, context.client, st);
 	return SinkResultType::NEED_MORE_INPUT;
 }
 
 SinkCombineResultType PhysicalAIRegion::Combine(ExecutionContext &context, OperatorSinkCombineInput &input) const {
 	auto &gstate = input.global_state.Cast<AIRegionGlobalSinkState>();
 	auto &lstate = input.local_state.Cast<AIRegionLocalSinkState>();
-	// Settle every background wave before the segment leaves this thread's ownership.
+	// Settle every dispatched call before the segment leaves this thread's ownership.
 	if (lstate.stream.leaf) {
 		lstate.stream.leaf->Drain();
 	} else {
-		AIRegionDrainAll(*this, lstate.stream);
+		AIRegionDrainAll(lstate.stream);
 	}
 	lock_guard<mutex> guard(gstate.lock);
 	gstate.buffer.Combine(lstate.buffer);
@@ -284,7 +260,7 @@ SinkFinalizeType PhysicalAIRegion::Finalize(Pipeline &pipeline, Event &event, Cl
 			auto &leaf = *st.leaf;
 			const bool done = limit >= 0 && (leaf.Passed() >= limit || passed_total >= limit);
 			if (!done) {
-				leaf.Finish(limit >= 0 ? 1 : AIRegionWaveOverlap());
+				leaf.Finish();
 			}
 			leaf.Results(gstate.results);
 			passed_total += leaf.Passed();
@@ -293,18 +269,20 @@ SinkFinalizeType PhysicalAIRegion::Finalize(Pipeline &pipeline, Event &event, Cl
 				for (const idx_t d : leaf.DistinctPerLeaf()) {
 					distinct += (distinct.empty() ? "" : ",") + std::to_string(d);
 				}
-				fprintf(stderr,
-				        "[leaf-region] leaves=%llu distinct=[%s] rows=%llu waves=%llu passed=%lld limit=%lld %s\n",
+				fprintf(stderr, "[leaf-region] leaves=%llu distinct=[%s] rows=%llu passed=%lld limit=%lld %s\n",
 				        (unsigned long long)leaf.DistinctPerLeaf().size(), distinct.c_str(),
-				        (unsigned long long)leaf.RowCount(), (unsigned long long)leaf.Waves(), (long long)leaf.Passed(),
-				        (long long)limit, leaf.TimingSummary().c_str());
+				        (unsigned long long)leaf.RowCount(), (long long)leaf.Passed(), (long long)limit,
+				        leaf.TimingSummary().c_str());
 			}
 			continue;
 		}
 		auto &map = *st.map;
 		// Scalar path: evaluate every remaining distinct input so its buffered rows get a real result.
-		while (map.NewDistinctSince() > 0) {
-			AIRegionFireOneWave(*this, context, st, /*sink_wave=*/false);
+		if (limit >= 0) {
+			AIRegionEvaluateInline(*this, context, st);
+		} else {
+			AIRegionDispatch(*this, context, st);
+			AIRegionDrainAll(st);
 		}
 		// Broadcast each rep's answer to this segment's buffered rows (undecided reps only occur on a
 		// node+limit early-stop -> false; the LIMIT above already has its k passers).
@@ -314,13 +292,9 @@ SinkFinalizeType PhysicalAIRegion::Finalize(Pipeline &pipeline, Event &event, Cl
 			gstate.results.push_back(st.rep_decided[rep] ? st.rep_result[rep] : Value::BOOLEAN(false));
 		}
 		if (AIConfig::Get().debug_log.find("region") != string::npos) {
-			fprintf(stderr,
-			        "[stream-dedup] distinct=%llu rows=%llu waves=%llu first_wave_at_rows=%llu "
-			        "floor=%llu min_full_wave=%llu last_flush=%llu segments=%zu\n",
-			        (unsigned long long)map.DistinctCount(), (unsigned long long)rows, (unsigned long long)st.waves,
-			        (unsigned long long)st.rows_at_first_wave, (unsigned long long)AIRegionWaveSize(),
-			        (unsigned long long)st.min_full_wave, (unsigned long long)st.last_flush_reps,
-			        gstate.segments.size());
+			fprintf(stderr, "[stream-dedup] distinct=%llu rows=%llu calls=%llu first_call_at_rows=%llu segments=%zu\n",
+			        (unsigned long long)map.DistinctCount(), (unsigned long long)rows, (unsigned long long)st.calls,
+			        (unsigned long long)st.rows_at_first_call, gstate.segments.size());
 		}
 	}
 	D_ASSERT(gstate.results.size() == gstate.buffer.Count());

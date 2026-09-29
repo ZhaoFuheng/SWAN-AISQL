@@ -483,7 +483,6 @@ static void AIClassifyFunction(DataChunk &args, ExpressionState &state, Vector &
 	cats_vec.ToUnifiedFormat(cats_format);
 	auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(cats_format);
 	auto &cats_child = ListVector::GetChild(cats_vec);
-	const idx_t child_count = ListVector::GetListSize(cats_vec);
 	UnifiedVectorFormat cats_child_format;
 	cats_child.ToUnifiedFormat(cats_child_format);
 	auto cats_child_data = UnifiedVectorFormat::GetData<string_t>(cats_child_format);
@@ -893,7 +892,6 @@ static void AIAggFunction(DataChunk &args, ExpressionState &state, Vector &resul
 	list_vec.ToUnifiedFormat(list_format);
 	auto list_entries = UnifiedVectorFormat::GetData<list_entry_t>(list_format);
 	auto &list_child = ListVector::GetChild(list_vec);
-	const idx_t child_count = ListVector::GetListSize(list_vec);
 	UnifiedVectorFormat list_child_format;
 	list_child.ToUnifiedFormat(list_child_format);
 	auto list_child_data = UnifiedVectorFormat::GetData<string_t>(list_child_format);
@@ -1336,8 +1334,8 @@ struct AIFilterWithEmbedBindData : public FunctionData {
 	AIFilterWithEmbedBindData(shared_ptr<AIFilterTreeNode> tree, string tree_str, idx_t leaf_count,
 	                          bool speculative = false, double threshold = 0.5, int64_t limit = -1, string meta = "",
 	                          vector<shared_ptr<Expression>> wrappers = {})
-	    : tree(std::move(tree)), tree_str(std::move(tree_str)), leaf_count(leaf_count), speculative(speculative),
-	      threshold(threshold), limit(limit), meta(std::move(meta)), wrappers(std::move(wrappers)) {
+	    : tree(std::move(tree)), tree_str(std::move(tree_str)), leaf_count(leaf_count), meta(std::move(meta)),
+	      wrappers(std::move(wrappers)), speculative(speculative), threshold(threshold), limit(limit) {
 	}
 	shared_ptr<AIFilterTreeNode> tree;
 	string tree_str;
@@ -2120,7 +2118,7 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 	std::mutex error_mutex;
 	ErrorData first_error; // the first exception a worker's leaf evaluation raised, rethrown after the join
 
-	auto worker = [&]() {
+	auto worker_body = [&]() {
 		while (true) {
 			idx_t row;
 			{
@@ -2460,19 +2458,8 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 			// plain ai_filter leaf (meta kind F) is the original path.
 			bool value_ok = false;
 			const auto llm_t0 = std::chrono::steady_clock::now();
-			bool value = false;
-			try {
-				value = AIEvalLeaf(context, leaf_meta[leaf], prompt[row][leaf], query_text, value_ok, nullptr, 0,
-				                   &pred_text[row][leaf]);
-			} catch (std::exception &ex) {
-				// A wrapper can raise on an answer (a strict cast, say) exactly as the scalar would; the query
-				// fails with that error once the pool has drained rather than terminating a worker thread.
-				std::lock_guard<std::mutex> lk(error_mutex);
-				if (!first_error.HasError()) {
-					first_error = ErrorData(ex);
-				}
-				value_ok = false;
-			}
+			const bool value = AIEvalLeaf(context, leaf_meta[leaf], prompt[row][leaf], query_text, value_ok, nullptr, 0,
+			                              &pred_text[row][leaf]);
 			ema_update(llm_lat_us,
 			           std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - llm_t0)
 			               .count());
@@ -2498,6 +2485,27 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 		}
 	};
 
+	// A worker must never let an exception escape its thread. A wrapper can raise on an answer (a strict cast,
+	// say) exactly as the scalar would -- on a call or on a cached answer -- so the first error stops every
+	// thread (the same flag a met LIMIT raises) and is rethrown once they have joined.
+	auto worker = [&]() {
+		try {
+			worker_body();
+		} catch (std::exception &ex) {
+			{
+				std::lock_guard<std::mutex> lk(error_mutex);
+				if (!first_error.HasError()) {
+					first_error = ErrorData(ex);
+				}
+			}
+			{
+				std::lock_guard<std::mutex> lock(q_mutex);
+				limit_hit.store(true);
+			}
+			q_cv.notify_all();
+		}
+	};
+
 	// Dedicated embedding prefetcher: while workers block on in-flight LLM calls, walk the pending
 	// queue and pre-embed those rows' unknown text leaves into feat_cache, so the embedding stage
 	// rides inside LLM latency instead of adding to it. Purely an accelerator: workers embed any
@@ -2505,90 +2513,94 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 	std::thread prefetcher;
 	if (!feature_prompt_mode && std::getenv("AISQL_NO_PREFETCH") == nullptr) {
 		prefetcher = std::thread([&]() {
-			while (resolved.load() < rep_count && !limit_hit.load()) {
-				// snapshot a slice of the queue front
-				vector<idx_t> pending;
-				idx_t lead_cap = 64;
-				if (const char *lc = std::getenv("AISQL_PREFETCH_LEAD")) {
-					const int64_t v = atoll(lc);
-					lead_cap = v <= 0 ? idx_t(64) : idx_t(v);
-				} else {
-					const int64_t ll = llm_lat_us.load(std::memory_order_relaxed);
-					const int64_t le = embed_lat_us.load(std::memory_order_relaxed);
-					if (ll > 0 && le > 0) {
-						const idx_t need = idx_t((int64_t(nworkers_hint) * le + ll - 1) / ll);
-						lead_cap = MaxValue<idx_t>(nworkers_hint, MinValue<idx_t>(need, 64));
+			try {
+				while (resolved.load() < rep_count && !limit_hit.load()) {
+					// snapshot a slice of the queue front
+					vector<idx_t> pending;
+					idx_t lead_cap = 64;
+					if (const char *lc = std::getenv("AISQL_PREFETCH_LEAD")) {
+						const int64_t v = atoll(lc);
+						lead_cap = v <= 0 ? idx_t(64) : idx_t(v);
+					} else {
+						const int64_t ll = llm_lat_us.load(std::memory_order_relaxed);
+						const int64_t le = embed_lat_us.load(std::memory_order_relaxed);
+						if (ll > 0 && le > 0) {
+							const idx_t need = idx_t((int64_t(nworkers_hint) * le + ll - 1) / ll);
+							lead_cap = MaxValue<idx_t>(nworkers_hint, MinValue<idx_t>(need, 64));
+						}
 					}
-				}
-				{
-					std::lock_guard<std::mutex> lock(q_mutex);
-					for (auto it = workq.begin(); it != workq.end() && pending.size() < lead_cap; ++it) {
-						pending.push_back(*it);
-					}
-				}
-				bool worked = false;
-				for (const auto r : pending) {
-					if (resolved.load() >= rep_count || limit_hit.load()) {
-						return;
-					}
-					// gather this row's unknown, uncached, non-image leaves
-					vector<string> texts;
-					vector<idx_t> lv;
 					{
-						std::lock_guard<std::mutex> flk(feat_mutex);
-						for (idx_t l = 0; l < n; l++) {
-							if (leaf_values[r][l] != AITriState::TRI_UNKNOWN || feat_cache.count(feat_key(r, l))) {
-								continue;
-							}
-							if (AITextHasImage(prompt[r][l])) {
-								// image leaf: pre-embed predicate text + the image ref through the
-								// dual encoder (the slowest embeds - exactly what overlap is for);
-								// same gate as the inline stage: only where the estimate can gate
-								bool r_estimable = false;
-								for (idx_t l2 = 0; l2 < n; l2++) {
-									if (leaf_values[r][l2] == AITriState::TRI_UNKNOWN &&
-									    !AITextHasImage(prompt[r][l2])) {
-										r_estimable = true;
-										break;
-									}
-								}
-								if (!bind_data.speculative || !r_estimable) {
+						std::lock_guard<std::mutex> lock(q_mutex);
+						for (auto it = workq.begin(); it != workq.end() && pending.size() < lead_cap; ++it) {
+							pending.push_back(*it);
+						}
+					}
+					bool worked = false;
+					for (const auto r : pending) {
+						if (resolved.load() >= rep_count || limit_hit.load()) {
+							return;
+						}
+						// gather this row's unknown, uncached, non-image leaves
+						vector<string> texts;
+						vector<idx_t> lv;
+						{
+							std::lock_guard<std::mutex> flk(feat_mutex);
+							for (idx_t l = 0; l < n; l++) {
+								if (leaf_values[r][l] != AITriState::TRI_UNKNOWN || feat_cache.count(feat_key(r, l))) {
 									continue;
 								}
-								const auto open = input_text[r][l].find(AI_IMAGE_OPEN);
-								const auto close = input_text[r][l].find(AI_IMAGE_CLOSE);
-								if (open == string::npos || close == string::npos || close <= open) {
+								if (AITextHasImage(prompt[r][l])) {
+									// image leaf: pre-embed predicate text + the image ref through the
+									// dual encoder (the slowest embeds - exactly what overlap is for);
+									// same gate as the inline stage: only where the estimate can gate
+									bool r_estimable = false;
+									for (idx_t l2 = 0; l2 < n; l2++) {
+										if (leaf_values[r][l2] == AITriState::TRI_UNKNOWN &&
+										    !AITextHasImage(prompt[r][l2])) {
+											r_estimable = true;
+											break;
+										}
+									}
+									if (!bind_data.speculative || !r_estimable) {
+										continue;
+									}
+									const auto open = input_text[r][l].find(AI_IMAGE_OPEN);
+									const auto close = input_text[r][l].find(AI_IMAGE_CLOSE);
+									if (open == string::npos || close == string::npos || close <= open) {
+										continue;
+									}
+									texts.push_back(pred_text[r][l]);
+									texts.push_back(input_text[r][l].substr(open, close - open + 1));
+									lv.push_back(l);
 									continue;
 								}
 								texts.push_back(pred_text[r][l]);
-								texts.push_back(input_text[r][l].substr(open, close - open + 1));
+								texts.push_back(input_text[r][l]);
 								lv.push_back(l);
-								continue;
 							}
-							texts.push_back(pred_text[r][l]);
-							texts.push_back(input_text[r][l]);
-							lv.push_back(l);
 						}
+						if (lv.empty()) {
+							continue;
+						}
+						const auto emb_t0 = std::chrono::steady_clock::now();
+						auto embs = AIEmbedBatch(texts, query_text);
+						ema_update(embed_lat_us, std::chrono::duration_cast<std::chrono::microseconds>(
+						                             std::chrono::steady_clock::now() - emb_t0)
+						                                 .count() /
+						                             int64_t(lv.size()));
+						std::lock_guard<std::mutex> flk(feat_mutex);
+						for (idx_t u = 0; u < lv.size(); u++) {
+							feat_cache[feat_key(r, lv[u])] =
+							    BuildPredicateFeature(embs[2 * u].embedding, embs[2 * u + 1].embedding);
+						}
+						worked = true;
 					}
-					if (lv.empty()) {
-						continue;
+					if (!worked) {
+						std::this_thread::sleep_for(std::chrono::milliseconds(2));
 					}
-					const auto emb_t0 = std::chrono::steady_clock::now();
-					auto embs = AIEmbedBatch(texts, query_text);
-					ema_update(embed_lat_us, std::chrono::duration_cast<std::chrono::microseconds>(
-					                             std::chrono::steady_clock::now() - emb_t0)
-					                                 .count() /
-					                             int64_t(lv.size()));
-					std::lock_guard<std::mutex> flk(feat_mutex);
-					for (idx_t u = 0; u < lv.size(); u++) {
-						feat_cache[feat_key(r, lv[u])] =
-						    BuildPredicateFeature(embs[2 * u].embedding, embs[2 * u + 1].embedding);
-					}
-					worked = true;
 				}
-				if (!worked) {
-					std::this_thread::sleep_for(std::chrono::milliseconds(2));
-				}
+			} catch (...) {
+				return; // an accelerator only: a failed embed stops prefetching, the workers embed inline
 			}
 		});
 	}
@@ -2863,6 +2875,51 @@ void AILeafEvaluate(ClientContext &context, const BoundFunctionExpression &eval_
 	}
 	AIFilterEvaluateBatch(context, one, count, prompt, pred, input, cost, valid, query_text, out_result, -1, nullptr);
 	out_valid = valid;
+}
+
+struct AILeafUnitEvaluator::Impl {
+	vector<AILeafMeta> metas;
+	bool speculative = false;
+	bool train = true;
+	idx_t train_every = 20;
+	mutable std::atomic<uint64_t> calls {0};
+};
+
+AILeafUnitEvaluator::AILeafUnitEvaluator(const BoundFunctionExpression &eval_call) : impl(make_uniq<Impl>()) {
+	auto &node = eval_call.BindInfo()->Cast<AIFilterWithEmbedBindData>();
+	impl->metas = AIParseLeafMeta(node.meta, node.leaf_count, node.wrappers);
+	impl->speculative = node.speculative;
+	impl->train = std::getenv("DUCKDB_AI_NO_TRAIN") == nullptr;
+	// One full-batch gradient step every 3 x ai_concurrency calls (AI_MLP_TRAIN_EVERY overrides). Each step
+	// trains on the whole example window, but it also makes every stored prediction stale, so the cadence
+	// decides how early the order follows the model. agent_bench Q17 (the one query whose calls depend on it):
+	// steps every 20-45 calls -> 171-190 calls; 50-75 -> 156 at 36 s; 100+ -> 190-225 (learns too late).
+	const char *every = std::getenv("AI_MLP_TRAIN_EVERY");
+	const int64_t every_n = every ? std::atoll(every) : 0;
+	impl->train_every =
+	    every_n > 0 ? static_cast<idx_t>(every_n) : 3 * MaxValue<idx_t>(AIConfig::Get().max_concurrency, 1);
+}
+
+AILeafUnitEvaluator::~AILeafUnitEvaluator() = default;
+
+bool AILeafUnitEvaluator::Evaluate(ClientContext &context, idx_t leaf, const string &prompt, const string &pred_text,
+                                   const vector<float> &feature, const string &query_text) const {
+	const auto &meta = impl->metas[leaf];
+	if (impl->speculative) {
+		// A speculative leaf only prunes what is already known false; an unknown input passes through.
+		bool v = false;
+		return !AIEvalLeafCached(context, meta, prompt, query_text, v, &pred_text) || v;
+	}
+	bool ok = false;
+	const bool value = AIEvalLeaf(context, meta, prompt, query_text, ok, nullptr, 0, &pred_text);
+	if (ok && !feature.empty()) {
+		AIRecordTrainingExample(prompt, feature, value);
+		AISelectivityModel::Global().AddExample(feature, value);
+	}
+	if (impl->train && (impl->calls.fetch_add(1) + 1) % impl->train_every == 0) {
+		AISelectivityModel::Global().TrainInlineIfReady();
+	}
+	return ok && value;
 }
 
 // A reorder node (evaluated via the worker pool + count-weighted LIMIT early-stop) vs a plain scalar AI call.
@@ -3272,12 +3329,9 @@ bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub
 		if (pred_col >= children.size() || !AIConstantConcatText(*children[pred_col], pred)) {
 			pred.clear();
 		}
-		bool value = false;
-		try {
-			value = AIEvalLeaf(context, metas[l], leaf_prompts[l], query_text, ok, prefix, expected_reuse, &pred);
-		} catch (std::exception &) {
-			ok = false; // a wrapper that raises on the answer invalidates the unit (the pool thread must not throw)
-		}
+		// A wrapper that raises on the answer propagates: the graph's pool hands the error to its driver.
+		const bool value =
+		    AIEvalLeaf(context, metas[l], leaf_prompts[l], query_text, ok, prefix, expected_reuse, &pred);
 		if (!ok) {
 			valid = false;
 			return false;

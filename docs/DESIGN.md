@@ -10,7 +10,8 @@ That yields one cost rule and one correctness rule, and every stage below is an 
   comparison; spending it to avoid a call is always right.
 * **Correctness.** Every stage is result-preserving *on its own*. Each has a parity test that runs
   the same query with the stage disabled and asserts an identical result set. A stage that
-  cannot preserve results is not merged, however large the win.
+  cannot preserve results is not merged, however large the win. An error is a result too: a
+  query that fails without a stage fails with the same error with it.
 
 ---
 
@@ -42,9 +43,11 @@ fan-out that repeats a row 50 times would otherwise repeat its prompt 50 times.
 
 Three consequences follow.
 
-* **Batching is denominated in prompts, not rows.** The region evaluates in *waves* of new distinct
-  inputs and keeps several waves in flight, so the request pool is never idle behind the
-  operator's own bookkeeping, and it never speculates on a call the query would not have made.
+* **Calls are dispatched per distinct input, not per row or per batch.** The region hands each new
+  distinct input to a request pool the moment it is known, and applies each answer the moment it
+  lands (asynchronous iteration), so no call waits for a batch to fill or to finish. It never
+  speculates on a call the query would not have made. Under a pushed LIMIT it evaluates inline
+  batches instead, so it can stop as soon as k rows are confirmed.
 * **Dictionaries are kept per leaf.** A node with several leaves keeps one dictionary per leaf on
   that leaf's own columns. Where the leaves read different join sides the dictionary is the *sum*
   of the sides, not their *product*. A later leaf is asked exactly for the inputs that still need
@@ -108,24 +111,36 @@ holds it chooses, per input, which leaf to ask next, so the expensive calls shor
 the data allows.
 
 * **In a region**, each row picks its next leaf by an exact minimum-expected-cost search over the
-  tree, using the leaf's predicted pass rate and its prompt cost. A leaf is asked only for the
-  distinct inputs that some still-undecided row needs, and a verdict landing on one distinct input
-  re-decides every row that shares it. Where every row of a join fan-out fails the first leaf, the
-  second leaf is never asked.
+  tree, using the leaf's predicted pass rate and its prompt cost. An input whose answer is already
+  on its way costs the row nothing, so the search prefers waiting for it over opening another leaf.
+  A leaf is asked only for the distinct inputs that some still-undecided row needs; each input is
+  sent on its own, and the verdict re-decides every row that shares it the moment it lands. Where
+  every row of a join fan-out fails the first leaf, the second leaf is never asked.
 * **In a factor graph**, the scheduler picks the next member or pair to check from the pass rates it
   has observed so far in the query, preferring checks whose failure cancels the most pairs. A
   per-side check tends to go first: one failed member removes every pair it would have formed.
   Within a pair, the leaves run in the node's order and stop at the first false answer.
 * **A LIMIT stops the operator, not the scan.** Once the region or graph has confirmed enough
   passing rows for the pushed `LIMIT k` (counted by fan-out, so k *output* rows), it stops asking.
+* **The request pool is the bound.** With the calls fixed, a query's latency is roughly its calls
+  times the mean call latency divided by `ai_concurrency`. Sending each input as soon as it is known
+  only matters where the pool would otherwise sit idle; the largest benchmark queries keep it full.
+* **Errors travel like verdicts.** An error raised while evaluating an input — a wrapper that cannot
+  read the answer, a prompt expression that fails — is carried back to the query and fails it, exactly
+  as the per-row evaluation would. No worker thread drops an error, and none lets one escape.
 
 **Selectivity is learned, not assumed.** The region's predictions come from a small model trained
-in-process on the verdicts the query itself produces. Its feature for a leaf is the embedding of the
+in-process on the verdicts the query itself produces: one full-batch gradient step over the most
+recent 256 verdicts every 3 × `ai_concurrency` calls. The cadence is what decides how early the order
+follows the model: stepping more often orders rows on too few labels, stepping less often learns only
+after most rows are decided. Its feature for a leaf is the embedding of the
 predicate text, the embedding of the row's input, and their cosine; text inputs use a sentence
 encoder, image inputs a CLIP dual encoder so that an `ai_image` predicate is compared with its image
 in one joint space. A query starts cold — the first rows are ordered by cost alone — and warms as its
-own verdicts land: the region ingests in slices, and after the first slice it waits until every leaf
-has a batch of verdicts before ordering the rest. The model is process-global and keeps training
+own verdicts land: the region ingests in slices, and while it is cold it sends a predicate's inputs
+only once a concurrency-wide batch of them is pending, and before deciding the next slice it waits for
+the calls already out. Once every leaf has a batch of verdicts, everything is sent as soon as it is
+known. The model is process-global and keeps training
 across queries; the predicate text being part of the feature is what lets it generalise across
 predicates rather than forget.
 
@@ -236,26 +251,27 @@ Each plan stage has one setting: `ai_inline_ai_ctes` (the pre-optimize hook), `a
 `ai_pullup` and `ai_speculative` (2), `ai_reorder` (3, the fold and the run-time ordering it enables),
 `ai_factorize` (4), `ai_join_factorize` (5) and `ai_limit` (6). Their purpose is the parity tests and
 A/B runs; the defaults are the measured composition. Everything that was
-measured to be right — wave overlap, the wave floor, the ingest slice, the warm gate, the speculative
-gate, connection reuse — is a constant in the code, not a knob. The remaining settings name the
+measured to be right — the ingest slice, the warm gate, the training cadence, the speculative gate,
+connection reuse — is a constant in the code, not a knob. The remaining settings name the
 endpoints, models, keys and concurrency of the LLM, embedding and TypeSafe backends. Two debug
 settings stay: `ai_debug_log` (diagnostics per subsystem) and `ai_debug_prompt_variant` (the
 cross-engine protocol above).
 
 ---
 
-## 9. Measured state (2026-09-26)
+## 9. Measured state (2026-09-28)
 
 All numbers are from the recorded runs in `sembench/` (replayed answers, latency and cost; chat
-model `gpt-5.6-luna`; SWAN and LOTUS recorded back-to-back; the Jev column routes ai_filter, ai_classify
-and, on MOVIE, the bounded ai_score of q9/q10 to System One).
+model `gpt-5.6-luna`; SWAN and LOTUS recorded back-to-back; SWAN replayed one query at a time on the
+2026-09-28 build; the Jev column routes ai_filter, ai_classify and, on MOVIE, the bounded ai_score of
+q9/q10 to System One).
 
 | benchmark | SWAN | SWAN + Jev (ai_filter/ai_classify on TypeSafe) | LOTUS / PLOP |
 |---|---|---|---|
-| SemBench MOVIE (10q) | **0.818**, 18.8k calls, $1.53, 1,139s | 0.795, 18.8k, **$0.39**, 511s | LOTUS 0.780, 201k, $14.45, 10,654s |
-| SemBench ECOMM (14q) | **0.699**, 16.6k, $8.02, 1,036s | 0.688, 16.6k, $7.39, 826s | LOTUS 0.637, 17.8k, $6.40, 1,990s |
-| SemBench MMQA (11q) | **0.636**, 16.1k, $1.84, 1,058s | 0.603, 14.1k, $1.53, 884s | LOTUS 0.449, 19.0k, $2.43, 1,720s |
-| agent_bench Q1–Q30 | **1.000**, 11,172 calls, $0.29, 811s | — | PLOP-DP 1.000, 13,602, $0.53, 1,080s; LOTUS 0.620*, 25,738, $2.84, 3,297s |
+| SemBench MOVIE (10q) | **0.818**, 18.8k calls, $1.53, 1,080s | 0.795, 18.8k, **$0.39**, 511s | LOTUS 0.780, 201k, $14.45, 10,654s |
+| SemBench ECOMM (14q) | **0.699**, 16.6k, $8.02, 1,028s | 0.688, 16.6k, $7.39, 826s | LOTUS 0.637, 17.8k, $6.40, 1,990s |
+| SemBench MMQA (11q) | **0.636**, 16.1k, $1.84, 1,057s | 0.603, 14.1k, $1.53, 884s | LOTUS 0.449, 19.0k, $2.43, 1,720s |
+| agent_bench Q1–Q30 | **1.000**, 11,172 calls, $0.29, 799s | — | PLOP-DP 1.000, 13,602, $0.53, 1,080s; LOTUS 0.620*, 25,738, $2.84, 3,297s |
 
 Quality is each suite's own metric (F1 / ARI / row-multiset F1; agent_bench uses the deterministic
 LIMIT-free PLOP ground truth). *LOTUS's agent_bench quality is not like-for-like: SWAN and PLOP

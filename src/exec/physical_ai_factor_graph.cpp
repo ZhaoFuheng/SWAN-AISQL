@@ -5,6 +5,7 @@
 #include "ai_prompt_cost.hpp"
 
 #include "duckdb/main/client_context.hpp"
+#include "duckdb/common/error_data.hpp"
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/parallel/meta_pipeline.hpp"
 #include "duckdb/parallel/pipeline.hpp"
@@ -307,6 +308,13 @@ struct GraphStreamPool {
 	vector<std::thread> threads;
 	string query_text;
 	optional_ptr<ClientContext> context;
+	//! The first exception a unit raised (a wrapper that cannot read an answer, a failed prompt expression);
+	//! rethrown to the driver by Drain, so the query fails exactly as the scalar evaluation would.
+	ErrorData error;
+
+	~GraphStreamPool() {
+		Shutdown(); // an exception unwinding the driver must still join the workers
+	}
 
 	void Start(ClientContext &ctx, idx_t n, string qt) {
 		context = &ctx;
@@ -325,13 +333,21 @@ struct GraphStreamPool {
 						tasks.pop_front();
 					}
 					bool valid = false;
-					const bool value =
-					    AIFactorEvalUnit(*context, task.sub_node->Cast<BoundFunctionExpression>(), task.prompts,
-					                     query_text, valid, task.prefixes.empty() ? nullptr : &task.prefixes,
-					                     task.expected_reuse) &&
-					    valid;
+					bool value = false;
+					ErrorData failure;
+					try {
+						value = AIFactorEvalUnit(*context, task.sub_node->Cast<BoundFunctionExpression>(), task.prompts,
+						                         query_text, valid, task.prefixes.empty() ? nullptr : &task.prefixes,
+						                         task.expected_reuse) &&
+						        valid;
+					} catch (std::exception &ex) {
+						failure = ErrorData(ex);
+					}
 					{
 						std::lock_guard<std::mutex> lock(m);
+						if (failure.HasError() && !error.HasError()) {
+							error = std::move(failure);
+						}
 						done.push_back(Done {std::move(task.key), task.is_unary, task.domain, task.a, task.b, value});
 					}
 					done_cv.notify_all();
@@ -348,13 +364,23 @@ struct GraphStreamPool {
 		task_cv.notify_one();
 	}
 	//! Harvest completions; blocking=true waits until at least one lands (or nothing is pending).
+	//! Rethrows the first error a unit raised.
 	void Drain(vector<Done> &out, bool blocking) {
-		std::unique_lock<std::mutex> lock(m);
-		if (blocking) {
-			done_cv.wait(lock, [&]() { return !done.empty() || unapplied == 0; });
+		ErrorData raised;
+		{
+			std::unique_lock<std::mutex> lock(m);
+			if (blocking) {
+				done_cv.wait(lock, [&]() { return !done.empty() || unapplied == 0 || error.HasError(); });
+			}
+			if (error.HasError()) {
+				raised = error;
+			}
+			out.insert(out.end(), std::make_move_iterator(done.begin()), std::make_move_iterator(done.end()));
+			done.clear();
 		}
-		out.insert(out.end(), std::make_move_iterator(done.begin()), std::make_move_iterator(done.end()));
-		done.clear();
+		if (raised.HasError()) {
+			raised.Throw();
+		}
 	}
 	void MarkApplied(idx_t n) {
 		std::lock_guard<std::mutex> lock(m);
@@ -372,7 +398,9 @@ struct GraphStreamPool {
 		}
 		task_cv.notify_all();
 		for (auto &thread : threads) {
-			thread.join();
+			if (thread.joinable()) {
+				thread.join();
+			}
 		}
 	}
 };

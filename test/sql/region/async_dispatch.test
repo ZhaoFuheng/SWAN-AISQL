@@ -1,0 +1,131 @@
+# name: test/sql/region/async_dispatch.test
+# description: Asynchronous dispatch in the AI region and the factor graph: every distinct input is its own
+# group: [region]
+
+#              unit on a worker pool, and its result is applied when it lands. Pinned here: (1) an error a
+#              unit raises -- a wrapper that cannot read the answer, a failing prompt expression -- fails the
+#              query exactly as the per-chunk path does, on the folded-node region, the plain-call region
+#              and the factor graph (the graph used to swallow it and drop the row); (2) queued units are
+#              dropped and the workers joined, so the connection stays usable; (3) the plain-call region
+#              asks each distinct input exactly once and agrees with the per-chunk path row for row.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE a AS SELECT range AS ka, 'doc a'||range::VARCHAR AS ta FROM range(300);
+
+statement ok
+CREATE TABLE b AS SELECT range AS kb, 'doc b'||range::VARCHAR AS tb FROM range(50);
+
+statement ok
+CREATE TABLE link AS SELECT range AS ka, (range % 50) AS kb FROM range(300);
+
+# --- folded-node region: a wrapper error inside a dispatched unit fails the query ----------------------
+query II
+EXPLAIN SELECT count(*) FROM a JOIN link USING (ka) JOIN b USING (kb)
+WHERE (ai_complete('Return a single yes or no. n? '||ta))::INTEGER > 3 AND ai_filter('[p=50] fine? '||tb);
+----
+physical_plan	<REGEX>:(?s).*Ai Region.*ai_function_with_embed\('A\(L0,L1\)'.*
+
+statement error
+SELECT count(*) FROM a JOIN link USING (ka) JOIN b USING (kb)
+WHERE (ai_complete('Return a single yes or no. n? '||ta))::INTEGER > 3 AND ai_filter('[p=50] fine? '||tb);
+----
+<REGEX>:.*Could not convert string.*
+
+# the per-chunk path raises the same error
+statement ok
+SET ai_factorize = 'off';
+
+statement error
+SELECT count(*) FROM a JOIN link USING (ka) JOIN b USING (kb)
+WHERE (ai_complete('Return a single yes or no. n? '||ta))::INTEGER > 3 AND ai_filter('[p=50] fine? '||tb);
+----
+<REGEX>:.*Could not convert string.*
+
+statement ok
+RESET ai_factorize;
+
+query I
+SELECT count(*) FROM a JOIN link USING (ka);
+----
+300
+
+# --- factor graph: the same error on a pair predicate is raised, not turned into a dropped pair ---------
+query II
+EXPLAIN SELECT count(*) FROM a CROSS JOIN b WHERE (ai_complete('Return a single yes or no. n? '||ta||' '||tb))::INTEGER > 3;
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+statement error
+SELECT count(*) FROM a CROSS JOIN b WHERE (ai_complete('Return a single yes or no. n? '||ta||' '||tb))::INTEGER > 3;
+----
+<REGEX>:.*Could not convert string.*
+
+query I
+SELECT count(*) FROM b;
+----
+50
+
+# --- plain-call region: the first unit fails while thousands are still queued ----------------------------
+statement ok
+CREATE TABLE fan AS SELECT (range % 3000) AS k FROM range(30000);
+
+statement error
+SELECT count(*) FROM fan WHERE ai_filter('[p=50] q '||CASE WHEN k = 0 THEN error('boom-first-unit') ELSE k::VARCHAR END);
+----
+<REGEX>:.*boom-first-unit.*
+
+query I
+SELECT count(*) FROM fan;
+----
+30000
+
+# --- plain-call region: one call per distinct input, same answer as the per-chunk path ------------------
+statement ok
+CREATE TABLE fan2 AS SELECT range AS id, (range % 400) AS k FROM range(8000);
+
+query II
+EXPLAIN SELECT id, ai_classify('item '||k::VARCHAR, ['x','y','z']) AS c FROM fan2;
+----
+physical_plan	<REGEX>:(?s).*Ai Region.*ai_classify.*
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE lab_region AS SELECT id, ai_classify('item '||k::VARCHAR, ['x','y','z']) AS c FROM fan2;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+400
+
+statement ok
+SET ai_factorize = 'off';
+
+statement ok
+CREATE TABLE lab_chunk AS SELECT id, ai_classify('item '||k::VARCHAR, ['x','y','z']) AS c FROM fan2;
+
+statement ok
+RESET ai_factorize;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM lab_region EXCEPT ALL SELECT * FROM lab_chunk)
+                      UNION ALL (SELECT * FROM lab_chunk EXCEPT ALL SELECT * FROM lab_region));
+----
+0
+
+query I
+SELECT count(*) FROM lab_region WHERE c IS NULL;
+----
+0
+
+statement ok
+CALL ai_mock_stop();

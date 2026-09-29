@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <functional>
+#include <exception>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -1045,21 +1046,34 @@ static void RunConcurrent(idx_t n, idx_t max_workers, const std::function<void(i
 		return;
 	}
 	std::atomic<idx_t> next {0};
+	std::mutex error_mutex;
+	std::exception_ptr first_error; // an exception must never escape a worker thread: rethrown after the join
 	vector<std::thread> workers;
 	workers.reserve(worker_count);
 	for (idx_t w = 0; w < worker_count; w++) {
 		workers.emplace_back([&]() {
-			for (;;) {
-				const idx_t i = next.fetch_add(1);
-				if (i >= n) {
-					break;
+			try {
+				for (;;) {
+					const idx_t i = next.fetch_add(1);
+					if (i >= n) {
+						break;
+					}
+					fn(i);
 				}
-				fn(i);
+			} catch (...) {
+				std::lock_guard<std::mutex> lock(error_mutex);
+				if (!first_error) {
+					first_error = std::current_exception();
+				}
+				next.store(n); // the others stop taking new items
 			}
 		});
 	}
 	for (auto &worker : workers) {
 		worker.join();
+	}
+	if (first_error) {
+		std::rethrow_exception(first_error);
 	}
 }
 

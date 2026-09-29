@@ -470,7 +470,7 @@ static bool AIDetectWrappedLeaf(const Expression &expr, AIMixedLeaf &out) {
 	}
 	auto wrapper = expr.Copy();
 	AIReplaceAICall(wrapper, *calls[0]);
-	out = AIMixedLeaf {kind, 'w', calls[0], nullptr, {}};
+	out = AIMixedLeaf {kind, 'w', calls[0], nullptr, {}, nullptr};
 	out.wrapper = std::move(wrapper);
 	return true;
 }
@@ -495,7 +495,7 @@ unique_ptr<Expression> AIDeserializeExpression(ClientContext &context, const str
 
 bool AIDetectMixedLeaf(const Expression &expr, AIMixedLeaf &out) {
 	if (AIIsFilterLeaf(expr)) {
-		out = AIMixedLeaf {'F', 0, &expr, nullptr, {}};
+		out = AIMixedLeaf {'F', 0, &expr, nullptr, {}, nullptr};
 		return true;
 	}
 	// Single comparison: <ai_call> <op> <const>.
@@ -522,7 +522,7 @@ bool AIDetectMixedLeaf(const Expression &expr, AIMixedLeaf &out) {
 		if (kind) {
 			const char op = AICmpOp(expr.GetExpressionType(), flipped);
 			if (op) {
-				out = AIMixedLeaf {kind, op, ai, cst, {}};
+				out = AIMixedLeaf {kind, op, ai, cst, {}, nullptr};
 				return true;
 			}
 		}
@@ -534,7 +534,7 @@ bool AIDetectMixedLeaf(const Expression &expr, AIMixedLeaf &out) {
 		char kind = 0;
 		vector<const Expression *> csts;
 		if (AIDetectSameCallEqualities(expr, ai, kind, csts)) {
-			out = AIMixedLeaf {kind, 'i', ai, nullptr, std::move(csts)};
+			out = AIMixedLeaf {kind, 'i', ai, nullptr, std::move(csts), nullptr};
 			return true;
 		}
 	}
@@ -553,7 +553,7 @@ bool AIDetectMixedLeaf(const Expression &expr, AIMixedLeaf &out) {
 			char kind = 0;
 			vector<const Expression *> csts;
 			if (AIDetectSameCallEqualities(child, ai, kind, csts)) {
-				out = AIMixedLeaf {kind, 'I', ai, nullptr, std::move(csts)};
+				out = AIMixedLeaf {kind, 'I', ai, nullptr, std::move(csts), nullptr};
 				return true;
 			}
 		}
