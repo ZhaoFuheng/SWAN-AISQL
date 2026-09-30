@@ -68,6 +68,7 @@ semantic decision**, and semantic placement happens before physical factorisatio
 ```
   pre-optimize hook   inline AI-bearing CTEs                                        (boundary removal)
   --- DuckDB built-ins run here: filter pushdown, join order, column pruning ---
+  0  top-N first       ORDER BY plain keys LIMIT k: keep the k rows, then run the AI select list on them
   1  semi-join reduce  prune each base table by its join neighbours' keys, below the leaf's
                        AI stage (an ai_filter or an AI projection), so the LLM sees reduced rows
   2  pull-up           lift the AI predicates above the joins, leaving a speculative pre-filter
@@ -84,6 +85,11 @@ travel together*; 4 and 5 decide *what they are evaluated on*; 6 decides *when t
 matches the shape the previous one produced: the region wants one node in a filter of its own, the
 factor graph wants a node over a cross product, the limit push-down wants a region or graph whose
 result feeds nothing but the LIMIT. Reversing any adjacent pair loses that shape.
+
+**Top-N first (stage 0).** For `SELECT ai_x(...) ... ORDER BY <plain column> LIMIT k`, DuckDB computes the
+SELECT list, AI calls included, for every row and then keeps k. Stage 0 keeps the k rows first and calls the
+LLM for those only (one SWAN 2.0 question: 745 calls -> 5). The answer is unchanged because the SELECT list
+is computed row by row. It is skipped when the sort reads an AI result.
 
 **Every spelling of a predicate is the same leaf.** Because a leaf is *any* boolean expression around
 one AI call, a predicate written as `lower(ai_complete(x)) IN ('yes', 'true')` is lifted, folded,
@@ -249,7 +255,7 @@ work can never subsidise the next.
 
 Each plan stage has one setting: `ai_inline_ai_ctes` (the pre-optimize hook), `ai_semi_reduce` (1),
 `ai_pullup` and `ai_speculative` (2), `ai_reorder` (3, the fold and the run-time ordering it enables),
-`ai_factorize` (4), `ai_join_factorize` (5) and `ai_limit` (6). Their purpose is the parity tests and
+`ai_factorize` (4), `ai_join_factorize` (5) and `ai_limit` (0 and 6). Their purpose is the parity tests and
 A/B runs; the defaults are the measured composition. Everything that was
 measured to be right — the ingest slice, the warm gate, the training cadence, the speculative gate,
 connection reuse — is a constant in the code, not a knob. The remaining settings name the

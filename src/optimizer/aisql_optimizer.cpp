@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 #include "duckdb/planner/operator/logical_materialized_cte.hpp"
 #include "optimizer/aisql_optimizer.hpp"
+#include "optimizer/ai_topn_pushdown.hpp"
 
 #include "optimizer/ai_cte_split.hpp"
 #include "optimizer/ai_cte_demand.hpp"
@@ -156,6 +157,13 @@ static void AisqlOptimizePlan(OptimizerExtensionInput &input, unique_ptr<Logical
 		return;
 	}
 	auto &optimizer = input.optimizer;
+
+	// ORDER BY ... LIMIT over a SELECT list with AI calls: keep the k rows first, then call the LLM for them only.
+	// First, so every later pass sees the AI projection above a k-row input.
+	{
+		AITopNPushdown ai_topn_pushdown(optimizer);
+		plan = ai_topn_pushdown.Optimize(std::move(plan));
+	}
 
 	// Yannakakis semi-join reduction: strip dangling tuples relationally before any AI evaluation.
 	{

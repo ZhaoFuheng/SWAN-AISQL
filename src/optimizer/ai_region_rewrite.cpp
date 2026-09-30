@@ -1,4 +1,5 @@
 #include "optimizer/ai_region_rewrite.hpp"
+#include "optimizer/ai_positional_maps.hpp"
 #include <unordered_set>
 #include "duckdb/planner/operator/logical_order.hpp"
 
@@ -254,67 +255,6 @@ void AIRegionRewrite::Rewrite(unique_ptr<LogicalOperator> &op, int64_t limit_k) 
 	}
 }
 
-//! Positional-map integrity across the hoist: inserting a region under one side of a join APPENDS
-//! its result column to that side's output, SHIFTING every later column's position in ancestor
-//! outputs. FILTER/ORDER_BY projection maps are positional, so each is snapshotted (its child's
-//! binding order) before the pass and remapped by binding IDENTITY afterwards -- identities
-//! survive the reshape, only their sequence changes. (Same disease and cure as the join
-//! rewrite's push-below; third shape of it found by the agent_bench workload.)
-static void SnapshotPositionalMaps(LogicalOperator &op,
-                                   vector<std::pair<LogicalOperator *, vector<ColumnBinding>>> &out) {
-	const bool has_map =
-	    (op.type == LogicalOperatorType::LOGICAL_FILTER && !op.Cast<LogicalFilter>().projection_map.empty()) ||
-	    (op.type == LogicalOperatorType::LOGICAL_ORDER_BY && !op.Cast<LogicalOrder>().projection_map.empty());
-	if (has_map && !op.children.empty()) {
-		out.emplace_back(&op, op.children[0]->GetColumnBindings());
-	}
-	for (auto &child : op.children) {
-		SnapshotPositionalMaps(*child, out);
-	}
-}
-
-static void CollectLiveOps(LogicalOperator &op, std::unordered_set<LogicalOperator *> &live) {
-	live.insert(&op);
-	for (auto &child : op.children) {
-		CollectLiveOps(*child, live);
-	}
-}
-
-static void RemapPositionalMaps(LogicalOperator &root,
-                                const vector<std::pair<LogicalOperator *, vector<ColumnBinding>>> &snaps) {
-	std::unordered_set<LogicalOperator *> live;
-	CollectLiveOps(root, live);
-	for (auto &snap : snaps) {
-		auto *node = snap.first;
-		if (!live.count(node) || node->children.empty()) {
-			continue;
-		}
-		vector<ProjectionIndex> *map = nullptr;
-		if (node->type == LogicalOperatorType::LOGICAL_FILTER) {
-			map = &node->Cast<LogicalFilter>().projection_map;
-		} else if (node->type == LogicalOperatorType::LOGICAL_ORDER_BY) {
-			map = &node->Cast<LogicalOrder>().projection_map;
-		}
-		if (!map || map->empty()) {
-			continue;
-		}
-		const auto new_out = node->children[0]->GetColumnBindings();
-		const auto &old_out = snap.second;
-		for (auto &m : *map) {
-			if (m.GetIndex() >= old_out.size()) {
-				continue;
-			}
-			const auto binding = old_out[m.GetIndex()];
-			for (idx_t j = 0; j < new_out.size(); j++) {
-				if (new_out[j] == binding) {
-					m = ProjectionIndex(j);
-					break;
-				}
-			}
-		}
-	}
-}
-
 unique_ptr<LogicalOperator> AIRegionRewrite::Optimize(unique_ptr<LogicalOperator> op) {
 	// SCALAR AI fan-out dedup is ON BY DEFAULT (opt OUT with DUCKDB_AI_DEDUP=off/0). A join fan-out repeats
 	// each input row; re-evaluating an ai_filter/classify/score/complete on the same input is pure wasted LLM
@@ -324,10 +264,11 @@ unique_ptr<LogicalOperator> AIRegionRewrite::Optimize(unique_ptr<LogicalOperator
 	const string mode = AIVarcharSetting(optimizer.context, "ai_factorize", "all");
 	allow_fanout_dedup = mode != "off";
 	scan_regions = mode == "all";
-	vector<std::pair<LogicalOperator *, vector<ColumnBinding>>> map_snaps;
-	SnapshotPositionalMaps(*op, map_snaps);
+	// Inserting a region under one side of a join APPENDS its result column to that side's output, shifting
+	// later positions in ancestors' positional maps (filters, orders and joins): remap them by identity.
+	const PositionalMapSnapshot maps(*op);
 	Rewrite(op, -1);
-	RemapPositionalMaps(*op, map_snaps);
+	maps.Remap(*op);
 	return op;
 }
 

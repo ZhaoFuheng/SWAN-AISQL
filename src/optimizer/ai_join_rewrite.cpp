@@ -1,3 +1,4 @@
+#include "optimizer/ai_positional_maps.hpp"
 #include "optimizer/ai_join_rewrite.hpp"
 
 #include "duckdb/catalog/catalog.hpp"
@@ -675,6 +676,7 @@ bool AIJoinRewrite::TrySemiConvertForConsumer(LogicalOperator &consumer) {
 	};
 	vector<DeadExprs> deads;
 	bool saw_region = false;
+	vector<LogicalOperator *> chain; // the row-preserving ops between the consumer and the join, top-down
 	LogicalOperator *cur = consumer.children[0].get();
 	while (cur->children.size() == 1) {
 		if (cur->type == LogicalOperatorType::LOGICAL_PROJECTION) {
@@ -705,6 +707,7 @@ bool AIJoinRewrite::TrySemiConvertForConsumer(LogicalOperator &consumer) {
 			break;
 		}
 		saw_ai = saw_ai || OpHasAICall(*cur);
+		chain.push_back(cur);
 		cur = cur->children[0].get();
 	}
 	if (cur->type != LogicalOperatorType::LOGICAL_COMPARISON_JOIN || cur->children.size() != 2) {
@@ -724,7 +727,24 @@ bool AIJoinRewrite::TrySemiConvertForConsumer(LogicalOperator &consumer) {
 	} else {
 		return false; // the consumer genuinely reads both sides -> multiplicity may matter downstream shapes
 	}
+	// A filter on the chain may carry a POSITIONAL projection_map (ColumnLifetimeAnalyzer) over its child's output.
+	// The conversion drops the other side's columns from the join's output, and regions and map-less filters
+	// pass that change up, so every such map is remapped by binding identity -- bottom-up, because each op's
+	// new output depends on the maps below it. (A stale map selected the region's result in place of the kept
+	// column: "Failed to bind column reference", SWAN 2.0 DISTINCT-over-join.)
+	vector<vector<ColumnBinding>> old_child_out;
+	for (auto *op : chain) {
+		old_child_out.push_back(op->children[0]->GetColumnBindings());
+	}
 	join.join_type = side == 0 ? JoinType::SEMI : JoinType::RIGHT_SEMI;
+	for (idx_t i = chain.size(); i-- > 0;) {
+		if (chain[i]->type == LogicalOperatorType::LOGICAL_FILTER) {
+			auto &map = chain[i]->Cast<LogicalFilter>().projection_map;
+			if (!map.empty()) {
+				RemapPositionalMap(map, old_child_out[i], chain[i]->children[0]->GetColumnBindings());
+			}
+		}
+	}
 	for (auto &de : deads) {
 		for (const idx_t i : de.dead) {
 			de.proj->expressions[i] =
@@ -753,8 +773,13 @@ unique_ptr<LogicalOperator> AIJoinRewrite::Optimize(unique_ptr<LogicalOperator> 
 	factor_mode = mode == "factor";
 	// DISTINCT/aggregate consumers first: an INNER converted to SEMI no longer needs (or allows) the region
 	// push-below -- the SEMI already never fans out, so the region above it folds survivors with no expand.
+	// The push-below moves a region (and its appended result column) under a join side, and the SEMI conversion
+	// narrows a join: both shift positions in ancestors' maps. Filter/order maps are fixed where each rewrite
+	// happens (RemapParentPositionalMaps, TrySemiConvertForConsumer); ancestor JOIN maps are remapped here.
+	const PositionalMapSnapshot maps(*op, /*joins_only=*/true);
 	SemiConvertSweep(*op);
 	Rewrite(op, op);
+	maps.Remap(*op);
 	if (semi_converted) {
 		op->ResolveOperatorTypes(); // the converted joins' output types shrank to the kept side
 	}

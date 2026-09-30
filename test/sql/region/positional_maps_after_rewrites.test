@@ -1,0 +1,100 @@
+# name: test/sql/region/positional_maps_after_rewrites.test
+# description: Two plans that died in the binding resolver ("Failed to bind column reference"), found by SWAN 2.0.
+# group: [region]
+
+#
+# DuckDB's column-lifetime pass gives filters and joins POSITIONAL projection maps over their children's outputs.
+#  1. DISTINCT over a join with an AI filter: the join rewrite converts the INNER join to SEMI (only one side is
+#     read), which drops the other side's columns; a filter between the DISTINCT and the join kept its old
+#     positional map and selected the AI region's result column in place of the kept column.
+#  2. A negated AI filter next to a second AI filter on the same CTE key, in a three-way join: the region
+#     rewrite put a region under the inner join, whose output grew by the region's result column, and the
+#     outer join's positional map then selected that column in place of the one the query returns.
+# Both queries must return what they return with the rewrites off (ai_pullup = false, the old safe path).
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE circuits AS SELECT range AS circuit_id, 'circuit ' || range::VARCHAR AS name FROM range(60);
+
+statement ok
+CREATE TABLE races AS SELECT range AS race_id, range % 50 AS circuit_id FROM range(400);
+
+statement ok
+CREATE TABLE districts AS SELECT 'district ' || range::VARCHAR AS dname, CASE WHEN range % 3 = 0 THEN 'S' ELSE 'D' END AS rtype FROM range(40);
+
+statement ok
+CREATE TABLE schools AS SELECT range AS code, 'school ' || range::VARCHAR AS school, 'street ' || (range % 90)::VARCHAR AS street,
+                               'district ' || (range % 40)::VARCHAR AS district FROM range(300);
+
+statement ok
+CREATE TABLE scores AS SELECT range AS code, 'school ' || range::VARCHAR AS sname, 300 + (range * 7) % 400 AS math FROM range(300);
+
+statement ok
+CREATE TABLE lunch AS SELECT range AS code, range % 5 AS grade FROM range(300);
+
+# --- shape 1: DISTINCT of the filtered side's column, and DISTINCT of the other side's column
+statement ok
+CREATE TABLE s1 AS SELECT DISTINCT c.name FROM circuits c JOIN races r ON r.circuit_id = c.circuit_id
+WHERE ai_filter('[p=50] Is it a street circuit? name: ' || c.name);
+
+statement ok
+CREATE TABLE s1b AS SELECT DISTINCT d.dname FROM districts AS d INNER JOIN schools AS s ON s.district = d.dname
+WHERE d.rtype = 'D' AND ai_filter('[p=50] Is it in Hayward? school: ' || s.school);
+
+# --- shape 2: negated AI filter + a second AI filter on one CTE key, three-way join, a plain predicate
+statement ok
+CREATE TABLE s2 AS WITH s AS (SELECT *, school || ', ' || street AS school_address FROM schools)
+SELECT t.sname FROM scores AS t INNER JOIN s ON t.code = s.code INNER JOIN lunch AS f ON f.code = s.code
+WHERE t.math > 400 AND NOT ai_filter('[p=50] Is it a magnet school? school_address: ' || s.school_address)
+  AND ai_filter('[p=50] Is it in Riverside County? school_address: ' || s.school_address);
+
+statement ok
+SET ai_pullup = false;
+
+statement ok
+CREATE TABLE r1 AS SELECT DISTINCT c.name FROM circuits c JOIN races r ON r.circuit_id = c.circuit_id
+WHERE ai_filter('[p=50] Is it a street circuit? name: ' || c.name);
+
+statement ok
+CREATE TABLE r1b AS SELECT DISTINCT d.dname FROM districts AS d INNER JOIN schools AS s ON s.district = d.dname
+WHERE d.rtype = 'D' AND ai_filter('[p=50] Is it in Hayward? school: ' || s.school);
+
+statement ok
+CREATE TABLE r2 AS WITH s AS (SELECT *, school || ', ' || street AS school_address FROM schools)
+SELECT t.sname FROM scores AS t INNER JOIN s ON t.code = s.code INNER JOIN lunch AS f ON f.code = s.code
+WHERE t.math > 400 AND NOT ai_filter('[p=50] Is it a magnet school? school_address: ' || s.school_address)
+  AND ai_filter('[p=50] Is it in Riverside County? school_address: ' || s.school_address);
+
+statement ok
+SET ai_pullup = true;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM s1 EXCEPT ALL SELECT * FROM r1) UNION ALL (SELECT * FROM r1 EXCEPT ALL SELECT * FROM s1));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM s1b EXCEPT ALL SELECT * FROM r1b) UNION ALL (SELECT * FROM r1b EXCEPT ALL SELECT * FROM s1b));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM s2 EXCEPT ALL SELECT * FROM r2) UNION ALL (SELECT * FROM r2 EXCEPT ALL SELECT * FROM s2));
+----
+0
+
+# non-trivial results: the comparisons above are not between two empty tables
+query III
+SELECT (SELECT count(*) FROM s1) > 0, (SELECT count(*) FROM s1b) > 0, (SELECT count(*) FROM s2) > 0;
+----
+true	true	true
+
+# the rows really are the kept side's column (the stale map returned the region's result instead)
+query II
+SELECT bool_and(name LIKE 'circuit %'), bool_and(dname LIKE 'district %') FROM s1, s1b;
+----
+true	true

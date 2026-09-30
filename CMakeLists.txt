@@ -32,6 +32,7 @@ set(EXTENSION_SOURCES
     src/optimizer/ai_predicate_rewrite.cpp
     src/optimizer/ai_filter_tree_build.cpp
     src/optimizer/ai_limit_pushdown.cpp
+    src/optimizer/ai_topn_pushdown.cpp
     src/optimizer/ai_region_rewrite.cpp
     src/rep/ai_sql_map_chunk.cpp
     src/exec/physical_ai_region.cpp

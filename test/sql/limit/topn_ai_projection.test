@@ -1,0 +1,106 @@
+# name: test/sql/limit/topn_ai_projection.test
+# description: ORDER BY <plain key> LIMIT k with AI calls in the SELECT list calls the LLM for the k kept rows only.
+# group: [limit]
+
+#
+# DuckDB plans TOP_N over the SELECT-list projection, so every row's AI call used to run before the top-N kept k
+# of them (SWAN 2.0 top_n questions: 745 calls for LIMIT 10). AITopNPushdown runs the top-N first when no sort key
+# reads an AI result. A key that does read one must still see every row.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE heroes AS SELECT range AS id, 'hero ' || range::VARCHAR AS name, (range * 37) % 200 AS weight FROM range(200);
+
+# --- the SELECT-list AI call runs for the k kept rows only (evaluations = calls + local-cache hits)
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE fast AS SELECT name, weight, ai_classify('Which publisher? name: ' || name, ['DC', 'Marvel']) AS publisher
+FROM heroes ORDER BY weight DESC, id LIMIT 5;
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls) + sum(cache_hits))::BIGINT FROM ai_usage();
+----
+5
+
+statement ok
+SET ai_limit = false;
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE slow AS SELECT name, weight, ai_classify('Which publisher? name: ' || name, ['DC', 'Marvel']) AS publisher
+FROM heroes ORDER BY weight DESC, id LIMIT 5;
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls) + sum(cache_hits))::BIGINT FROM ai_usage();
+----
+200
+
+statement ok
+SET ai_limit = true;
+
+# result-preserving, row for row and in order
+query I
+SELECT count(*) FROM (SELECT row_number() OVER () AS rn, * FROM fast) f
+FULL OUTER JOIN (SELECT row_number() OVER () AS rn, * FROM slow) s USING (rn)
+WHERE f.name IS DISTINCT FROM s.name OR f.weight IS DISTINCT FROM s.weight OR f.publisher IS DISTINCT FROM s.publisher;
+----
+0
+
+query I
+SELECT count(*) FROM fast;
+----
+5
+
+# --- a key that reads the AI result must not be pushed: every row is evaluated
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE by_ai AS SELECT name, ai_classify('Which publisher? name: ' || name, ['DC', 'Marvel']) AS publisher
+FROM heroes ORDER BY publisher, id LIMIT 5;
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls) + sum(cache_hits))::BIGINT FROM ai_usage();
+----
+200
+
+statement ok
+SET ai_limit = false;
+
+statement ok
+CREATE TABLE by_ai_ref AS SELECT name, ai_classify('Which publisher? name: ' || name, ['DC', 'Marvel']) AS publisher
+FROM heroes ORDER BY publisher, id LIMIT 5;
+
+statement ok
+SET ai_limit = true;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM by_ai EXCEPT ALL SELECT * FROM by_ai_ref) UNION ALL (SELECT * FROM by_ai_ref EXCEPT ALL SELECT * FROM by_ai));
+----
+0
+
+# --- a computed key over plain columns is substituted below the projection
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE computed AS SELECT id, ai_complete('Describe this hero. name: ' || name) AS d FROM heroes
+ORDER BY weight * 2 + id % 3, id LIMIT 7;
+
+query II
+SELECT count(*), count(d) FROM computed;
+----
+7	7
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls) + sum(cache_hits))::BIGINT FROM ai_usage();
+----
+7
