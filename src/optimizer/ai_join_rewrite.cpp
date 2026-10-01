@@ -138,23 +138,6 @@ static optional_ptr<LogicalOperator> ParentOf(LogicalOperator &root, LogicalOper
 	return nullptr;
 }
 
-// Remap a positional map by binding IDENTITY: old position -> the same binding's new position.
-static void RemapPositionalMap(vector<ProjectionIndex> &map, const vector<ColumnBinding> &old_out,
-                               const vector<ColumnBinding> &new_out) {
-	for (auto &m : map) {
-		if (m.GetIndex() >= old_out.size()) {
-			continue;
-		}
-		const auto binding = old_out[m.GetIndex()];
-		for (idx_t j = 0; j < new_out.size(); j++) {
-			if (new_out[j] == binding) {
-				m = ProjectionIndex(j);
-				break;
-			}
-		}
-	}
-}
-
 //! A FILTER/ORDER_BY above `target` may carry a POSITIONAL projection_map built for `target`'s old output
 //! order. The push-below reshapes that order (the region result moves from the end into the pushed side);
 //! binding identities are preserved, only their sequence changes, so the map is remapped by identity.
@@ -171,7 +154,7 @@ static void RemapParentPositionalMaps(LogicalOperator &root, LogicalOperator &ta
 			                ? parent->Cast<LogicalFilter>().projection_map
 			                : parent->Cast<LogicalOrder>().projection_map;
 			if (!map.empty()) {
-				RemapPositionalMap(map, old_out, cur->GetColumnBindings());
+				PositionalMapSnapshot::RemapByIdentity(map, old_out, cur->GetColumnBindings());
 				return; // above here the order is defined by this map, now correct
 			}
 		} else if (LogicalAIRegion::TryCast(*parent)) {
@@ -741,7 +724,8 @@ bool AIJoinRewrite::TrySemiConvertForConsumer(LogicalOperator &consumer) {
 		if (chain[i]->type == LogicalOperatorType::LOGICAL_FILTER) {
 			auto &map = chain[i]->Cast<LogicalFilter>().projection_map;
 			if (!map.empty()) {
-				RemapPositionalMap(map, old_child_out[i], chain[i]->children[0]->GetColumnBindings());
+				PositionalMapSnapshot::RemapByIdentity(map, old_child_out[i],
+				                                       chain[i]->children[0]->GetColumnBindings());
 			}
 		}
 	}

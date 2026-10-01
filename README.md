@@ -29,11 +29,9 @@ GEN=ninja make reldebug        # or: make release / make debug   (~25 min, build
 - `build/reldebug/extension/aisql/aisql.duckdb_extension` — the loadable extension
 - `build/reldebug/test/unittest` — the test runner with the extension's sqllogictests registered
 
-The submodules track DuckDB `main`, pinned to the commit the code is written against (the engine uses
-current planner/vector APIs that are not in the v1.5 release line). `vcpkg` is optional: the Makefile only
-uses it when `VCPKG_TOOLCHAIN_PATH` is set, and `vcpkg.json` lists no dependencies (the LLM client uses
-DuckDB's bundled http-only `httplib` and `yyjson`; TLS towards providers is terminated by the local proxies
-in `serve/`).
+The `duckdb/` submodule is pinned to the DuckDB commit the engine is written against. No vcpkg dependencies
+are needed: the LLM client uses DuckDB's bundled http-only `httplib`, and the local proxies in `serve/`
+terminate TLS towards the providers.
 
 To check the build, run the test suite. It uses an in-process deterministic mock LLM, so it needs no
 network or keys:
@@ -129,6 +127,16 @@ orders predicates by learned selectivity and keeps 20 requests in flight; `ai_us
 `ai_complete(prompt) → VARCHAR`, `ai_agg(list, instruction)`, `ai_embed(text)`, and `ai_image(path)` to put an
 image into a prompt. Prompts are ordinary SQL string expressions, so any column can be concatenated in.
 
+**Writing a filter prompt.** Keep the question apart from the evidence. When the context is a short fact
+about a named entity (a name, an address), this layout measured best on the SWAN benchmark, raising filter
+quality from 0.65 to 0.71 at the same cost; on long free-text contexts (SemBench's movie reviews) the one-line
+form above does as well or better:
+
+```sql
+ai_filter('Context:' || chr(10) || '[school_address]: «' || school_address || '»' || chr(10) || chr(10) || chr(10)
+          || 'Claim: Is the school in the city of Fresno? school_address')
+```
+
 **If a function returns `NULL` and `ai_usage()` shows `llm_calls = 0`**, the request never got an answer:
 `failed_calls` counts such requests and the CLI prints one `[aisql] LLM request to <endpoint> failed: …`
 line with the reason (typically nothing listening on the endpoint — start `serve/start_stack.sh`, or
@@ -185,73 +193,28 @@ but most of their queries need the image assets, which are not in git — see `s
 
 ## Settings
 
-All settings are `SET`-able per connection; the `AI_*` environment variable in the last column seeds the
-default when set (the bench harnesses use them). `SELECT name, value FROM duckdb_settings() WHERE name LIKE 'ai_%'`
-shows the live values.
+Everything is a DuckDB setting (`SET ai_... = ...`, per connection). The ones most users touch:
 
-**Connection and model**
+| setting | default | what it does |
+|---|---|---|
+| `ai_endpoint` | `http://localhost:4000` | the OpenAI-compatible chat endpoint (`http://localhost:4001` for the cache proxy) |
+| `ai_model` | `gpt-5.6-luna` | the chat model for every AI function |
+| `ai_api_key` | *(empty)* | bearer token for the endpoint; empty for the local stack |
+| `ai_concurrency` | `20` | LLM requests in flight |
+| `ai_embed_endpoint` | `http://localhost:4002` | the embedding server behind the selectivity model |
 
-| setting | values | default | what it does |
-|---|---|---|---|
-| `ai_endpoint` | URL (http) | `http://localhost:4000` | OpenAI-compatible chat endpoint: litellm directly, or `http://localhost:4001` for the cache proxy (`AI_PROXY_URL`) |
-| `ai_model` | model id | `gpt-5.6-luna` | chat model for every AI function (`AI_MODEL`) |
-| `ai_api_key` | string | *(empty)* | bearer token sent to `ai_endpoint`; empty for the local stack (`AI_API_KEY`) |
-| `ai_reasoning_effort` | `low` / `medium` / `high` / *(empty)* | *(empty = omit)* | forwarded per request when set (`AI_REASONING_EFFORT`) |
-| `ai_concurrency` | integer ≥ 1 | `20` | in-flight LLM requests, process-wide (`AI_MAX_CONCURRENCY`) |
-| `ai_max_retries` | integer ≥ 0 | `6` | retries per request on 429/503/529 or a transient failure, exponential backoff (`AI_MAX_RETRIES`) |
-| `ai_hedge` | `true` / `false` | `true` | duplicate a call still unanswered past the observed p99 latency; first answer wins (`AI_HEDGE`) |
-| `ai_prefix_cache` | `true` / `false` | `true` | explicit provider prompt caching for factor-graph pair prompts (`AI_PREFIX_CACHE`) |
-| `ai_local_cache` | `true` / `false` | `true` | in-process response cache for chat + embeddings |
-| `ai_local_cache_scope` | `query` / `cross_query` | `query` | `query`: one query never serves another (the benchmark rule); `cross_query`: process lifetime |
-| `ai_embed_endpoint` | URL (http) | `http://localhost:4002` | embeddings server for the selectivity model (`AI_EMBED_URL`) |
-| `ai_embed_model` | model id | `sentence-transformers/all-MiniLM-L6-v2` | model name sent with each embeddings request; the server embeds with whatever it loaded (`AI_EMBED_MODEL`; the server's image model is `AI_EMBED_IMAGE_MODEL`) |
-| `ai_embed_images` | `true` / `false` | `true` | embed image predicates (predicate text × image through CLIP) for the selectivity model; `false`, or a text-only server, keeps a neutral prior for them (`AI_EMBED_IMAGES`) |
-| `ai_embed_concurrency` | integer ≥ 1 | `4` | embedding requests in flight at once (`AI_EMBED_CONCURRENCY`) |
-| `ai_embed_batch_images` | integer ≥ 1 | `8` | image items per embedding request (`AI_EMBED_BATCH_IMAGES`) |
-
-**TypeSafe System One (Jev) backend** — optional, per function
-
-| setting | values | default | what it does |
-|---|---|---|---|
-| `ai_typesafe` | csv of `filter`, `classify`, `score` | *(empty = off)* | route `ai_filter` → Noul, `ai_classify` → Choice and/or `ai_score` with integer bounds of at most 10 levels → Score to TypeSafe; other `ai_score` forms and image-bearing prompts stay on the chat model (`AI_TYPESAFE`) |
-| `ai_typesafe_endpoint` | URL (http) | `http://localhost:4001` | the cache proxy, which terminates TLS towards `https://api.typesafe.ai` (`AI_TYPESAFE_URL`) |
-| `ai_typesafe_model` | model id | `jev-latest` | (`AI_TYPESAFE_MODEL`) |
-| `ai_typesafe_api_key` | string | *(empty)* | (`TYPESAFE_API_KEY`) |
-| `ai_typesafe_threshold` | 0.0 – 1.0 | `0.5` | Noul probability at or above which `ai_filter` is true (`AI_TYPESAFE_THRESHOLD`) |
-
-**Optimizer** — every stage is result-preserving; each can be switched off independently
-
-| setting | values | default | what it does |
-|---|---|---|---|
-| `ai_inline_ai_ctes` | `true` / `false` | `true` | inline CTEs that contain AI functions so pruning and pull-up can reach the predicate |
-| `ai_semi_reduce` | `true` / `false` | `true` | Yannakakis semi-join reduction before any AI evaluation |
-| `ai_pullup` | `true` / `false` | `true` | lift semantic filters above the joins (`DUCKDB_SEMANTIC_PULLUP`) |
-| `ai_speculative` | `true` / `false` | `true` | speculative pre-filter at a pulled-up predicate's leaf: rows the selectivity model expects to fail are evaluated and pruned before the join, the rest pass through to the lifted predicate (`AI_SPECULATIVE`) |
-| `ai_reorder` | `true` / `false` | `true` | ordering of AI predicates with learned selectivity + speculative evaluation (`DUCKDB_AI_REORDER`) |
-| `ai_factorize` | `off` / `filters` / `all` | `all` | AI region placement: none / above AI filters only / every AI call (`DUCKDB_AI_DEDUP`, `DUCKDB_AI_SCAN_REGION`) |
-| `ai_join_factorize` | `off` / `pushdown` / `factor` | `factor` | AI-condition joins: expand / push the region below the join / factor graph over the pair domain (`DUCKDB_AI_GROUP_JOIN`) |
-| `ai_limit` | `true` / `false` | `true` | LIMIT push-down into AI evaluation (early stop) (`DUCKDB_AI_LIMIT`) |
-
-**Debug / experiment knobs** (`ai_debug_*`) — stable but not part of the user contract
-
-| setting | values | default | what it does |
-|---|---|---|---|
-| `ai_debug_log` | csv of `region`, `dispatch`, `spec`, `yann`, `leaftexts`, `mock` | *(empty)* | stderr diagnostics per subsystem (`region` prints the leaf-region timers, `dispatch` each batch of calls the region hands to its request pool) |
-| (env) `AI_MLP_FIFO` / `AI_MLP_MIN_TRAIN` / `AI_MLP_TRAIN_EVERY` | integer | `256` / `16` / 3 × `ai_concurrency` | the selectivity model's training window (most recent labelled examples), the examples a step needs, and the calls between two full-batch training steps |
-| `ai_debug_prompt_variant` | `strict` / `soft` / `plain` | `strict` | `ai_filter` system prompt; `plain` sends the bare prompt (cross-engine, prompt-identical comparisons) |
-
-Embedding-server environment (`serve/ai_embed_server.py`): `AI_EMBED_MODEL` (text model), `AI_EMBED_IMAGE_MODEL`
-(CLIP model; empty = text only), `AI_EMBED_DEVICE` (default `cpu`), `AI_EMBED_PORT`, `AI_EMBED_BACKEND` (`st` / `mlx`).
-`GET http://localhost:4002/` reports what it loaded.
+Every optimizer stage has an on/off setting (`ai_semi_reduce`, `ai_pullup`, `ai_reorder`, `ai_factorize`,
+`ai_join_factorize`, `ai_limit`, ...) for parity tests and A/B runs; the defaults are the measured
+composition. The full list, with every default and the environment variable that seeds it, is in
+[docs/SETTINGS.md](docs/SETTINGS.md).
 
 ## Hybrid bench (agent_bench Q1–Q30): SWAN vs LOTUS, with PLOP as the reference
 
 The 30 hybrid queries (relational plans with semantic operators over DataAgentBench and TPC-H data) are
 the benchmark introduced by the PLOP paper. PLOP itself is not publicly released, so it cannot be rerun
-here; its authors shared the queries and their execution results with us, and both are committed:
-`plop_queries/` (their SQL), `results/plop` (PLOP's optimized runs), `results/plop_gt` (the un-rewritten
-execution with the output-truncating `LIMIT`s removed, used as the deterministic ground truth) and
-`results/plop_none`. What you can run is SWAN and LOTUS on the same queries and compare all three:
+here; its authors shared the queries and their execution results with us, and both are committed under
+`sembench/AGENTBENCH/` (`sembench/README.md` describes the ground truth). What you can run is SWAN and
+LOTUS on the same queries and compare all three:
 
 ```sh
 cd sembench/AGENTBENCH
@@ -266,12 +229,10 @@ The SWAN translations are `swan_queries/Q*.sql` (`translate_to_swan.py` document
 tagged (`SWAN_TAG=my_run` → `results/my_run/` + `results/my_run_agentbench_results.json`) and scored by
 tag: `python3 eval_agentbench.py my_run plop`.
 
-Read the quality column with the sampling in mind. The published SWAN row (1.000) consumed the *same*
-recorded model verdict as PLOP for every shared prompt (the proxy's shared-verdict alias over PLOP's
-recorded samples, `sembench/README.md` rule 7); a fresh run samples the model anew, so its agreement
-with PLOP's ground truth also measures verdict variance, exactly as LOTUS's column does. Calls, cost
-and latency are comparable either way, and the committed `results/` hold the runs behind the numbers
-in `docs/DESIGN.md`.
+Read the quality column with the sampling in mind: the published SWAN row reused PLOP's recorded model
+verdicts for every shared prompt, while a fresh run samples the model anew, so its agreement with the
+ground truth also measures verdict variance (`sembench/README.md` rule 7). Calls, cost and latency are
+comparable either way.
 
 ## Acknowledgements
 
@@ -293,4 +254,5 @@ serve/               start_stack.sh, ai_cache_server.py, ai_embed_server.py, lit
 sembench/            SemBench MOVIE / ECOMM / MMQA and agent_bench (SWAN, PLOP, LOTUS queries), harnesses,
                      ground truth, recorded results, compare.py
 docs/DESIGN.md       the design: two currencies, pipeline, boundary rule, duplication safety, caching, measured state
+docs/SETTINGS.md     every setting, its default and the environment variable that seeds it
 ```

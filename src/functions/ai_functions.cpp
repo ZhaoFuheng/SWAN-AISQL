@@ -357,6 +357,13 @@ static unique_ptr<FunctionData> AIKeyBind(BindScalarFunctionInput &input) {
 			                                    : string());
 		}
 	}
+	// ai_filter takes exactly one argument, the prompt. Its varargs signature exists only so this bind can
+	// append the key columns; a re-bind (keys already in place) returned above, so any other extra argument
+	// was written by the user and would otherwise be silently ignored.
+	if (bound_function.GetName() == "ai_filter" && arguments.size() != 1) {
+		throw BinderException("ai_filter takes exactly one argument, the prompt (got %llu)",
+		                      static_cast<uint64_t>(arguments.size()));
+	}
 	// NULL handling for the prompt, expressed IN THE EXPRESSION so every evaluation path inherits
 	// it -- the scalar functions, and equally the folded reorder node, which rebuilds its prompts
 	// from this expression and would otherwise need its own copy of the rule.

@@ -104,5 +104,18 @@ SELECT len(ai_embed('hello')) FROM range(1);
 ----
 4
 
+# ai_filter takes exactly one argument, the prompt: an extra argument is an error, not silently ignored
+statement error
+SELECT ai_filter('Is it blue?', 'sky');
+----
+ai_filter takes exactly one argument
+
+# the key columns the bind appends to a prompt over a column survive a plan copy (a CTE read twice re-binds)
+query I
+WITH c AS (SELECT range AS id FROM range(6) WHERE ai_filter('Is this id interesting? ' || range::VARCHAR))
+SELECT (SELECT count(*) FROM c) * (SELECT count(*) FROM c) = (SELECT count(*) FROM c a, c b);
+----
+true
+
 statement ok
 CALL ai_mock_stop();

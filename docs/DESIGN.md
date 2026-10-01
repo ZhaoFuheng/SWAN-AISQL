@@ -261,7 +261,8 @@ measured to be right — the ingest slice, the warm gate, the training cadence, 
 connection reuse — is a constant in the code, not a knob. The remaining settings name the
 endpoints, models, keys and concurrency of the LLM, embedding and TypeSafe backends. Two debug
 settings stay: `ai_debug_log` (diagnostics per subsystem) and `ai_debug_prompt_variant` (the
-cross-engine protocol above).
+cross-engine protocol above). The full list, with defaults and environment variables, is
+[SETTINGS.md](SETTINGS.md).
 
 ---
 

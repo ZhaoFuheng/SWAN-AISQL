@@ -28,8 +28,26 @@ public:
 		Take(root);
 	}
 
-	//! Remap every snapshotted map of an operator still in `root`'s tree by binding identity. A map entry
-	//! whose binding is gone keeps its position (a pass that removes a column must fix its own consumers).
+	//! Remap one positional map from `before` (its child's binding order when the map was built) to `now`.
+	//! A map entry whose binding is gone keeps its position (a pass that removes a column must fix its own
+	//! consumers).
+	static void RemapByIdentity(vector<ProjectionIndex> &map, const vector<ColumnBinding> &before,
+	                            const vector<ColumnBinding> &now) {
+		for (auto &m : map) {
+			if (m.GetIndex() >= before.size()) {
+				continue;
+			}
+			const auto binding = before[m.GetIndex()];
+			for (idx_t j = 0; j < now.size(); j++) {
+				if (now[j] == binding) {
+					m = ProjectionIndex(j);
+					break;
+				}
+			}
+		}
+	}
+
+	//! Remap every snapshotted map of an operator still in `root`'s tree by binding identity.
 	void Remap(LogicalOperator &root) const {
 		std::unordered_set<const LogicalOperator *> live;
 		Collect(root, live);
@@ -41,19 +59,7 @@ public:
 			if (!map) {
 				continue;
 			}
-			const auto now = entry.op->children[entry.child]->GetColumnBindings();
-			for (auto &m : *map) {
-				if (m.GetIndex() >= entry.before.size()) {
-					continue;
-				}
-				const auto binding = entry.before[m.GetIndex()];
-				for (idx_t j = 0; j < now.size(); j++) {
-					if (now[j] == binding) {
-						m = ProjectionIndex(j);
-						break;
-					}
-				}
-			}
+			RemapByIdentity(*map, entry.before, entry.op->children[entry.child]->GetColumnBindings());
 		}
 	}
 
