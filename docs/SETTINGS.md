@@ -40,7 +40,7 @@ shows the live values.
 |---|---|---|---|
 | `ai_inline_ai_ctes` | `true` / `false` | `true` | inline CTEs that contain AI functions so pruning and pull-up can reach the predicate |
 | `ai_semi_reduce` | `true` / `false` | `true` | Yannakakis semi-join reduction before any AI evaluation |
-| `ai_pullup` | `true` / `false` | `true` | lift semantic filters above the joins (`DUCKDB_SEMANTIC_PULLUP`) |
+| `ai_pullup` | `true` / `false` | `true` | lift each semantic filter through every operator it commutes with (joins' preserved sides, projections, CTE main queries) to just above the highest row-removing one (`DUCKDB_SEMANTIC_PULLUP`) |
 | `ai_speculative` | `true` / `false` | `true` | speculative pre-filter at a pulled-up predicate's leaf: rows the selectivity model expects to fail are evaluated and pruned before the join, the rest pass through to the lifted predicate (`AI_SPECULATIVE`) |
 | `ai_reorder` | `true` / `false` | `true` | ordering of AI predicates with learned selectivity + speculative evaluation (`DUCKDB_AI_REORDER`) |
 | `ai_factorize` | `off` / `filters` / `all` | `all` | AI region placement: none / above AI filters only / every AI call (`DUCKDB_AI_DEDUP`, `DUCKDB_AI_SCAN_REGION`) |

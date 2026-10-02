@@ -71,8 +71,9 @@ semantic decision**, and semantic placement happens before physical factorisatio
   0  top-N first       ORDER BY plain keys LIMIT k: keep the k rows, then run the AI select list on them
   1  semi-join reduce  prune each base table by its join neighbours' keys, below the leaf's
                        AI stage (an ai_filter or an AI projection), so the LLM sees reduced rows
-  2  pull-up           lift the AI predicates above the joins, leaving a speculative pre-filter
-                       at the leaf                                              (semantic placement)
+  2  pull-up           lift each AI predicate through every operator it commutes with, settle it
+                       above the highest row-removing one, leave a speculative pre-filter at the leaf
+                                                                               (semantic placement)
      cleanup           re-run column pruning / build-side choice after 1-2 reshaped the plan
   3  fold              group a filter's AI predicates into one node (tree + leaves)
   4  region            place the node, or a lone AI call, in a region: row -> distinct-value currency
@@ -101,6 +102,22 @@ relational ones, the node is installed in its own filter *above* the relational 
 evaluates a conjunction through an adaptive filter that permutes conjunct order, so leaving the two
 side by side could run the LLM node first over every row; a separate filter makes the cheap-first
 order structural.
+
+**Pull-up is the inverse of push-down.** DuckDB pushes a cheap predicate as low as it legally can;
+an AI predicate costs a call per distinct input, so stage 2 lifts it as high as it legally can. The
+walk is bottom-up and knows nothing about query shapes, only one commutation law per operator: a
+filter on the columns of one input moves above a filter, a projection (routing its columns through,
+appending a passthrough column when the consumers above tolerate it), a cross product, the
+preserved side of a join (both sides of INNER; the left of SEMI, ANTI, LEFT, SINGLE, MARK; the right
+of RIGHT, RIGHT_SEMI, RIGHT_ANTI), and a CTE node's main query; it stops at aggregates, limits,
+sorts, set operations, windows and a CTE body. Lifting through a preserving operator never adds a
+call (the output projected onto the predicate's columns is a subset of its input), so the only
+question is where the lift stops paying: the predicate settles directly above the highest operator
+it crossed that can remove rows of its input (inner, semi and anti joins, a filter with relational
+conjuncts), and goes back exactly where it was if it crossed none. Predicates settling at one site
+share one filter, so the fold stage sees them together. This is what makes `IN (SELECT ...)` and
+`EXISTS` work: DuckDB plans them as semi joins above the scan and pushes the AI predicate under
+them; the law for a semi join lifts it back above (SWAN 2.0 football-16: 296 calls -> 22).
 
 **Speculative pre-filter.** When the pull-up lifts a predicate above a join it leaves a copy at the
 leaf that only *prunes*: a row the selectivity model expects to fail is evaluated there and dropped
@@ -185,7 +202,7 @@ Three distinct mechanisms must cross that boundary, and they are not interchange
 |---|---|---|
 | **relational predicate pushdown** — a predicate on the *same* relation as the AI filter | the predicate and the filter must be in one scope | inlining |
 | **semi-join reduction** — pruning by a *neighbour's* keys | the reducer's cluster walk must see the join tree inside the CTE | the reducer descends into the main query, and below an AI *projection* whose key passes through it |
-| **AI filter pull-up** — lifting the predicate above the joins | the pull-up walk must descend past the CTE node | pull-up descends into a CTE's main query |
+| **AI filter pull-up** — lifting the predicate above the row-removing operators | the pull-up walk must descend past the CTE node | the commutation law admits a CTE node's main query |
 
 **Inlining is the boundary removal, not an optimisation in itself.** AI-bearing CTEs are marked
 never-materialise in the pre-optimize hook so DuckDB's own inliner runs them at its natural
