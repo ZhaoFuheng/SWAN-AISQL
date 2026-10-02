@@ -4,9 +4,9 @@
 optimizer and executor built around **factorized ("two-currency") execution**: every LLM call runs once per
 *distinct* input, joins over AI predicates evaluate the distinct *pair domain* without materializing the
 cross product, and learned predicate ordering, Yannakakis semi-join reduction and LIMIT early-stop minimize
-calls. Benchmarked against LOTUS on SemBench (MOVIE / ECOMM / MMQA) and, on the 30-query hybrid bench the
-PLOP authors shared with us, against PLOP's recorded runs and LOTUS. The design is in
-[docs/DESIGN.md](docs/DESIGN.md).
+calls. Benchmarked against LOTUS on SemBench (MOVIE / ECOMM / MMQA), against PLOP's recorded runs and LOTUS
+on the 30-query hybrid bench the PLOP authors shared with us, and against BlendSQL and LOTUS on
+[SWAN 2.0](https://github.com/ZhaoFuheng/SWAN). The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
 This repository is a DuckDB **extension** built on the
 [extension template](https://github.com/duckdb/extension-template): the engine is the `aisql` extension,
@@ -15,7 +15,7 @@ DuckDB is the `duckdb/` submodule, CI comes from `extension-ci-tools/`, and depe
 
 The numbered sections are a path: build, keys, Python environment, start the serving stack, run a query,
 then run SemBench MOVIE for SWAN and LOTUS and compare them. Reference material (settings, the hybrid
-bench, layout) follows.
+bench, SWAN 2.0, layout) follows.
 
 ## 1. Build
 
@@ -235,6 +235,24 @@ Read the quality column with the sampling in mind: the published SWAN row reused
 verdicts for every shared prompt, while a fresh run samples the model anew, so its agreement with the
 ground truth also measures verdict variance (`sembench/README.md` rule 7). Calls, cost and latency are
 comparable either way.
+
+## SWAN 2.0: SWAN vs BlendSQL vs LOTUS
+
+[SWAN 2.0](https://github.com/ZhaoFuheng/SWAN) is a 120-question benchmark over four BIRD databases (scaled to
+~10k rows and duplicated): one AISQL query per question, which every system runs as written — SWAN-AISQL
+directly, BlendSQL and LOTUS through mechanical translations — so each system's planner decides the LLM
+calls. Its `scripts/run_swan_aisql.sh` clones and builds this repository, starts the serving stack and runs
+all 120 questions; the quality score follows SemBench (relative error for numbers, F1 for row sets).
+
+| system | quality (mean) | exact | LLM calls | cost |
+|---|---|---|---|---|
+| **SWAN-AISQL** | **0.775** | 64/120 | 23,135 | $2.50 |
+| BlendSQL 0.1.27 | 0.741 | 51/120 | 59,462 | $4.83 |
+| LOTUS 1.2.4 | 0.770 | 59/120 | 69,478 | $4.18 |
+
+gpt-5.6-luna for all three, zero-shot, 20 requests in flight. Run-to-run noise on the mean is about ±0.02
+(the benchmark's results README gives the measurement), so read the calls and cost columns as the clear
+separation. Per-question answers and scores: `results/gpt-5.6-luna/` in that repository.
 
 ## Acknowledgements
 

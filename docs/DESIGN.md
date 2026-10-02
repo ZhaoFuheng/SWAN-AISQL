@@ -280,6 +280,7 @@ are replayed. Quality, calls and cost are comparable throughout.
 | SemBench ECOMM (14q) | **0.724**, 16.4k, $8.32, 2,882s† | 0.688, 16.6k, $7.39, 826s | LOTUS 0.637, 17.8k, $6.40, 1,990s |
 | SemBench MMQA (11q) | **0.692**, 15.9k, $2.31, 1,314s† | 0.603, 14.1k, $1.53, 884s | LOTUS 0.449, 19.0k, $2.43, 1,720s |
 | agent_bench Q1–Q30 | **1.000**, 11,172 calls, $0.29, 799s | — | PLOP-DP 1.000, 13,602, $0.53, 1,080s; LOTUS 0.620*, 25,738, $2.84, 3,297s |
+| SWAN 2.0 (120q, 4 BIRD databases) | **0.775**, 23,135 calls, $2.50 | — | BlendSQL 0.741, 59,462, $4.83; LOTUS 0.770, 69,478, $4.18 |
 
 Quality is each suite's own metric (F1 / ARI / row-multiset F1; agent_bench uses the deterministic
 LIMIT-free PLOP ground truth). *LOTUS's agent_bench quality is not like-for-like: SWAN and PLOP
@@ -287,6 +288,9 @@ consume the same recorded verdict per shared prompt, LOTUS's verdicts are indepe
 where an answer hinges on a few judgments any disagreement scores 0; its calls, latency and cost are
 comparable. Per-query tables: `sembench/AGENTBENCH/results/agentbench_comparison_three_way.md`,
 `sembench/typesafe_comparison_20260925.md`, and `sembench/compare.py SUITE` for the SemBench suites.
+SWAN 2.0 is the benchmark in github.com/ZhaoFuheng/SWAN: one AISQL query per question that every system
+plans itself, with scaled and duplicated databases; its results folder holds the three systems' answers,
+and the ±0.02 run-to-run noise it measured applies to all of its rows.
 
 ---
 
