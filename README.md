@@ -126,11 +126,13 @@ orders predicates by learned selectivity and keeps 20 requests in flight; `ai_us
 `ai_filter(prompt) → BOOLEAN`, `ai_classify(input, [labels]) → VARCHAR`, `ai_score(input, rubric[, lo, hi])`,
 `ai_complete(prompt) → VARCHAR`, `ai_agg(list, instruction)`, `ai_embed(text)`, and `ai_image(path)` to put an
 image into a prompt. Prompts are ordinary SQL string expressions, so any column can be concatenated in.
+Every answer is structured output (a JSON schema per function); `ai_filter` has the model state its reason
+in one sentence before the verdict, which measurably sharpens borderline factual claims (SWAN benchmark
+0.75 → 0.78 mean quality, about 35 more output tokens per call).
 
 **Writing a filter prompt.** Keep the question apart from the evidence. When the context is a short fact
-about a named entity (a name, an address), this layout measured best on the SWAN benchmark, raising filter
-quality from 0.65 to 0.71 at the same cost; on long free-text contexts (SemBench's movie reviews) the one-line
-form above does as well or better:
+about a named entity (a name, an address), this layout measured best on the SWAN benchmark at the same cost;
+on long free-text contexts (SemBench's movie reviews) the one-line form above does as well or better:
 
 ```sql
 ai_filter('Context:' || chr(10) || '[school_address]: «' || school_address || '»' || chr(10) || chr(10) || chr(10)
@@ -185,7 +187,7 @@ python3 compare.py MOVIE
 | q | SWAN quality | LOTUS quality | SWAN calls | LOTUS calls | SWAN lat (s) | LOTUS lat (s) | SWAN $ | LOTUS $ |
 |---|---|---|---|---|---|---|---|---|
 | … | | | | | | | | |
-| **macro / Σ** | **0.818** | **0.780** | 18,806 | 201,344 | 1139 | 10654 | 1.53 | 14.45 |
+| **macro / Σ** | **0.832** | **0.780** | 18,804 | 201,344 | 1686 | 10654 | 2.28 | 14.45 |
 
 Quality is SemBench's own metric per query (F1, count/ratio accuracy, Spearman for the ranking queries).
 ECOMM and MMQA run the same way (`ECOMM/swan_ecomm.py --serial`, `MMQA/swan_mmqa.py`, `compare.py ECOMM`),

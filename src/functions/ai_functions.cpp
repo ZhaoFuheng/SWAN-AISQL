@@ -51,15 +51,20 @@ namespace duckdb {
 // JSON schema fragments (structured output)
 //===--------------------------------------------------------------------===//
 // Fixed structured-output schemas shared by all AI functions except ai_complete.
-// Every function returns a single "result" field; only the leaf type differs.
-static const char *const BOOL_RESULT_SCHEMA = "{\"type\":\"object\",\"properties\":{\"result\":{\"type\":\"boolean\"}},"
-                                              "\"required\":[\"result\"],\"additionalProperties\":false}";
+// Every function returns a "result" field; only the leaf type differs (ai_filter adds its reasoning).
 static const char *const NUMBER_RESULT_SCHEMA =
     "{\"type\":\"object\",\"properties\":{\"result\":{\"type\":\"number\"}},"
     "\"required\":[\"result\"],\"additionalProperties\":false}";
 static const char *const STRING_RESULT_SCHEMA =
     "{\"type\":\"object\",\"properties\":{\"result\":{\"type\":\"string\"}},"
     "\"required\":[\"result\"],\"additionalProperties\":false}";
+//! ai_filter answers with a short "reasoning" before its "result": a reasoning model commits to a bare
+//! boolean with a much smaller thinking budget than it spends on a free-text verdict (SWAN 2.0 bench:
+//! ~15 vs ~45 reasoning tokens per call for the same claims), and the sentence recovers that accuracy.
+static const char *const FILTER_RESULT_SCHEMA =
+    "{\"type\":\"object\",\"properties\":{\"reasoning\":{\"type\":\"string\",\"description\":\"one short "
+    "sentence\"},\"result\":{\"type\":\"boolean\"}},\"required\":[\"reasoning\",\"result\"],"
+    "\"additionalProperties\":false}";
 
 //===--------------------------------------------------------------------===//
 // System prompts, shared by the scalar functions AND the reorder node's leaf evaluation (AIEvalLeaf) so both
@@ -88,7 +93,7 @@ static const char *AIFilterSystemPrompt() {
 
 //! ai_filter's structured-output schema, or "" in the plain variant (bare prompt, text verdict).
 static const char *AIFilterSchema() {
-	return AIConfig::Get().prompt_variant_plain ? "" : BOOL_RESULT_SCHEMA;
+	return AIConfig::Get().prompt_variant_plain ? "" : FILTER_RESULT_SCHEMA;
 }
 
 //! Read ai_filter's verdict: the {"result":bool} envelope, else a bare yes/no answer text. The

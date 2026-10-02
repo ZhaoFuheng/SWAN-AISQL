@@ -266,18 +266,19 @@ cross-engine protocol above). The full list, with defaults and environment varia
 
 ---
 
-## 9. Measured state (2026-09-28)
+## 9. Measured state (2026-10-02)
 
-All numbers are from the recorded runs in `sembench/` (replayed answers, latency and cost; chat
-model `gpt-5.6-luna`; SWAN and LOTUS recorded back-to-back; SWAN replayed one query at a time on the
-2026-09-28 build; the Jev column routes ai_filter, ai_classify and, on MOVIE, the bounded ai_score of
-q9/q10 to System One).
+All numbers are from the recorded runs in `sembench/` (chat model `gpt-5.6-luna`; the Jev column routes
+ai_filter, ai_classify and, on MOVIE, the bounded ai_score of q9/q10 to System One). †The SWAN column was
+recorded fresh on 2026-10-02, after `ai_filter` gained its reasoning sentence; its latencies carry that day's
+provider load and are not back-to-back with the LOTUS and Jev recordings (2026-09-23/25), whose latencies
+are replayed. Quality, calls and cost are comparable throughout.
 
 | benchmark | SWAN | SWAN + Jev (ai_filter/ai_classify on TypeSafe) | LOTUS / PLOP |
 |---|---|---|---|
-| SemBench MOVIE (10q) | **0.818**, 18.8k calls, $1.53, 1,080s | 0.795, 18.8k, **$0.39**, 511s | LOTUS 0.780, 201k, $14.45, 10,654s |
-| SemBench ECOMM (14q) | **0.699**, 16.6k, $8.02, 1,028s | 0.688, 16.6k, $7.39, 826s | LOTUS 0.637, 17.8k, $6.40, 1,990s |
-| SemBench MMQA (11q) | **0.636**, 16.1k, $1.84, 1,057s | 0.603, 14.1k, $1.53, 884s | LOTUS 0.449, 19.0k, $2.43, 1,720s |
+| SemBench MOVIE (10q) | **0.832**, 18.8k calls, $2.28, 1,686s† | 0.795, 18.8k, **$0.39**, 511s | LOTUS 0.780, 201k, $14.45, 10,654s |
+| SemBench ECOMM (14q) | **0.724**, 16.4k, $8.32, 2,882s† | 0.688, 16.6k, $7.39, 826s | LOTUS 0.637, 17.8k, $6.40, 1,990s |
+| SemBench MMQA (11q) | **0.692**, 15.9k, $2.31, 1,314s† | 0.603, 14.1k, $1.53, 884s | LOTUS 0.449, 19.0k, $2.43, 1,720s |
 | agent_bench Q1–Q30 | **1.000**, 11,172 calls, $0.29, 799s | — | PLOP-DP 1.000, 13,602, $0.53, 1,080s; LOTUS 0.620*, 25,738, $2.84, 3,297s |
 
 Quality is each suite's own metric (F1 / ARI / row-multiset F1; agent_bench uses the deterministic
