@@ -32,13 +32,12 @@ suite's macro F1 / count accuracy / ARI)
 | **SWAN-AISQL** | **0.832** · 18.8k · $2.28 | **0.724** · 16.4k · $8.32 | **0.692** · 15.9k · $2.31 |
 
 **Hybrid bench** (the 30 agent_bench queries of the PLOP paper: relational plans with semantic operators;
-quality = row-multiset F1 against the LIMIT-free PLOP ground truth; latency comparable because SWAN and PLOP
-consume the same recorded verdict per shared prompt)
+quality = row-multiset F1 against the LIMIT-free PLOP ground truth; SWAN and PLOP consume the same prompt template)
 
 | | macro-F1 | calls | cost | latency |
 |---|---|---|---|---|
-| LOTUS | 0.620* | 25,738 | $2.84 | 3,297 s |
-| PLOP-DP (authors' recorded runs) | 1.000 | 13,602 | $0.53 | 1,080 s |
+| LOTUS 1.2.4 | 0.620* | 25,738 | $2.84 | 3,297 s |
+| PLOP-DP | 1.000 | 13,602 | $0.53 | 1,080 s |
 | **SWAN-AISQL** | **1.000** | **11,172** | **$0.29** | **799 s** |
 
 *LOTUS's verdicts are independent samples, so where an answer hinges on a few judgments any disagreement
