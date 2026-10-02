@@ -10,6 +10,7 @@ test/python/__pycache__/
 # SWAN AI-SQL: local secrets, LLM caches, run logs, python caches
 .env
 serve/.llm_cache*
+serve/replay/
 serve/*.log
 sembench/**/*.log
 sembench/ECOMM/data/sf_500/images/

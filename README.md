@@ -13,9 +13,49 @@ This repository is a DuckDB **extension** built on the
 DuckDB is the `duckdb/` submodule, CI comes from `extension-ci-tools/`, and dependencies are declared in
 `vcpkg.json` (none required today).
 
-The numbered sections are a path: build, keys, Python environment, start the serving stack, run a query,
-then run SemBench MOVIE for SWAN and LOTUS and compare them. Reference material (settings, the hybrid
-bench, SWAN 2.0, layout) follows.
+The results come first; then the numbered sections are a path: build, keys, Python environment, start the
+serving stack, run a query, then run SemBench MOVIE for SWAN and LOTUS and compare them. Reference material
+(settings, the hybrid bench, SWAN 2.0, layout) follows.
+
+## Results
+
+All three comparisons use `gpt-5.6-luna` for every system, 20 requests in flight, every call through the
+cache proxy (the recorded answers are published, see Keys). Quality is each benchmark's own metric; calls are
+chat requests; cost is the provider's price for them.
+
+**SemBench** (MOVIE sf2000: text sentiment, 10 queries; ECOMM sf500: 14; MMQA sf200: 11; quality = the
+suite's macro F1 / count accuracy / ARI)
+
+| | MOVIE | ECOMM | MMQA |
+|---|---|---|---|
+| LOTUS 1.2.4 | 0.780 · 201k calls · $14.45 | 0.637 · 17.8k · $6.40 | 0.449 · 19.0k · $2.43 |
+| **SWAN-AISQL** | **0.832** · 18.8k · $2.28 | **0.724** · 16.4k · $8.32 | **0.692** · 15.9k · $2.31 |
+
+**Hybrid bench** (the 30 agent_bench queries of the PLOP paper: relational plans with semantic operators;
+quality = row-multiset F1 against the LIMIT-free PLOP ground truth; latency comparable because SWAN and PLOP
+consume the same recorded verdict per shared prompt)
+
+| | macro-F1 | calls | cost | latency |
+|---|---|---|---|---|
+| LOTUS | 0.620* | 25,738 | $2.84 | 3,297 s |
+| PLOP-DP (authors' recorded runs) | 1.000 | 13,602 | $0.53 | 1,080 s |
+| **SWAN-AISQL** | **1.000** | **11,172** | **$0.29** | **799 s** |
+
+*LOTUS's verdicts are independent samples, so where an answer hinges on a few judgments any disagreement
+scores 0; its calls, cost and latency are comparable.
+
+**SWAN 2.0** (120 questions over four BIRD databases scaled to ~10k rows with duplicate entities; one AISQL
+query per question that every system plans itself; quality = SemBench-style relative error / F1)
+
+| | quality | exact | calls | cost |
+|---|---|---|---|---|
+| LOTUS 1.2.4 | 0.770 | 59/120 | 69,478 | $4.18 |
+| BlendSQL 0.1.27 (zero-shot) | 0.741 | 51/120 | 59,462 | $4.83 |
+| **SWAN-AISQL** | **0.775** | **64/120** | **22,626** | **$2.46** |
+
+Run-to-run noise on a mean quality is about ±0.02 (a same-setup rerun of SWAN scored 0.729 against
+0.750), so read the quality columns as "at least as good" and the calls and cost columns as the separation.
+Section 6 and the two benchmark sections after the settings say how to reproduce each table.
 
 ## 1. Build
 
@@ -51,6 +91,17 @@ TYPESAFE_API_KEY=...        # only for SET ai_typesafe='filter,classify,score' (
 ```
 
 `serve/start_stack.sh` and the benchmark harnesses read `.env`; nothing else in the repo carries a key.
+
+**No key? Replay the published cache.** Every number in this README was produced through the cache proxy,
+and the recorded answers are published on Zenodo (DOI below, ~ZENODO_SIZE). `serve/fetch_cache.sh` downloads
+them to `serve/.llm_cache.duckdb`; the stack then starts without litellm, and SemBench, the hybrid bench and
+SWAN 2.0 replay their answers, latency and cost at $0 — for SWAN and for the baselines (LOTUS on every
+benchmark, BlendSQL on SWAN 2.0), so every comparison table reproduces. Replay matches requests byte for byte, so it covers
+the repository's queries with the default prompts and model; an edited query is a fresh request and needs
+a key. One caveat: under a `LIMIT` the engine stops as soon as it has enough rows, and which rows it asks
+about first varies slightly from run to run, so a replay of a LIMIT query can touch a handful of prompts the
+recording never did; without a key those calls fail and the query answers from the rows it could decide
+(`ai_usage()` shows them as `failed_calls`).
 
 ## 3. Python environment
 
@@ -246,7 +297,7 @@ all 120 questions; the quality score follows SemBench (relative error for number
 
 | system | quality (mean) | exact | LLM calls | cost |
 |---|---|---|---|---|
-| **SWAN-AISQL** | **0.775** | 64/120 | 23,135 | $2.50 |
+| **SWAN-AISQL** | **0.775** | 64/120 | 22,626 | $2.46 |
 | BlendSQL 0.1.27 | 0.741 | 51/120 | 59,462 | $4.83 |
 | LOTUS 1.2.4 | 0.770 | 59/120 | 69,478 | $4.18 |
 
