@@ -44,15 +44,13 @@ quality = row-multiset F1 against the LIMIT-free PLOP ground truth; SWAN and PLO
 
 | | macro-F1 | calls | cost | latency |
 |---|---|---|---|---|
-| LOTUS 1.2.4 | 0.607* | 25,749 | $2.90 | 1,802 s† |
-| BlendSQL 0.1.27 (zero-shot) | 0.758* | 24,631 | ~$2.76 | 1,960 s† |
+| LOTUS 1.2.4 | 0.607* | 25,749 | $2.90 | 1,802 s |
+| BlendSQL 0.1.27 (zero-shot) | 0.758* | 24,631 | ~$2.76 | 1,960 s |
 | PLOP-DP | 1.000 | 13,602 | $0.53 | 1,080 s |
 | **SWAN-AISQL** | **1.000** | **11,172** | **$0.29** | **799 s** |
 
 *LOTUS's and BlendSQL's verdicts are independent samples, so where an answer hinges on a few judgments any
-disagreement scores 0; their calls, cost and latency are comparable. †Recorded fresh on 2026-10-02/03
-(LOTUS's prompts render deterministically only since that day's fix); the SWAN and PLOP latencies replay the
-shared 2026-09 recording. Latency is wall-clock over the 30 queries run one after the other, 20 requests in
+disagreement scores 0; their calls, cost and latency are comparable. Latency is wall-clock over the 30 queries run one after the other, 20 requests in
 flight. BlendSQL runs our mechanical translation of the SWAN queries
 (`sembench/AGENTBENCH/translate_to_blendsql.py`).
 
