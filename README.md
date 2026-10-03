@@ -23,20 +23,21 @@ All three comparisons use `gpt-5.6-luna` for every system, 20 requests in flight
 cache proxy (the recorded answers are published, see Keys). Quality is each benchmark's own metric; calls are
 chat requests; cost is the provider's price for them.
 
-**SemBench** (MOVIE sf2000: text sentiment, 10 queries; ECOMM sf500: 14; MMQA sf200: 11; quality = the
-suite's macro F1 / count accuracy / ARI). PLOP and BlendSQL do not support images, so they run MOVIE only.
+**SemBench MOVIE** (sf2000: text sentiment over reviews, 10 queries; quality = the suite's macro F1 / count
+accuracy / Spearman)
 
-| | MOVIE | ECOMM | MMQA |
-|---|---|---|---|
-| LOTUS 1.2.4 | 0.780 · 201k calls · $14.45 · 10,654 s | 0.637 · 17.8k · $6.40 · 1,990 s | 0.449 · 19.0k · $2.43 · 1,720 s |
-| PLOP-DP | 0.726 · 19.1k · ~$1.69 · 1,665 s | n/a (images) | n/a (images) |
-| BlendSQL 0.1.27 (zero-shot) | 0.763 · 18.7k · ~$1.44 · 1,188 s | n/a (images) | n/a (images) |
-| **SWAN-AISQL** | **0.832** · 18.8k · $2.28 · 1,686 s | **0.724** · 16.4k · $8.32 · 2,882 s | **0.692** · 15.9k · $2.31 · 1,314 s |
+| | quality | calls | cost | latency (10 q) |
+|---|---|---|---|---|
+| LOTUS 1.2.4 | 0.780 | 201k | $14.45 | 10,654 s |
+| PLOP-DP | 0.726 | 19.1k | ~$1.69 | 1,665 s |
+| BlendSQL 0.1.27 (zero-shot) | 0.763 | 18.7k | ~$1.44 | 1,188 s |
+| **SWAN-AISQL** | **0.832** | 18.8k | $2.28 | 1,686 s |
 
-Each cell is quality · chat calls · cost · wall-clock latency of the suite's queries run one after the other
-with 20 requests in flight. Recording dates: LOTUS 2026-09-23, SWAN 2026-10-01 (the run with the `ai_filter`
-reasoning field), PLOP and BlendSQL 2026-10-02. PLOP's and BlendSQL's costs are estimates from their token
-counts (their requests carry no provider cost header). Per-query tables: `sembench/compare.py SUITE`.
+Latency is wall-clock over the suite's queries run one after the other. Recording dates: LOTUS 2026-09-23,
+SWAN 2026-10-01 (the run with the `ai_filter` reasoning field), PLOP and BlendSQL 2026-10-02. PLOP's and
+BlendSQL's costs are estimates from their token counts (their requests carry no provider cost header).
+SemBench's two image suites, ECOMM and MMQA, run SWAN against LOTUS only (PLOP and BlendSQL do not support
+images); their tables are in section 6.
 
 **Hybrid bench** (the 30 agent_bench queries of the PLOP paper: relational plans with semantic operators;
 quality = row-multiset F1 against the LIMIT-free PLOP ground truth; SWAN and PLOP consume the same prompt template)
@@ -218,7 +219,7 @@ line with the reason (typically nothing listening on the endpoint — start `ser
 `SET ai_endpoint` to where litellm or the proxy runs). Failed answers are never cached, so the next query
 retries. `SET ai_max_retries` (default 6, exponential backoff) bounds the wait.
 
-## 6. SemBench MOVIE: SWAN vs LOTUS, PLOP and BlendSQL
+## 6. SemBench: MOVIE for all four systems, ECOMM and MMQA for SWAN vs LOTUS
 
 The MOVIE suite (10 queries over the reviews above) is fully self-contained in the repo: data, queries,
 gold answers and the recorded results of all four systems. Every call goes through the cache proxy, so a run
@@ -275,8 +276,20 @@ Latency is the sum of the per-query wall times, each a fresh recording: LOTUS 20
 PLOP and BlendSQL 2026-10-02.
 
 Quality is SemBench's own metric per query (F1, count/ratio accuracy, Spearman for the ranking queries).
-ECOMM and MMQA run the same way (`ECOMM/swan_ecomm.py --serial`, `MMQA/swan_mmqa.py`, `compare.py ECOMM`),
-but most of their queries need the image assets, which are not in git — see `sembench/README.md`.
+
+**ECOMM and MMQA** (the image suites: ECOMM sf500, 14 queries over fashion product listings with photos; MMQA sf200,
+11 queries over tables that mix text and images; quality = macro F1 / count accuracy / ARI) run the same way
+(`ECOMM/swan_ecomm.py --serial`, `MMQA/swan_mmqa.py`, `compare.py ECOMM`), but most of their queries need
+the image assets, which are not in git — see `sembench/README.md`. PLOP and BlendSQL do not support images,
+so these suites compare SWAN with LOTUS:
+
+| | ECOMM (14 q) | MMQA (11 q) |
+|---|---|---|
+| LOTUS 1.2.4 | 0.637 · 17.8k calls · $6.40 · 1,990 s | 0.449 · 19.0k · $2.43 · 1,720 s |
+| **SWAN-AISQL** | **0.724** · 16.4k · $8.32 · 2,882 s | **0.692** · 15.9k · $2.31 · 1,314 s |
+
+Each cell is quality · chat calls · cost · wall-clock latency, recorded on 2026-09-23 (LOTUS) and 2026-10-01
+(SWAN). Per-query tables: `compare.py ECOMM`, `compare.py MMQA`.
 
 ## Settings
 
