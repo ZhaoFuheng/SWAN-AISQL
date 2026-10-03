@@ -1,4 +1,4 @@
-# SWAN AI-SQL — semantic SQL for DuckDB
+# SWAN AI-SQL
 
 `ai_filter / ai_classify / ai_score / ai_complete / ai_agg / ai_embed / ai_image` for DuckDB, plus an
 optimizer and executor built around **factorized ("two-currency") execution**: every LLM call runs once per
