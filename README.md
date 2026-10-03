@@ -1,6 +1,6 @@
-# SWAN AI-SQL
+# SWAN AISQL
 
-`ai_filter / ai_classify / ai_score / ai_complete / ai_agg / ai_embed / ai_image` for DuckDB, plus an
+SWAN AISQL introduce `ai_filter / ai_classify / ai_score / ai_complete / ai_agg / ai_embed / ai_image` semantic operators, plus an
 optimizer and executor built around **factorized ("two-currency") execution**: every LLM call runs once per
 *distinct* input, joins over AI predicates evaluate the distinct *pair domain* without materializing the
 cross product, and learned predicate ordering, Yannakakis semi-join reduction and LIMIT early-stop minimize
