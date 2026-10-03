@@ -13,10 +13,13 @@ ROOT="$HERE/.."
 if [ -f "$ROOT/.env" ]; then
 	set -a; . "$ROOT/.env"; set +a
 fi
-: "${OPENAI_API_KEY:?set OPENAI_API_KEY in $ROOT/.env (copy .env.example)}"
 PY="${PYTHON:-python3}"
 
-if ! curl -sf -m 2 http://127.0.0.1:4000/health >/dev/null 2>&1; then
+# Without a provider key the stack is replay-only: the cache proxy answers recorded requests (see
+# serve/fetch_cache.sh) and a request it has not seen fails with an upstream error instead of costing money.
+if [ -z "${OPENAI_API_KEY:-}" ]; then
+	echo "no OPENAI_API_KEY in $ROOT/.env: replay-only (recorded requests answer from serve/.llm_cache.duckdb, new ones fail)"
+elif ! curl -sf -m 2 http://127.0.0.1:4000/health >/dev/null 2>&1; then
 	nohup litellm --config "$HERE/litellm.config.yaml" --port 4000 > "$HERE/litellm.log" 2>&1 &
 	echo "litellm      :4000  (pid $!, log serve/litellm.log)"
 else

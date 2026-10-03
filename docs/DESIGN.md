@@ -296,7 +296,7 @@ are replayed. Quality, calls and cost are comparable throughout.
 | SemBench MOVIE (10q) | **0.832**, 18.8k calls, $2.28, 1,686s† | 0.795, 18.8k, **$0.39**, 511s | LOTUS 0.780, 201k, $14.45, 10,654s |
 | SemBench ECOMM (14q) | **0.724**, 16.4k, $8.32, 2,882s† | 0.688, 16.6k, $7.39, 826s | LOTUS 0.637, 17.8k, $6.40, 1,990s |
 | SemBench MMQA (11q) | **0.692**, 15.9k, $2.31, 1,314s† | 0.603, 14.1k, $1.53, 884s | LOTUS 0.449, 19.0k, $2.43, 1,720s |
-| agent_bench Q1–Q30 | **1.000**, 11,172 calls, $0.29, 799s | — | PLOP-DP 1.000, 13,602, $0.53, 1,080s; LOTUS 0.620*, 25,738, $2.84, 3,297s |
+| agent_bench Q1–Q30 | **1.000**, 11,172 calls, $0.29, 799s | — | PLOP-DP 1.000, 13,602, $0.53, 1,080s; LOTUS 0.607*, 25,749, $2.90, 1,802s† |
 | SWAN 2.0 (120q, 4 BIRD databases) | **0.775**, 23,135 calls, $2.50 | — | BlendSQL 0.741, 59,462, $4.83; LOTUS 0.770, 69,478, $4.18 |
 
 Quality is each suite's own metric (F1 / ARI / row-multiset F1; agent_bench uses the deterministic

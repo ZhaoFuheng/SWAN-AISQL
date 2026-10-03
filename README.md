@@ -36,12 +36,14 @@ quality = row-multiset F1 against the LIMIT-free PLOP ground truth; SWAN and PLO
 
 | | macro-F1 | calls | cost | latency |
 |---|---|---|---|---|
-| LOTUS 1.2.4 | 0.620* | 25,738 | $2.84 | 3,297 s |
+| LOTUS 1.2.4 | 0.607* | 25,749 | $2.90 | 1,802 s† |
 | PLOP-DP | 1.000 | 13,602 | $0.53 | 1,080 s |
 | **SWAN-AISQL** | **1.000** | **11,172** | **$0.29** | **799 s** |
 
 *LOTUS's verdicts are independent samples, so where an answer hinges on a few judgments any disagreement
-scores 0; its calls, cost and latency are comparable.
+scores 0; its calls and cost are comparable. †LOTUS's row is a fresh recording of 2026-10-02 (its prompts
+render deterministically only since that day's fix), so its latency carries that day's provider load; the
+SWAN and PLOP latencies are replays of the shared 2026-09 recording.
 
 **SWAN 2.0** (120 questions over four BIRD databases scaled to ~10k rows with duplicate entities; one AISQL
 query per question that every system plans itself; quality = SemBench-style relative error / F1)
@@ -92,7 +94,7 @@ TYPESAFE_API_KEY=...        # only for SET ai_typesafe='filter,classify,score' (
 `serve/start_stack.sh` and the benchmark harnesses read `.env`; nothing else in the repo carries a key.
 
 **No key? Replay the published cache.** Every number in this README was produced through the cache proxy,
-and the recorded answers are published on Zenodo (DOI below, ~ZENODO_SIZE). `serve/fetch_cache.sh` downloads
+and the recorded answers are published on Zenodo ([10.5281/zenodo.23112765](https://doi.org/10.5281/zenodo.23112765), about 650 MB). `serve/fetch_cache.sh` downloads
 them to `serve/.llm_cache.duckdb`; the stack then starts without litellm, and SemBench, the hybrid bench and
 SWAN 2.0 replay their answers, latency and cost at $0 — for SWAN and for the baselines (LOTUS on every
 benchmark, BlendSQL on SWAN 2.0), so every comparison table reproduces. Replay matches requests byte for byte, so it covers

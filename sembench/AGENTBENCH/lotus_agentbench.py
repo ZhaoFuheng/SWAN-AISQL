@@ -9,10 +9,13 @@ are saved to results/lotus/QN.csv for cross-system agreement checks.
   run:  python3 lotus_agentbench.py [Q1 Q2 ...]
   env:  AI_PROXY_URL (:4001), AI_MODEL (gpt-5.6-luna), AI_MAX_CONCURRENCY (20)
 """
+import os, sys
+# Pin the hash seed BEFORE importing lotus: prompts render in set order -> unstable cache keys.
+if os.environ.get("PYTHONHASHSEED") != "0":
+    os.environ["PYTHONHASHSEED"] = "0"
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 import importlib.util
 import json
-import os
-import sys
 import time
 import urllib.request
 from datetime import datetime, timezone
