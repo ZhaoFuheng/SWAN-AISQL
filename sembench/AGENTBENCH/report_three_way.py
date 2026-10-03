@@ -15,13 +15,15 @@ from datetime import date
 HERE = os.path.dirname(os.path.abspath(__file__))
 SWAN_TAG = os.environ.get("SWAN_TAG", "swan")
 SYSTEMS = [("SWAN", SWAN_TAG), ("PLOP", "plop"), ("LOTUS", "lotus")]
+if os.path.exists(os.path.join(HERE, "results", "blendsql_agentbench_results.json")):
+    SYSTEMS.append(("BlendSQL", "blendsql"))
 
 ev_src = open(os.path.join(HERE, "eval_agentbench.py")).read().replace("\nmain()\n", "\n")
 ev = importlib.util.module_from_spec(importlib.util.spec_from_loader("ev", loader=None))
 ev.__dict__["__file__"] = os.path.join(HERE, "eval_agentbench.py")
 exec(compile(ev_src, "eval_agentbench.py", "exec"), ev.__dict__)
 
-HEADER = """# agent_bench Q1-Q30: SWAN vs PLOP-DP vs LOTUS (gpt-5.6-luna) -- {today}
+HEADER = """# agent_bench Q1-Q30: SWAN vs PLOP-DP vs LOTUS vs BlendSQL (gpt-5.6-luna) -- {today}
 
 Quality = deterministic scorer (eval_agentbench.py): LIMIT-free PLOP execution as ground truth; LIMIT queries scored sound+complete. Calls = true request counts through the recording proxy (SWAN replays PLOP's samples via the shared-verdict alias; LOTUS Q1-Q18 replayed from 2026-09-21, Q19-Q30 recorded fresh 2026-09-26). LOTUS translations are ours (sembench/README.md, provenance table). SWAN run: results/{swan_tag}.
 
@@ -31,17 +33,23 @@ wherever their plans agree. LOTUS uses its own prompt templates, so its verdicts
 the same model: on queries whose answer hinges on a handful of judgments (Q13/Q16/Q17/Q30 have an EMPTY
 ground truth; LOTUS admitted 3 / 261 / 3,026 / 4 rows) any disagreement scores 0 even when LOTUS's answer
 is a perfectly reasonable reading. Its macro therefore measures verdict agreement with PLOP's samples as
-much as correctness; the calls / latency / cost columns are the like-for-like comparison.
+much as correctness; the calls / latency / cost columns are the like-for-like comparison. BlendSQL (our
+mechanical translation, translate_to_blendsql.py; zero-shot; cost estimated from its token counts) is in
+the same position as LOTUS: independent samples.
 
-| q | SWAN | PLOP | LOTUS | SWAN calls | PLOP calls | LOTUS calls | SWAN lat (s) | PLOP lat (s) | LOTUS lat (s) | SWAN $ | PLOP $ | LOTUS $ |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
 """
+
+
+def table_header():
+    names = [n for n, _ in SYSTEMS]
+    cols = names + [f"{n} calls" for n in names] + [f"{n} lat (s)" for n in names] + [f"{n} $" for n in names]
+    return "| q | " + " | ".join(cols) + " |\n|---|" + "---|" * len(cols)
 
 
 def main():
     runs = {name: json.load(open(os.path.join(HERE, "results", tag + "_agentbench_results.json")))["per_query"]
             for name, tag in SYSTEMS}
-    lines = [HEADER.format(today=date.today().isoformat(), swan_tag=SWAN_TAG).rstrip("\n")]
+    lines = [HEADER.format(today=date.today().isoformat(), swan_tag=SWAN_TAG).rstrip("\n"), table_header()]
     q_sum = {n: [] for n, _ in SYSTEMS}
     tot = {n: {"calls": 0, "lat": 0.0, "cost": 0.0} for n, _ in SYSTEMS}
     for i in range(1, 31):

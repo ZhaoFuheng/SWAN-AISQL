@@ -1,0 +1,13 @@
+PLOP MOVIE gpt-5.6-luna via http://localhost:4001  mode=costmodel  workers=20  sf2000  serial  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10']
+q1   lat=   11.8s calls=   127 fresh=  424 tok=     8870 ~$0.0033  n=5/1487  P=1.0 R=1.0 quality=1.0
+q2   lat=   18.3s calls=   119 fresh=  646 tok=     8045 ~$0.0031  n=5/14  P=0.8 R=0.8 quality=0.8
+q3   lat=   19.5s calls=   119 fresh=  587 tok=     7689 ~$0.0030  n=1/1  value=8.0 rel_err=0.4286 quality=0.571
+q4   lat=   17.8s calls=   119 fresh=  655 tok=     7695 ~$0.0030  n=1/1  value=0.0667 rel_err=0.4286 quality=0.571
+q5   lat=   14.0s calls=   140 fresh=  543 tok=    22051 ~$0.0127  n=10/32288  P=0.8 R=0.8 quality=0.8
+q6   lat=   13.1s calls=   124 fresh=  527 tok=    19660 ~$0.0113  n=10/32736  P=0.6 R=0.6 quality=0.6
+q7   lat= 1411.7s calls= 16257 fresh=39836 tok=  2682795 ~$1.5476  n=49516/32736  P=0.569 R=0.971 quality=0.717
+q8   lat=   18.8s calls=   119 fresh=  360 tok=     9593 ~$0.0037  n=2/2  value=0.0 rel_err=0.0 quality=1.0
+q9   lat=   15.7s calls=   128 fresh=  318 tok=    23147 ~$0.0072  n=256/256  P=0.774 R=0.613 quality=0.774
+q10  lat=  124.2s calls=  1864 fresh= 2216 tok=   313717 ~$0.0969  n=105/116  P=0.432 R=0.3 quality=0.432
+TOTAL(10q)  latency=1664.9s  calls=19116  ~cost=$1.6916  tokens=3103262  macro-quality=0.726
+

@@ -1,0 +1,13 @@
+BlendSQL MOVIE gpt-5.6-luna via http://localhost:4001  concurrency=20  sf2000  serial  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10']
+q1   lat=    4.4s calls=     9 tok=      990 ~$0.0002  n=5/1487  P=1.0 R=1.0 quality=1.0
+q2   lat=    5.1s calls=    67 tok=     6810 ~$0.0018  n=5/14  P=0.8 R=0.8 quality=0.8
+q3   lat=   11.8s calls=   119 tok=    12128 ~$0.0032  n=1/1  value=10.0 rel_err=0.2857 quality=0.714
+q4   lat=    9.4s calls=   119 tok=    14125 ~$0.0047  n=1/1  value=0.0917 rel_err=0.2143 quality=0.786
+q5   lat=    3.9s calls=    21 tok=     4301 ~$0.0017  n=10/32288  P=0.857 R=0.6 quality=0.706
+q6   lat=    3.2s calls=    15 tok=     2967 ~$0.0010  n=10/32736  P=1.0 R=0.7 quality=0.824
+q7   lat= 1024.2s calls= 16256 tok=  3417091 ~$1.2760  n=34384/32736  P=0.698 R=0.83 quality=0.759
+q8   lat=    8.8s calls=   119 tok=    13006 ~$0.0034  n=2/2  value=0.0 rel_err=0.1617 quality=0.838
+q9   lat=    8.9s calls=   128 tok=    30230 ~$0.0103  n=256/256  P=0.758 R=0.583 quality=0.758
+q10  lat=  108.1s calls=  1864 tok=   409026 ~$0.1354  n=105/116  P=0.443 R=0.317 quality=0.443
+TOTAL(10q)  latency=1187.8s  calls=18717  ~cost=$1.4378  tokens=3910674  macro-quality=0.763
+

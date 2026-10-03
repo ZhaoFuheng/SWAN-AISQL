@@ -36,3 +36,5 @@ docs/ENGINEERING_NOTES.md
 venv/
 docker_env.txt
 .ccache/
+sembench/*/llm_calls_*.log
+sembench_ecomm/

@@ -5,8 +5,8 @@ protocol. Rules, in order of how often they were broken:
 
 1. **Never rebuild the engine while a run is in flight** -- each query spawns a fresh CLI, so a
    mid-run rebuild silently mixes two binaries.
-2. **Back-to-back recording for any latency claim.** Record both systems per query, LOTUS then
-   SWAN, into a fresh store through a second proxy (`CACHE_PROXY_PORT=4011 CACHE_DB=<new file>`,
+2. **Back-to-back recording for any latency claim.** Record the compared systems per query, LOTUS then
+   SWAN (and PLOP / BlendSQL where they run), into a fresh store through a second proxy (`CACHE_PROXY_PORT=4011 CACHE_DB=<new file>`,
    alias OFF, the conda `swan-ai-sql` python -- `/usr/local/bin/python3` has no duckdb), then merge
    with `_pre_rerecord_20260923/merge_cache.py` (migrates `recorded_at`, upserts, self-verifies).
    The proxy inserts `ON CONFLICT DO NOTHING`, so the main cache cannot be "repopulated" in place.
@@ -32,6 +32,12 @@ protocol. Rules, in order of how often they were broken:
 | MMQA | translated from SemBench's BigQuery dialect (`AI.IF` → `ai_filter`, `AI.GENERATE` → `ai_complete`; `swan_mmqa.py`) | **written by us** — SemBench MMQA ships no LOTUS runner; `lotus_mmqa.py` mirrors the same table/prompt mapping as the SWAN queries so the comparison is engine-vs-engine | SemBench's `ground_truth/` |
 | agent_bench (PLOP) | translated from PLOP's queries (`AGENTBENCH/plop_queries/`, `translate_to_swan.py`), which the PLOP authors shared with us together with their execution results -- PLOP itself is not public, so its side is the committed `results/plop*` | **written by us** (`AGENTBENCH/lotus_queries/QN.py`; PLOP is the compared system here, LOTUS is a third reference) | PLOP's un-rewritten execution of the LIMIT-free queries (`plop_gt_queries/`, `results/plop_gt/`) |
 
+PLOP and BlendSQL: on MOVIE, `MOVIE/plop_queries/qN.sql` and `MOVIE/blendsql_queries/qN.sql` carry the same
+prompt text as the SWAN queries in each system's own dialect (PLOP appends its answer-format suffix, BlendSQL
+its `LLMMap` frame); on agent_bench, `AGENTBENCH/blendsql_queries/QN.sql` is the mechanical translation of
+the SWAN queries (`translate_to_blendsql.py`). Neither supports images, so ECOMM and MMQA are not run for
+them. Running the PLOP fork: `PLOP_FORK.md`.
+
 So on ECOMM and MOVIE the LOTUS side is SemBench's own code; on MMQA and agent_bench it is our translation, kept prompt-identical to the SWAN side.
 
 ## What is on disk vs. what you need to fetch
@@ -40,7 +46,7 @@ Committed: every query (SWAN, PLOP, PLOP ground-truth, LOTUS), the harnesses, go
 suite databases (`ECOMM/ecomm.db`, `MOVIE/movie.db`, `MMQA/mmqa.db`), the agent_bench datasets
 (`AGENTBENCH/dataset/`, TPC-H sf0.005 parquet + book_review/yelp/googlelocal/stockindex), the per-run
 summaries (`*_results.json`, comparison `.md`) and the result rows of the cited runs
-(`AGENTBENCH/results/{plop,plop_gt,plop_none,lotus,swan_leaf2,swan_gate2}`; the 52MB Q19 outputs are gzipped and
+(`AGENTBENCH/results/{plop,plop_gt,plop_none,lotus,blendsql,swan_leaf2,swan_gate2}`; the 52MB Q19 outputs are gzipped and
 the scorer reads `.csv.gz`).
 
 Not committed (images, raw sources, caches):

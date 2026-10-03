@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-query SWAN vs LOTUS table for one SemBench suite, from the recorded results files.
+"""Per-query table of every recorded system (SWAN, PLOP, BlendSQL, LOTUS) for one SemBench suite.
 
   python3 compare.py MOVIE            (from sembench/; also ECOMM, MMQA)
   SWAN_TAG=_x python3 compare.py MOVIE   compare a tagged SWAN run (swan_movie_results_x.json)
@@ -27,31 +27,55 @@ def fmt(v, digits):
     return ("%.*f" % (digits, v)) if isinstance(v, (int, float)) else "-"
 
 
+SYSTEMS = (("SWAN", "swan"), ("PLOP", "plop"), ("BlendSQL", "blendsql"), ("LOTUS", "lotus"))
+
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     suite = sys.argv[1].upper()
     low = suite.lower()
     tag = os.environ.get("SWAN_TAG", "")
-    swan = load(os.path.join(HERE, suite, f"swan_{low}_results{tag}.json"))
-    lotus = load(os.path.join(HERE, suite, f"lotus_{low}_results.json"))
-    queries = [q for q in swan if q in lotus]
-    print(f"# SemBench {suite}: SWAN{' (' + tag + ')' if tag else ''} vs LOTUS\n")
-    print("| q | SWAN quality | LOTUS quality | SWAN calls | LOTUS calls | SWAN lat (s) | LOTUS lat (s) | SWAN $ | LOTUS $ |")
-    print("|---|---|---|---|---|---|---|---|---|")
-    tot = {"s": [0.0, 0, 0.0, 0.0], "l": [0.0, 0, 0.0, 0.0]}
+    runs = []
+    for name, sysname in SYSTEMS:
+        path = os.path.join(HERE, suite, f"{sysname}_{low}_results{tag if sysname == 'swan' else ''}.json")
+        if os.path.exists(path):
+            runs.append((name, load(path)))
+    # every query any system ran, in the first system's order; a system that did not run one shows n/a
+    # (PLOP and BlendSQL do not support images: ECOMM / MMQA are not run for them)
+    queries = list(runs[0][1])
+    for _, r in runs[1:]:
+        queries += [q for q in r if q not in queries]
+    counted = {n: 0 for n, _ in runs}
+    names = [n for n, _ in runs]
+    print(f"# SemBench {suite}: " + " vs ".join(names) + (f" (SWAN {tag})" if tag else "") + "\n")
+    cols = [f"{n} quality" for n in names] + [f"{n} calls" for n in names] + [f"{n} lat (s)" for n in names] + [f"{n} $" for n in names]
+    print("| q | " + " | ".join(cols) + " |")
+    print("|---|" + "---|" * len(cols))
+    tot = {n: [0.0, 0, 0.0, 0.0] for n in names}
     for q in queries:
-        s, l = swan[q], lotus[q]
-        for key, rec in (("s", s), ("l", l)):
-            tot[key][0] += quality(rec) or 0.0
-            tot[key][1] += rec.get("llm_calls") or 0
-            tot[key][2] += rec.get("latency_s") or 0.0
-            tot[key][3] += rec.get("cost_usd") or 0.0
-        print(f"| {q} | {fmt(quality(s), 3)} | {fmt(quality(l), 3)} | {s.get('llm_calls', 0):,} | {l.get('llm_calls', 0):,} "
-              f"| {fmt(s.get('latency_s'), 1)} | {fmt(l.get('latency_s'), 1)} | {fmt(s.get('cost_usd'), 3)} | {fmt(l.get('cost_usd'), 3)} |")
-    n = len(queries)
-    print(f"| **macro / Σ** | **{tot['s'][0] / n:.3f}** | **{tot['l'][0] / n:.3f}** | {tot['s'][1]:,} | {tot['l'][1]:,} "
-          f"| {tot['s'][2]:.0f} | {tot['l'][2]:.0f} | {tot['s'][3]:.2f} | {tot['l'][3]:.2f} |")
+        recs = [(n, r.get(q)) for n, r in runs]
+        for n, rec in recs:
+            if rec is None:
+                continue
+            counted[n] += 1
+            tot[n][0] += quality(rec) or 0.0
+            tot[n][1] += rec.get("llm_calls") or 0
+            tot[n][2] += rec.get("latency_s") or 0.0
+            tot[n][3] += rec.get("cost_usd") or 0.0
+        cells = [fmt(quality(rec), 3) if rec else "n/a" for _, rec in recs]
+        cells += [f"{rec.get('llm_calls') or 0:,}" if rec else "n/a" for _, rec in recs]
+        cells += [fmt(rec.get("latency_s"), 1) if rec else "n/a" for _, rec in recs]
+        cells += [fmt(rec.get("cost_usd"), 3) if rec else "n/a" for _, rec in recs]
+        print(f"| {q} | " + " | ".join(cells) + " |")
+    cells = [f"**{tot[x][0] / counted[x]:.3f}**" + ("" if counted[x] == len(queries) else f" ({counted[x]}q)") for x in names] \
+        + [f"{tot[x][1]:,}" for x in names] + [f"{tot[x][2]:.0f}" for x in names] + [f"{tot[x][3]:.2f}" for x in names]
+    print("| **macro / Σ** | " + " | ".join(cells) + " |")
+    if any(counted[x] != len(queries) for x in names):
+        print("\nA macro over fewer queries than the suite (marked with its query count) is not comparable with the "
+              "full-suite macros.")
+    if any(n in ("PLOP", "BlendSQL") for n in names):
+        print("\nPLOP and BlendSQL costs are estimates from their token counts (their requests carry no provider cost header).")
 
 
 if __name__ == "__main__":
