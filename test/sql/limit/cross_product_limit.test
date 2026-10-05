@@ -20,7 +20,7 @@
 #              An unordered LIMIT returns an ARBITRARY k rows, so this changes WHICH rows come
 #              back -- every one of them still correct. Scoring such a query by row identity
 #              measures which rows an engine reached first, not whether it is right; see
-#              sembench/AGENTBENCH/eval_agentbench.py, which checks soundness and cardinality.
+#              aisql-bench/AGENTBENCH/eval_agentbench.py, which checks soundness and cardinality.
 
 require aisql
 

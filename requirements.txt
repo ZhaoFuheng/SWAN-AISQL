@@ -2,8 +2,8 @@
 #   uv venv && source .venv/bin/activate && uv pip install -r requirements.txt
 litellm[proxy]>=1.50   # the `litellm` SERVER (serve/litellm.config.yaml, :4000) needs the [proxy] extra; bare litellm is SDK-only
 duckdb>=1.1            # serve/ai_cache_server.py store; harness result handling
-pandas>=2.0            # sembench scorers / result tables
+pandas>=2.0            # aisql-bench scorers / result tables
 # Embedding server (serve/ai_embed_server.py) -- pick ONE:
 #   requirements-embed-st.txt   any host: CLIP clip-ViT-B-32 via sentence-transformers (text + image)  [default]
 #   requirements-embed-mlx.txt  Apple Silicon only: the same CLIP model via mlx-embeddings (AI_EMBED_BACKEND=mlx) [optional]
-# LOTUS baselines (sembench/*/lotus_*.py): requirements-lotus.txt
+# LOTUS baselines (aisql-bench/*/lotus_*.py): requirements-lotus.txt

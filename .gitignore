@@ -12,13 +12,13 @@ test/python/__pycache__/
 serve/.llm_cache*
 serve/replay/
 serve/*.log
-sembench/**/*.log
-sembench/ECOMM/data/sf_500/images/
-sembench/MMQA/files/mmqa/source_data/
-sembench/MMQA/files/**/*.jpg
-sembench/MMQA/files/**/*.jpeg
-sembench/MMQA/files/**/*.png
-sembench/MMQA/files/**/*.JPG
+aisql-bench/**/*.log
+aisql-bench/ECOMM/data/sf_500/images/
+aisql-bench/MMQA/files/mmqa/source_data/
+aisql-bench/MMQA/files/**/*.jpg
+aisql-bench/MMQA/files/**/*.jpeg
+aisql-bench/MMQA/files/**/*.png
+aisql-bench/MMQA/files/**/*.JPG
 __pycache__/
 *.pyc
 duckdb_unittest_tempdir/
@@ -36,16 +36,17 @@ docs/ENGINEERING_NOTES.md
 venv/
 docker_env.txt
 .ccache/
-sembench/*/llm_calls_*.log
+aisql-bench/*/llm_calls_*.log
 sembench_ecomm/
 .venv-thalamusdb/
-sembench/*/thalamusdb.duckdb
-sembench/*/thalamusdb_export/
+aisql-bench/*/thalamusdb.duckdb
+aisql-bench/*/thalamusdb_export/
 .venv-palimpzest/
 
 # agent_bench run scratch: DuckDB temp storage of the ThalamusDB runner, Palimpzest's parse-error dumps, and the
 # raw Q19 outputs (committed gzipped; score_agentbench.py reads .csv.gz)
-sembench/AGENTBENCH/.tmp/
-sembench/AGENTBENCH/parse-answer-errors/
-sembench/AGENTBENCH/results/*/Q19.csv
-sembench/parse-answer-errors/
+aisql-bench/AGENTBENCH/.tmp/
+aisql-bench/AGENTBENCH/parse-answer-errors/
+aisql-bench/AGENTBENCH/results/*/Q19.csv
+aisql-bench/parse-answer-errors/
+docs/port_regression_20260925.md

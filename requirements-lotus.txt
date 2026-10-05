@@ -1,2 +1,2 @@
-# LOTUS baselines (sembench/MOVIE/lotus_movie.py etc.); pins the version the recorded runs used.
+# LOTUS baselines (aisql-bench/MOVIE/lotus_movie.py etc.); pins the version the recorded runs used.
 lotus-ai>=1.1

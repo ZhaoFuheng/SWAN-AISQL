@@ -123,28 +123,28 @@ SELECT count(*) FROM ((SELECT * FROM r2 EXCEPT SELECT * FROM r2_off)
 # This is the certified repro (agent_bench Q28 on the committed tpch parquet): it fails with the
 # remap disabled and runs clean with it.
 statement ok
-CREATE VIEW IF NOT EXISTS part     AS SELECT * FROM read_parquet('{WORKING_DIRECTORY}/sembench/AGENTBENCH/dataset/tpch/part.parquet');
+CREATE VIEW IF NOT EXISTS part     AS SELECT * FROM read_parquet('{WORKING_DIRECTORY}/aisql-bench/AGENTBENCH/dataset/tpch/part.parquet');
 
 statement ok
-CREATE VIEW IF NOT EXISTS supplier AS SELECT * FROM read_parquet('{WORKING_DIRECTORY}/sembench/AGENTBENCH/dataset/tpch/supplier.parquet');
+CREATE VIEW IF NOT EXISTS supplier AS SELECT * FROM read_parquet('{WORKING_DIRECTORY}/aisql-bench/AGENTBENCH/dataset/tpch/supplier.parquet');
 
 statement ok
-CREATE VIEW IF NOT EXISTS customer AS SELECT * FROM read_parquet('{WORKING_DIRECTORY}/sembench/AGENTBENCH/dataset/tpch/customer.parquet');
+CREATE VIEW IF NOT EXISTS customer AS SELECT * FROM read_parquet('{WORKING_DIRECTORY}/aisql-bench/AGENTBENCH/dataset/tpch/customer.parquet');
 
 statement ok
-CREATE VIEW IF NOT EXISTS lineitem AS SELECT * FROM read_parquet('{WORKING_DIRECTORY}/sembench/AGENTBENCH/dataset/tpch/lineitem.parquet');
+CREATE VIEW IF NOT EXISTS lineitem AS SELECT * FROM read_parquet('{WORKING_DIRECTORY}/aisql-bench/AGENTBENCH/dataset/tpch/lineitem.parquet');
 
 statement ok
-CREATE VIEW IF NOT EXISTS orders   AS SELECT * FROM read_parquet('{WORKING_DIRECTORY}/sembench/AGENTBENCH/dataset/tpch/orders.parquet');
+CREATE VIEW IF NOT EXISTS orders   AS SELECT * FROM read_parquet('{WORKING_DIRECTORY}/aisql-bench/AGENTBENCH/dataset/tpch/orders.parquet');
 
 statement ok
-CREATE VIEW IF NOT EXISTS partsupp AS SELECT * FROM read_parquet('{WORKING_DIRECTORY}/sembench/AGENTBENCH/dataset/tpch/partsupp.parquet');
+CREATE VIEW IF NOT EXISTS partsupp AS SELECT * FROM read_parquet('{WORKING_DIRECTORY}/aisql-bench/AGENTBENCH/dataset/tpch/partsupp.parquet');
 
 statement ok
-CREATE VIEW IF NOT EXISTS nation   AS SELECT * FROM read_parquet('{WORKING_DIRECTORY}/sembench/AGENTBENCH/dataset/tpch/nation.parquet');
+CREATE VIEW IF NOT EXISTS nation   AS SELECT * FROM read_parquet('{WORKING_DIRECTORY}/aisql-bench/AGENTBENCH/dataset/tpch/nation.parquet');
 
 statement ok
-CREATE VIEW IF NOT EXISTS region   AS SELECT * FROM read_parquet('{WORKING_DIRECTORY}/sembench/AGENTBENCH/dataset/tpch/region.parquet');
+CREATE VIEW IF NOT EXISTS region   AS SELECT * FROM read_parquet('{WORKING_DIRECTORY}/aisql-bench/AGENTBENCH/dataset/tpch/region.parquet');
 
 statement ok
 WITH
