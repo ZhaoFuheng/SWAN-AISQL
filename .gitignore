@@ -38,3 +38,14 @@ docker_env.txt
 .ccache/
 sembench/*/llm_calls_*.log
 sembench_ecomm/
+.venv-thalamusdb/
+sembench/*/thalamusdb.duckdb
+sembench/*/thalamusdb_export/
+.venv-palimpzest/
+
+# agent_bench run scratch: DuckDB temp storage of the ThalamusDB runner, Palimpzest's parse-error dumps, and the
+# raw Q19 outputs (committed gzipped; score_agentbench.py reads .csv.gz)
+sembench/AGENTBENCH/.tmp/
+sembench/AGENTBENCH/parse-answer-errors/
+sembench/AGENTBENCH/results/*/Q19.csv
+sembench/parse-answer-errors/

@@ -1,0 +1,1024 @@
+{
+ "per_query": {
+  "Q5": {
+   "latency_s": 1.7,
+   "wall_s": 14.6,
+   "llm_calls": 1,
+   "llm_calls_fresh": 0,
+   "tokens": 667,
+   "cost_usd": 0.00029,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 4,
+   "operators": [
+    [
+     "filter",
+     "Return true if this book is a middle-grade science fiction adventure set during a pandemic lockdown in which Cleo Porter leaves a sealed apartment to deliver life-saving medicine, clearly positioned for young readers. Answer true or false only.",
+     [
+      "title",
+      "categories",
+      "description_snippet"
+     ],
+     1
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q29": {
+   "latency_s": 4.0,
+   "wall_s": 19.1,
+   "llm_calls": 36,
+   "llm_calls_fresh": 0,
+   "tokens": 20090,
+   "cost_usd": 0.00828,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 36,
+   "operators": [
+    [
+     "filter",
+     "Does this sourcing region align with procurement priorities? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "s_acctbal",
+      "ps_supplycost",
+      "supplier_region_name",
+      "n_name",
+      "r_name"
+     ],
+     36
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q1": {
+   "latency_s": 16.7,
+   "wall_s": 33.6,
+   "llm_calls": 200,
+   "llm_calls_fresh": 200,
+   "tokens": 165158,
+   "cost_usd": 0.05792,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 5,
+   "operators": [
+    [
+     "map",
+     "Which category best fits this book? (1) Fiction (2) Non-Fiction (3) Memoir (4) Biography (5) Self-Help. Return only the number: by",
+     [
+      "title",
+      "author"
+     ],
+     200
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q2": {
+   "latency_s": 9.1,
+   "wall_s": 26.1,
+   "llm_calls": 100,
+   "llm_calls_fresh": 100,
+   "tokens": 70218,
+   "cost_usd": 0.02752,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 3,
+   "operators": [
+    [
+     "map",
+     "Classify business quality: (1) Poor (2) Fair (3) Good (4) Excellent. Return only number: -",
+     [
+      "name",
+      "description"
+     ],
+     100
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q3": {
+   "latency_s": 6.2,
+   "wall_s": 20.5,
+   "llm_calls": 79,
+   "llm_calls_fresh": 79,
+   "tokens": 55429,
+   "cost_usd": 0.01971,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 4,
+   "operators": [
+    [
+     "map",
+     "Classify location: (1) Urban (2) Suburban (3) Rural. Return only number: in . Description:",
+     [
+      "name",
+      "state",
+      "description"
+     ],
+     79
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q4": {
+   "latency_s": 10.4,
+   "wall_s": 23.0,
+   "llm_calls": 141,
+   "llm_calls_fresh": 0,
+   "tokens": 137598,
+   "cost_usd": 0.04747,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 211,
+   "operators": [
+    [
+     "filter",
+     "Is this book recently popular since 2016?",
+     [
+      "title",
+      "subtitle",
+      "author",
+      "categories",
+      "description"
+     ],
+     141
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q6": {
+   "latency_s": 11.9,
+   "wall_s": 25.2,
+   "llm_calls": 200,
+   "llm_calls_fresh": 0,
+   "tokens": 258280,
+   "cost_usd": 0.07127,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 1,
+   "operators": [
+    [
+     "filter",
+     "Confirm this is the Buddy the Soldier Bear children's picture book that follows a stuffed bear from a toy store to a battlefield, emphasizes supporting soldiers and veteran families, and is categorized under children's literature.",
+     [
+      "title",
+      "subtitle",
+      "author",
+      "categories",
+      "description",
+      "features",
+      "details"
+     ],
+     200
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q7": {
+   "latency_s": 13.7,
+   "wall_s": 26.5,
+   "llm_calls": 210,
+   "llm_calls_fresh": 0,
+   "tokens": 264177,
+   "cost_usd": 0.07388,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 0,
+   "operators": [
+    [
+     "filter",
+     "Confirm this is the Buddy the Soldier Bear children's picture book that follows a stuffed bear from a toy store to a battlefield, emphasizes supporting soldiers and veteran families, and is categorized under children's literature.",
+     [
+      "title",
+      "subtitle",
+      "author",
+      "categories",
+      "description",
+      "features",
+      "details"
+     ],
+     200
+    ],
+    [
+     "filter",
+     "Does this context match reviews about Buddy the Soldier Bear as toddler bedtime comfort + military/veteran support in 2020 with verified 5-star and >=2 helpful votes? Answer YES or NO. If unsure, answer NO.",
+     [
+      "context_id",
+      "context_name",
+      "audience",
+      "message_focus",
+      "quality_rule"
+     ],
+     10
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q8": {
+   "latency_s": 11.7,
+   "wall_s": 24.4,
+   "llm_calls": 200,
+   "llm_calls_fresh": 0,
+   "tokens": 257392,
+   "cost_usd": 0.07125,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 1,
+   "operators": [
+    [
+     "filter",
+     "Confirm this is the second edition of Make: Electronics, the hands-on beginner's electronics guide from the Make magazine team that highlights colorful diagrams and step-by-step experiments.",
+     [
+      "title",
+      "subtitle",
+      "author",
+      "categories",
+      "description",
+      "features",
+      "details"
+     ],
+     200
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q9": {
+   "latency_s": 11.7,
+   "wall_s": 24.5,
+   "llm_calls": 200,
+   "llm_calls_fresh": 0,
+   "tokens": 257192,
+   "cost_usd": 0.0705,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 1,
+   "operators": [
+    [
+     "filter",
+     "Confirm this is French Illusions, the travel memoir where Linda Kovic-Skow recounts her au pair year with the demanding Dubois family in France's Loire Valley.",
+     [
+      "title",
+      "subtitle",
+      "author",
+      "categories",
+      "description",
+      "features",
+      "details"
+     ],
+     200
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q10": {
+   "latency_s": 2.3,
+   "wall_s": 15.1,
+   "llm_calls": 26,
+   "llm_calls_fresh": 0,
+   "tokens": 14011,
+   "cost_usd": 0.00423,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 5,
+   "operators": [
+    [
+     "filter",
+     "Return true if this business primarily offers massage therapy or spa treatments. Otherwise return false. Respond with true or false only.",
+     [
+      "name",
+      "description",
+      "MISC",
+      "num_of_reviews"
+     ],
+     26
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q11": {
+   "latency_s": 6.1,
+   "wall_s": 18.6,
+   "llm_calls": 79,
+   "llm_calls_fresh": 0,
+   "tokens": 39669,
+   "cost_usd": 0.01132,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 5,
+   "operators": [
+    [
+     "filter",
+     "Return true only if this business is primarily a cannabis dispensary, delivery service, or weed retailer. Otherwise return false. Respond with true or false only.",
+     [
+      "name",
+      "description",
+      "MISC"
+     ],
+     79
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q12": {
+   "latency_s": 3.7,
+   "wall_s": 16.2,
+   "llm_calls": 26,
+   "llm_calls_fresh": 0,
+   "tokens": 13540,
+   "cost_usd": 0.00397,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 2,
+   "operators": [
+    [
+     "filter",
+     "Return true only if this business is primarily an auto repair, mechanic, brake, tire, or vehicle maintenance shop. Otherwise return false. Respond with true or false only.",
+     [
+      "name",
+      "description",
+      "MISC"
+     ],
+     26
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q13": {
+   "latency_s": 5.6,
+   "wall_s": 18.4,
+   "llm_calls": 73,
+   "llm_calls_fresh": 0,
+   "tokens": 37934,
+   "cost_usd": 0.01272,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 5,
+   "operators": [
+    [
+     "filter",
+     "Return true only if this business primarily offers nail salon, manicure, pedicure, brow, or spa services. Otherwise return false. Respond with true or false only.",
+     [
+      "name",
+      "description",
+      "MISC"
+     ],
+     73
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q14": {
+   "latency_s": 5.4,
+   "wall_s": 18.2,
+   "llm_calls": 61,
+   "llm_calls_fresh": 0,
+   "tokens": 31207,
+   "cost_usd": 0.00937,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 1,
+   "operators": [
+    [
+     "filter",
+     "Return true only if this place is a campground, RV park, off-road recreation area, or outdoor trailhead. Otherwise return false. Respond with true or false only.",
+     [
+      "name",
+      "description",
+      "MISC"
+     ],
+     61
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q15": {
+   "latency_s": 91.7,
+   "wall_s": 105.3,
+   "llm_calls": 1100,
+   "llm_calls_fresh": 0,
+   "tokens": 629973,
+   "cost_usd": 0.32302,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 142,
+   "operators": [
+    [
+     "filter",
+     "You are helping a retail analytics team pick products for customer demand analysis. From the name, type, and brand, does this item read like a marketable finished good rather than an upstream industrial input? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "p_name",
+      "p_type",
+      "p_brand"
+     ],
+     1000
+    ],
+    [
+     "filter",
+     "You are tagging accounts for B2B revenue analysis. Based on this customer name pattern, market segment, and balance level, does this profile look more like a business customer likely to place larger operational orders? Return a single YES or NO, with no other words. If uncertain, return NO.",
+     [
+      "c_name",
+      "c_mktsegment",
+      "c_acctbal"
+     ],
+     100
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q16": {
+   "latency_s": 102.5,
+   "wall_s": 117.4,
+   "llm_calls": 1171,
+   "llm_calls_fresh": 0,
+   "tokens": 658451,
+   "cost_usd": 0.32839,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 0,
+   "operators": [
+    [
+     "filter",
+     "Task: classify whether this part should be included in customer-facing demand analysis. Rule: YES only if the part sounds like a finished good that could appear in commercial product demand; NO for raw/industrial-looking components. Return YES or NO only. If uncertain, return NO.",
+     [
+      "p_name",
+      "p_type",
+      "p_brand"
+     ],
+     1000
+    ],
+    [
+     "filter",
+     "Task: decide if this is an enterprise-oriented customer profile for B2B order analysis. Rule: YES only for profiles that look commercially active (business segment + meaningful balance); otherwise NO. Return YES or NO only. If uncertain, return NO.",
+     [
+      "c_name",
+      "c_mktsegment",
+      "c_acctbal"
+     ],
+     100
+    ],
+    [
+     "filter",
+     "You are validating whether this customer profile is a business-relevant account for enterprise analysis. Return a single YES or NO, with no other words. If uncertain, return NO.",
+     [
+      "c_name",
+      "c_mktsegment",
+      "c_acctbal"
+     ],
+     71
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q17": {
+   "latency_s": 287.2,
+   "wall_s": 302.3,
+   "llm_calls": 3924,
+   "llm_calls_fresh": 0,
+   "tokens": 2192919,
+   "cost_usd": 1.00317,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 17130,
+   "operators": [
+    [
+     "filter",
+     "You are triaging enterprise orders for operations monitoring. From the priority label, total price, and order comment, does this order look important enough to deserve active follow-up by an operations manager? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "o_orderpriority",
+      "o_totalprice",
+      "o_comment"
+     ],
+     3735
+    ],
+    [
+     "filter",
+     "You are identifying high-value B2B customer profiles. From the customer name format, market segment, balance, and account comment, does this record look like a customer worth prioritizing in business account analytics? Return a single YES or NO, with no other words. If uncertain, return NO.",
+     [
+      "c_name",
+      "c_mktsegment",
+      "c_acctbal",
+      "c_comment"
+     ],
+     120
+    ],
+    [
+     "filter",
+     "You are an operations manager assessing whether a high-value customer is associated with an important order that requires active follow-up. The customer has the following profile: )",
+     [
+      "c_name",
+      "c_mktsegment",
+      "c_acctbal",
+      "c_comment"
+     ],
+     69
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q18": {
+   "latency_s": 10.1,
+   "wall_s": 28.3,
+   "llm_calls": 78,
+   "llm_calls_fresh": 0,
+   "tokens": 43566,
+   "cost_usd": 0.02171,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 2175,
+   "operators": [
+    [
+     "filter",
+     "You are preparing a logistics performance dashboard for retail distribution. Based on product name, type, packaging container, and size, does this part look like something that would realistically move through customer-facing distribution channels? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "p_name",
+      "p_type",
+      "p_container",
+      "p_size"
+     ],
+     53
+    ],
+    [
+     "filter",
+     "You are selecting countries to include in a cross-border freight and trade analysis view. Is this nation likely meaningful enough to keep in a global logistics discussion dataset? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "n_name"
+     ],
+     25
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q19": {
+   "latency_s": 1101.8,
+   "wall_s": 1121.6,
+   "llm_calls": 13340,
+   "llm_calls_fresh": 13338,
+   "tokens": 7216747,
+   "cost_usd": 3.40723,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 184569,
+   "operators": [
+    [
+     "filter",
+     "Lineitem shipping details:\\nMode: \\nInstruction: \\nComment: \\nIs this likely a potentially problematic fulfillment case worth audit attention? Answer YES or NO. If unsure, answer YES.",
+     [
+      "l_shipmode",
+      "l_shipinstruct",
+      "l_comment"
+     ],
+     13160
+    ],
+    [
+     "filter",
+     "Customer profile check:\\nName: \\nSegment: \\nBalance: \\nComment: \\nAnswer YES only if this customer appears likely to have higher complaint/escalation risk in commercial operations. Otherwise answer NO. If unsure, answer NO.",
+     [
+      "c_name",
+      "c_mktsegment",
+      "c_acctbal",
+      "c_comment"
+     ],
+     180
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q20": {
+   "latency_s": 6.2,
+   "wall_s": 23.8,
+   "llm_calls": 100,
+   "llm_calls_fresh": 0,
+   "tokens": 61710,
+   "cost_usd": 0.0192,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 55,
+   "operators": [
+    [
+     "filter",
+     "Return true if the business offers customer parking (lot, garage, street, or valet) or any form of bike parking. Use the provided attributes and description to decide. Respond with true or false only.",
+     [
+      "business_id",
+      "attributes",
+      "description"
+     ],
+     100
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q21": {
+   "latency_s": 6.8,
+   "wall_s": 19.7,
+   "llm_calls": 100,
+   "llm_calls_fresh": 0,
+   "tokens": 59003,
+   "cost_usd": 0.01641,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 2712,
+   "operators": [
+    [
+     "filter",
+     "Return true if the business clearly accepts credit card payments. Prefer explicit evidence from attributes or the narrative. Answer true or false only.",
+     [
+      "business_id",
+      "attributes",
+      "description"
+     ],
+     100
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q22": {
+   "latency_s": 6.0,
+   "wall_s": 20.8,
+   "llm_calls": 100,
+   "llm_calls_fresh": 0,
+   "tokens": 60342,
+   "cost_usd": 0.01857,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 270,
+   "operators": [
+    [
+     "filter",
+     "Return true if the business offers public WiFi access for its customers. Use both the attributes and description for evidence. Respond true or false only.",
+     [
+      "business_id",
+      "attributes",
+      "description"
+     ],
+     100
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q23": {
+   "latency_s": 7.0,
+   "wall_s": 19.4,
+   "llm_calls": 100,
+   "llm_calls_fresh": 0,
+   "tokens": 65144,
+   "cost_usd": 0.02185,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 649,
+   "operators": [
+    [
+     "filter",
+     "Return true if the description makes the primary business category explicit (for example, Italian restaurant, dental clinic, yoga studio). Favor entries where you can clearly read at least one category phrase. Answer true or false only.",
+     [
+      "business_id",
+      "name",
+      "attributes",
+      "description"
+     ],
+     100
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q24": {
+   "latency_s": 4.8,
+   "wall_s": 17.4,
+   "llm_calls": 62,
+   "llm_calls_fresh": 0,
+   "tokens": 39327,
+   "cost_usd": 0.01323,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 870,
+   "operators": [
+    [
+     "filter",
+     "Return true if the business description clearly lists multiple categories or service types that can be tokenized. Focus on entries with explicit category phrases. Respond with true or false only.",
+     [
+      "business_id",
+      "attributes",
+      "description"
+     ],
+     62
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q25": {
+   "latency_s": 98.5,
+   "wall_s": 111.3,
+   "llm_calls": 1171,
+   "llm_calls_fresh": 0,
+   "tokens": 667519,
+   "cost_usd": 0.3397,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 140,
+   "operators": [
+    [
+     "filter",
+     "You are helping a retail analytics team pick products for customer demand analysis. From the name, type, and brand, does this item read like a marketable finished good rather than an upstream industrial input? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "p_name",
+      "p_type",
+      "p_brand"
+     ],
+     1000
+    ],
+    [
+     "filter",
+     "You are tagging accounts for B2B revenue analysis. Based on this customer name pattern, market segment, and balance level, does this profile look more like a business customer likely to place larger operational orders? Return a single YES or NO, with no other words. If uncertain, return NO.",
+     [
+      "c_name",
+      "c_mktsegment",
+      "c_acctbal"
+     ],
+     100
+    ],
+    [
+     "filter",
+     "You are validating whether this customer profile is a business-relevant account for enterprise analysis. Return a single YES or NO, with no other words. If uncertain, return NO.",
+     [
+      "c_name",
+      "c_mktsegment",
+      "c_acctbal"
+     ],
+     71
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q26": {
+   "latency_s": 118.2,
+   "wall_s": 131.4,
+   "llm_calls": 1429,
+   "llm_calls_fresh": 0,
+   "tokens": 829004,
+   "cost_usd": 0.41285,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 1850,
+   "operators": [
+    [
+     "filter",
+     "You are helping a retail analytics team pick products for customer demand analysis. From the name, type, and brand, does this item read like a marketable finished good rather than an upstream industrial input? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "p_name",
+      "p_type",
+      "p_brand"
+     ],
+     1000
+    ],
+    [
+     "filter",
+     "You are shortlisting suppliers for stable operations. Based on supplier name style, account balance, comment, nation, and region, does this supplier look commercially dependable? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "s_name",
+      "s_acctbal",
+      "s_comment",
+      "n_name",
+      "r_name"
+     ],
+     45
+    ],
+    [
+     "filter",
+     "You are triaging enterprise orders for operations monitoring. From priority, total price, and comment, should this order be considered operationally important? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "o_orderpriority",
+      "o_totalprice",
+      "o_comment"
+     ],
+     11
+    ],
+    [
+     "filter",
+     "You are tagging accounts for B2B revenue analysis. Based on customer name, market segment, account balance, and profile comment, does this customer look business-like and operationally relevant? Return a single YES or NO, with no other words. If uncertain, return NO.",
+     [
+      "c_name",
+      "c_mktsegment",
+      "c_acctbal",
+      "c_comment"
+     ],
+     373
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q27": {
+   "latency_s": 96.3,
+   "wall_s": 110.2,
+   "llm_calls": 1193,
+   "llm_calls_fresh": 0,
+   "tokens": 697822,
+   "cost_usd": 0.33674,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 161,
+   "operators": [
+    [
+     "filter",
+     "You are screening parts for strategic sourcing analysis. Looking at part name, type, brand, and size, does this look like a differentiated component where supplier quality and pricing strategy would matter? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "p_name",
+      "p_type",
+      "p_brand",
+      "p_size"
+     ],
+     1000
+    ],
+    [
+     "filter",
+     "You are shortlisting suppliers for long-term procurement partnerships. Based on supplier identity style, account balance, and profile comment tone, does this supplier appear commercially dependable enough for preferred-vendor consideration? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "s_name",
+      "s_acctbal",
+      "s_comment"
+     ],
+     32
+    ],
+    [
+     "filter",
+     "You are validating whether this supplier profile is suitable for preferred-vendor sourcing. Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "p_type",
+      "region_name",
+      "s_name",
+      "s_acctbal",
+      "s_comment"
+     ],
+     161
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q28": {
+   "latency_s": 23.0,
+   "wall_s": 39.6,
+   "llm_calls": 273,
+   "llm_calls_fresh": 0,
+   "tokens": 146493,
+   "cost_usd": 0.06566,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 14,
+   "operators": [
+    [
+     "filter",
+     "Does this order look operationally significant based on priority label, total price, and comment content? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "o_orderpriority",
+      "o_totalprice",
+      "o_comment"
+     ],
+     243
+    ],
+    [
+     "filter",
+     "Does this customer look operationally strategic based on name style, market segment, and account balance? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "c_name",
+      "c_mktsegment",
+      "c_acctbal"
+     ],
+     16
+    ],
+    [
+     "filter",
+     "Could this customer account be strategically important for order fulfillment? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "o_orderpriority",
+      "o_totalprice",
+      "l_shipmode",
+      "c_name",
+      "c_mktsegment",
+      "c_acctbal"
+     ],
+     14
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  },
+  "Q30": {
+   "latency_s": 8.1,
+   "wall_s": 20.8,
+   "llm_calls": 12,
+   "llm_calls_fresh": 0,
+   "tokens": 7125,
+   "cost_usd": 0.00386,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "rows": 4,
+   "operators": [
+    [
+     "filter",
+     "Does this part look suitable for customer-facing distribution based on name, type, and packaging? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "p_name",
+      "p_type",
+      "p_container"
+     ],
+     4
+    ],
+    [
+     "filter",
+     "Does this supplier appear qualified for consumer-facing distribution partnerships? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "s_name",
+      "s_acctbal",
+      "s_comment"
+     ],
+     4
+    ],
+    [
+     "filter",
+     "Would this supplier be suitable for retail distribution of this product? Return a single YES or NO, with no other words. If uncertain, return YES.",
+     [
+      "p_type",
+      "l_shipmode",
+      "c_mktsegment",
+      "s_name",
+      "s_acctbal",
+      "s_comment"
+     ],
+     4
+    ]
+   ],
+   "error": null,
+   "ran_at": "2026-10-04 23:27:50 MDT"
+  }
+ },
+ "model": "gpt-5.6-luna",
+ "concurrency": 20,
+ "optimizer": "pareto",
+ "policy": "MaxQuality",
+ "updated": "2026-10-04 23:27:50 MDT",
+ "total": {
+  "n_queries": 30,
+  "latency_s": 2088.4,
+  "llm_calls": 25785,
+  "cost_usd": 6.8213,
+  "cost_is_estimate": true,
+  "tokens": 14997707,
+  "errors": 0
+ }
+}

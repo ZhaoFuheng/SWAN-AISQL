@@ -1,0 +1,14 @@
+Palimpzest MMQA gpt-5.6-luna via http://localhost:4001  optimizer=pareto  policy=MaxQuality  workers=20  queries=['q1', 'q2a', 'q2b', 'q3a', 'q3f', 'q4', 'q5', 'q6a', 'q6b', 'q6c', 'q7']
+q1    lat=  16.8s calls=   20 fresh=  20 tok=  12086 ~$0.0043  n=1/1  P=1.0 R=1.0 F1=1.0
+q2a   lat= 218.1s calls= 2600 fresh=1200 tok=2420067 ~$0.8146  n=98/5  P=0.051 R=1.0 F1=0.097
+q2b   lat= 227.1s calls= 2698 fresh=  27 tok=2481476 ~$0.8403  n=98/5  P=0.051 R=1.0 F1=0.097
+q3a   lat=  24.7s calls=  200 fresh= 200 tok= 103977 ~$0.0313  n=19/13  P=0.684 R=1.0 F1=0.813
+q3f   lat=  24.1s calls=  200 fresh= 200 tok= 103661 ~$0.0307  n=4/3  P=0.75 R=1.0 F1=0.857
+q4    lat=  17.3s calls=   24 fresh=  24 tok=  19279 ~$0.0075  n=47/39  P=0.617 R=0.744 F1=0.674
+q5    lat=  15.2s calls=    1 fresh=   1 tok=   3838 ~$0.0010  n=1/1  P=1.0 R=1.0 F1=1.0
+q6a   lat=  24.4s calls=  200 fresh= 180 tok=  87489 ~$0.0293  n=1/1  P=1.0 R=1.0 F1=1.0
+q6b   lat=  25.1s calls=  200 fresh= 179 tok=  88608 ~$0.0315  n=1/1  P=1.0 R=1.0 F1=1.0
+q6c   lat=  25.6s calls=  200 fresh= 181 tok=  89830 ~$0.0340  n=5/5  P=1.0 R=1.0 F1=1.0
+q7    lat=2815.7s calls=40000 fresh=27000 tok=36276983 ~$11.9634  n=534/5  P=0.012 R=1.0 F1=0.024
+TOTAL(11q)  latency=3434.1s  calls=46343  ~cost=$13.788  tokens=41687294  macro-F1=0.687
+

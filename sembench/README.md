@@ -38,7 +38,39 @@ its `LLMMap` frame); on agent_bench, `AGENTBENCH/blendsql_queries/QN.sql` is the
 the SWAN queries (`translate_to_blendsql.py`). Neither supports images, so ECOMM and MMQA are not run for
 them. Running the PLOP fork: `PLOP_FORK.md`.
 
+Palimpzest: `MOVIE/palimpzest_queries.py`, `MMQA/palimpzest_queries.py` and `ECOMM/palimpzest_queries/qN.py`
+are **SemBench's own Palimpzest programs**, copied from the SemBench repository (MOVIE q1–q10, MMQA all
+eleven, ECOMM q1–q13; SemBench wrote none for ECOMM q14), run by `palimpzest_<suite>.py` through
+`palimpzest_exec.py` in Palimpzest's own interpreter (`setup_palimpzest.sh`) with SemBench's Palimpzest
+settings and the Abacus optimizer on (SemBench ran 0.8.2 with it off; we run 1.5.3, the current release).
+Calls and tokens are the proxy's counter deltas while a query runs (one suite at a time, nothing else on the
+proxy); cost is estimated from those tokens.
+
+ThalamusDB: `<suite>/thalamusdb_queries/` are **SemBench's own ThalamusDB formulations**, copied from the
+SemBench repository (MOVIE q1–q8, ECOMM q1/q2/q7/q8/q9, MMQA q2a/q3a/q3f/q6a–c/q7; the other queries need
+operators ThalamusDB lacks), run by `thalamusdb_<suite>.py` through `thalamusdb_exec.py` in ThalamusDB's own
+interpreter (`setup_thalamusdb.sh`) with SemBench's runner settings (error bound 0, caps lifted, 6,000 s per
+query). The tables follow SemBench's ThalamusDB setup (`<suite>/thalamusdb.duckdb`, built on first run from
+this repository's suite databases); the one edit is ECOMM q8's description-length column, which reads this
+suite's flattened `description`. On agent_bench the PLOP authors wrote no ThalamusDB queries, so
+`AGENTBENCH/thalamusdb_queries/` is **our formulation** (`make_thalamusdb_queries.py` states the rule: one
+materialised item column per predicate, SemBench's own convention; a predicate over two tables filters the
+equi-joined rows; a CTE a later LIMIT subquery depends on becomes a ThalamusDB stage, as does a single-side
+predicate feeding a cross product (Q17, Q19, Q26), so the product is formed over survivors only; the k-way
+classification of Q1–Q3 is a CASE cascade of k−1 filters, specific classes first and the broadest class as the
+fallback, each condition naming the full option set, and
+the runner keeps the first k rows of a LIMIT query since ThalamusDB returns every certain row; the rows
+come from ThalamusDB's own SQL rewrite run in DuckDB, so duplicates and column types are kept). Palimpzest
+runs `AGENTBENCH/lotus_queries/QN.py` unchanged through `palimpzest_hybrid_exec.py`, which backs the
+programs' `sem_filter` / `sem_map` with Palimpzest programs (the prompt's labelled fields become
+`depends_on` columns, the rest the instruction), so the LOTUS and Palimpzest rows share one formulation.
+
 So on ECOMM and MOVIE the LOTUS side is SemBench's own code; on MMQA and agent_bench it is our translation, kept prompt-identical to the SWAN side.
+
+SWAN 2.0 (`SWAN2/`): the benchmark at github.com/ZhaoFuheng/SWAN writes one AISQL query per question that
+every system runs; `SWAN2/aisql`, `SWAN2/oracle` and `SWAN2/questions` are a copy of its queries, oracle forms
+and question list (`SWAN2/sync.sh` refreshes them from a checkout), kept here so this repository holds every
+query behind its tables. The databases, harness, translations and results live in the benchmark.
 
 ## What is on disk vs. what you need to fetch
 

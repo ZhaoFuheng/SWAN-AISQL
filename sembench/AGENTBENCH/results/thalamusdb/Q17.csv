@@ -1,0 +1,1 @@
+o_orderkey,o_custkey,o_orderdate,o_orderpriority,o_totalprice,l_partkey,l_suppkey,l_shipmode,l_shipinstruct,l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,p_name,p_type,p_brand,s_name,supplier_nation,c_custkey,c_name,c_address,c_nationkey,c_phone,c_acctbal,c_mktsegment,c_comment

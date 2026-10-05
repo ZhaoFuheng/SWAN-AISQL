@@ -1,0 +1,807 @@
+{
+ "q2a": {
+  "predicted": [
+   [
+    "2",
+    "0bf44cd47c202f590ef58e012c52117e.jpg"
+   ],
+   [
+    "3",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "7",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "8",
+    "0bf44cd47c202f590ef58e012c52117e.jpg"
+   ],
+   [
+    "12",
+    "42c88eafedfab5203c72e1d2ec1c2f37.jpg"
+   ],
+   [
+    "5",
+    "117d500aaa630023c4038b8268b309c0.png"
+   ],
+   [
+    "3",
+    "00a5d23fa78de769d00d2ced7d067dbf.jpg"
+   ],
+   [
+    "3",
+    "42c88eafedfab5203c72e1d2ec1c2f37.jpg"
+   ],
+   [
+    "12",
+    "00a5d23fa78de769d00d2ced7d067dbf.jpg"
+   ],
+   [
+    "4",
+    "5588a1833b8fa95fe1b0ed520e447d64.jpg"
+   ],
+   [
+    "7",
+    "0cdbe38cdf213b9f46182f98230aa5f7.jpg"
+   ],
+   [
+    "3",
+    "0bf44cd47c202f590ef58e012c52117e.jpg"
+   ],
+   [
+    "12",
+    "0bf44cd47c202f590ef58e012c52117e.jpg"
+   ],
+   [
+    "2",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "9",
+    "0c52006c9bcaf332468ce660c5921dc3.png"
+   ],
+   [
+    "0",
+    "0c52006c9bcaf332468ce660c5921dc3.png"
+   ],
+   [
+    "2",
+    "42c88eafedfab5203c72e1d2ec1c2f37.jpg"
+   ],
+   [
+    "6",
+    "117d500aaa630023c4038b8268b309c0.png"
+   ],
+   [
+    "8",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "2",
+    "00a5d23fa78de769d00d2ced7d067dbf.jpg"
+   ],
+   [
+    "8",
+    "00a5d23fa78de769d00d2ced7d067dbf.jpg"
+   ],
+   [
+    "4",
+    "0a8338eedd3ebeced9ad26a9bb98a642.jpg"
+   ],
+   [
+    "10",
+    "0c52006c9bcaf332468ce660c5921dc3.png"
+   ],
+   [
+    "7",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "12",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "8",
+    "42c88eafedfab5203c72e1d2ec1c2f37.jpg"
+   ]
+  ],
+  "gold": [
+   [
+    0,
+    "117d500aaa630023c4038b8268b309c0.png"
+   ],
+   [
+    5,
+    "117d500aaa630023c4038b8268b309c0.png"
+   ],
+   [
+    6,
+    "117d500aaa630023c4038b8268b309c0.png"
+   ],
+   [
+    9,
+    "117d500aaa630023c4038b8268b309c0.png"
+   ],
+   [
+    10,
+    "117d500aaa630023c4038b8268b309c0.png"
+   ]
+  ]
+ },
+ "q3a": {
+  "predicted": [
+   "High Road",
+   "Save the Date",
+   "Queens of Country",
+   "The Disaster Artist",
+   "The Mouse That Roared (film)",
+   "Bachelorette",
+   "3, 2, 1... Frankie Go Boom",
+   "The World's End (film)",
+   "The Night Before",
+   "The Interview",
+   "The People We Hate at the Wedding",
+   "Shorts (2009 film)",
+   "Bloodstone (1988 film)",
+   "Orange County",
+   "Mean Girls",
+   "My Best Friend's Girl",
+   "The Butcher Boy (1997 film)",
+   "That's What She Said (film)",
+   "Whiskey Tango Foxtrot (film)",
+   "Magical Mystery Tour (film)",
+   "Hot Tub Time Machine",
+   "King Lear (1987 film)",
+   "Shout at the Devil (film)"
+  ],
+  "gold": [
+   "Orange County",
+   "Mean Girls",
+   "My Best Friend's Girl",
+   "Hot Tub Time Machine",
+   "High Road",
+   "Save the Date",
+   "Bachelorette",
+   "3, 2, 1... Frankie Go Boom",
+   "Queens of Country",
+   "The Interview",
+   "The Night Before",
+   "The Disaster Artist",
+   "The People We Hate at the Wedding"
+  ]
+ },
+ "q3f": {
+  "predicted": [
+   "My Best Friend's Girl",
+   "Save the Date",
+   "The People We Hate at the Wedding",
+   "That's What She Said (film)"
+  ],
+  "gold": [
+   "My Best Friend's Girl",
+   "Save the Date",
+   "The People We Hate at the Wedding"
+  ]
+ },
+ "q6a": {
+  "predicted": [
+   "Garuda Indonesia",
+   "United Airlines",
+   "Middle East Airlines",
+   "Ethiopian Airlines",
+   "Aerom\u00e9xico",
+   "Kuwait Airways",
+   "Delta Air Lines",
+   "Singapore Airlines",
+   "Air China",
+   "Iraqi Airways",
+   "WestJet",
+   "Lion Air",
+   "Discover Airlines",
+   "Sun Country Airlines"
+  ],
+  "gold": [
+   "Discover Airlines"
+  ]
+ },
+ "q6b": {
+  "predicted": [
+   "Malaysia Airlines",
+   "Sun Country Airlines",
+   "Sichuan Airlines",
+   "Nepal Airlines",
+   "Middle East Airlines",
+   "American Airlines",
+   "AirAsia",
+   "United Airlines",
+   "Discover Airlines",
+   "Air Canada Rouge",
+   "Emirates",
+   "Air Canada Express",
+   "SCAT Airlines",
+   "Virgin Atlantic",
+   "WestJet",
+   "flydubai",
+   "Shanghai Airlines",
+   "Air China",
+   "Singapore Airlines"
+  ],
+  "gold": [
+   "Discover Airlines"
+  ]
+ },
+ "q6c": {
+  "predicted": [
+   "Congo Airways",
+   "Delta Air Lines",
+   "British Airways",
+   "AirAsia",
+   "Air Canada",
+   "Air China",
+   "Tigerair Taiwan",
+   "Singapore Airlines",
+   "Virgin Atlantic",
+   "WestJet",
+   "China Airlines",
+   "Sichuan Airlines",
+   "American Airlines",
+   "Breeze Airways",
+   "Malaysia Airlines",
+   "J-Air",
+   "Discover Airlines",
+   "Lion Air",
+   "9 Air",
+   "Shanghai Airlines",
+   "United Airlines",
+   "Edelweiss Air",
+   "Middle East Airlines",
+   "Air Canada Rouge",
+   "Tunisair",
+   "United Express",
+   "Garuda Indonesia",
+   "Starlux Airlines",
+   "Qatar Airways",
+   "Ethiopian Airlines",
+   "Royal Air Maroc",
+   "Sun Country Airlines"
+  ],
+  "gold": [
+   "British Airways",
+   "Delta Air Lines",
+   "Discover Airlines",
+   "Edelweiss Air",
+   "Virgin Atlantic"
+  ]
+ },
+ "q7": {
+  "predicted": [
+   [
+    "AirAsia",
+    "0b94ab1e7b50729b234c7e42fe1bf671.jpg"
+   ],
+   [
+    "Loong Air",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Lion Air",
+    "0cdbe38cdf213b9f46182f98230aa5f7.jpg"
+   ],
+   [
+    "Japan Air Commuter",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Angara Airlines",
+    "0cdbe38cdf213b9f46182f98230aa5f7.jpg"
+   ],
+   [
+    "Air Do",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "Pakistan International Airlines",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "Air North",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "Aerom\u00e9xico",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "Susi Air",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "Flynas",
+    "0c52006c9bcaf332468ce660c5921dc3.png"
+   ],
+   [
+    "Ruili Airlines",
+    "0a8338eedd3ebeced9ad26a9bb98a642.jpg"
+   ],
+   [
+    "Aero K",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "Iraqi Airways",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "flydubai",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Kam Air",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "Toki Air",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "Starlux Airlines",
+    "0bf44cd47c202f590ef58e012c52117e.jpg"
+   ],
+   [
+    "Avianca",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "Airblue",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Fiji Link",
+    "0a8338eedd3ebeced9ad26a9bb98a642.jpg"
+   ],
+   [
+    "Lucky Air",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "Airblue",
+    "0ac83693b42f451f27c992a887c38887.jpg"
+   ],
+   [
+    "Aerom\u00e9xico",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "Delta Air Lines",
+    "1sz0kf8wcmj0q8n3pu6mg61gl158vvz1.png"
+   ],
+   [
+    "Air Tahiti",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "Toki Air",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Air Senok",
+    "0ac83693b42f451f27c992a887c38887.jpg"
+   ],
+   [
+    "Oman Air",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Kalstar Aviation",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "Discover Airlines",
+    "nqr1pjql5qs3dp8rz2a4zzq7rn0xyp6k.png"
+   ],
+   [
+    "Kalstar Aviation",
+    "0bf44cd47c202f590ef58e012c52117e.jpg"
+   ],
+   [
+    "Air Senok",
+    "0cdbe38cdf213b9f46182f98230aa5f7.jpg"
+   ],
+   [
+    "CM Airlines",
+    "0bf44cd47c202f590ef58e012c52117e.jpg"
+   ],
+   [
+    "SCAT Airlines",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "Korean Air",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "Sepehran Airlines",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Air Canada Rouge",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "Alaska Airlines",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "ATA Airlines",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "Safarilink",
+    "0d03699bfc51444df6ca45c9f7566a55.jpg"
+   ],
+   [
+    "Libyan Airlines",
+    "0a2c3d9697a848dec1f0fc055990d657.jpg"
+   ],
+   [
+    "Air China",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "CM Airlines",
+    "0d03699bfc51444df6ca45c9f7566a55.jpg"
+   ],
+   [
+    "China Eastern Airlines",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "Air North",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "Air Arabia",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "Susi Air",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "Thai AirAsia",
+    "0b94ab1e7b50729b234c7e42fe1bf671.jpg"
+   ],
+   [
+    "Edelweiss Air",
+    "6zpijbg5jv4jftpftpmla6xbizne28d9.png"
+   ],
+   [
+    "flynas",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "Air Arabia",
+    "0b94ab1e7b50729b234c7e42fe1bf671.jpg"
+   ],
+   [
+    "Libyan Airlines",
+    "0a8338eedd3ebeced9ad26a9bb98a642.jpg"
+   ],
+   [
+    "Cayman Airways",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Air Tahiti",
+    "0a8338eedd3ebeced9ad26a9bb98a642.jpg"
+   ],
+   [
+    "Japan Air Commuter",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "Air Canada",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "Thai Lion Air",
+    "0cdbe38cdf213b9f46182f98230aa5f7.jpg"
+   ],
+   [
+    "Starlux Airlines",
+    "0d03699bfc51444df6ca45c9f7566a55.jpg"
+   ],
+   [
+    "Alaska Airlines",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "S7 Airlines",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "United Airlines",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "Air Do",
+    "0cdbe38cdf213b9f46182f98230aa5f7.jpg"
+   ],
+   [
+    "Lucky Air",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "Grand Canyon Airlines",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "flynas",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Air Canada Express",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "Virgin Atlantic",
+    "antbx4oxst0z5o6pe2g1thrjr0dz073j.png"
+   ],
+   [
+    "Air North",
+    "0cdbe38cdf213b9f46182f98230aa5f7.jpg"
+   ],
+   [
+    "Kuwait Airways",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Angara Airlines",
+    "0a8338eedd3ebeced9ad26a9bb98a642.jpg"
+   ],
+   [
+    "SCAT Airlines",
+    "0a8338eedd3ebeced9ad26a9bb98a642.jpg"
+   ],
+   [
+    "Porter Airlines",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "Air Senok",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "Frontier Airlines",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "Alaska Airlines",
+    "0b94ab1e7b50729b234c7e42fe1bf671.jpg"
+   ],
+   [
+    "Air Senok",
+    "0bf44cd47c202f590ef58e012c52117e.jpg"
+   ],
+   [
+    "Angara Airlines",
+    "0bf44cd47c202f590ef58e012c52117e.jpg"
+   ],
+   [
+    "CM Airlines",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "Breeze Airways",
+    "0ac83693b42f451f27c992a887c38887.jpg"
+   ],
+   [
+    "Oman Air",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "SCAT Airlines",
+    "0bf44cd47c202f590ef58e012c52117e.jpg"
+   ],
+   [
+    "TransNusa",
+    "0e4376f9dac9a582c8efcca6fda8f9b5.jpg"
+   ],
+   [
+    "Air Cairo",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "SalamAir",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "Aerom\u00e9xico",
+    "0a40a4327b631b02ea9a5d8bad0cbd71.jpg"
+   ],
+   [
+    "Angara Airlines",
+    "0d03699bfc51444df6ca45c9f7566a55.jpg"
+   ],
+   [
+    "Kalstar Aviation",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Congo Airways",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "Beijing Capital Airlines",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Fiji Link",
+    "0cdbe38cdf213b9f46182f98230aa5f7.jpg"
+   ],
+   [
+    "Air Canada Express",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "AirAsia",
+    "0d03699bfc51444df6ca45c9f7566a55.jpg"
+   ],
+   [
+    "Oman Air",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "Nile Air",
+    "0d03699bfc51444df6ca45c9f7566a55.jpg"
+   ],
+   [
+    "Safarilink",
+    "0cdbe38cdf213b9f46182f98230aa5f7.jpg"
+   ],
+   [
+    "Susi Air",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Tigerair Taiwan",
+    "0cdbe38cdf213b9f46182f98230aa5f7.jpg"
+   ],
+   [
+    "S7 Airlines",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Thai Lion Air",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "China Southern Airlines",
+    "0d03699bfc51444df6ca45c9f7566a55.jpg"
+   ],
+   [
+    "British Airways",
+    "cwncgabxti09zmf36t4phvaz1xzv10wu.png"
+   ],
+   [
+    "Susi Air",
+    "0ac83693b42f451f27c992a887c38887.jpg"
+   ],
+   [
+    "Eastar Jet",
+    "0bf44cd47c202f590ef58e012c52117e.jpg"
+   ],
+   [
+    "Saudia",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "Aero K",
+    "0e5ef5756c89f15f43bb002c748fad6f.jpg"
+   ],
+   [
+    "Susi Air",
+    "0cdbe38cdf213b9f46182f98230aa5f7.jpg"
+   ],
+   [
+    "Viva",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "9 Air",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "Skymark Airlines",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Thai Lion Air",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "Air Senok",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "Tigerair Taiwan",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "Cebu Pacific",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "Air Tahiti",
+    "0ac83693b42f451f27c992a887c38887.jpg"
+   ],
+   [
+    "Air Do",
+    "0cfaa3d5a46a430485706f811b3d2f55.png"
+   ],
+   [
+    "Saudia",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Oman Air",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "Loong Air",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "Viva",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Lucky Air",
+    "0cdbe38cdf213b9f46182f98230aa5f7.jpg"
+   ],
+   [
+    "Air Tahiti",
+    "0cdbe38cdf213b9f46182f98230aa5f7.jpg"
+   ],
+   [
+    "NAM Air",
+    "0be99201122a0c8a5038aeb94d46d2e0.jpg"
+   ],
+   [
+    "Sepehran Airlines",
+    "00e5bf0ce82a749aa491974fc3dff419.png"
+   ],
+   [
+    "Air Senok",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ],
+   [
+    "Angara Airlines",
+    "0e428fd848ba49bf388935fdcafe1b5c.png"
+   ]
+  ],
+  "gold": [
+   [
+    "British Airways",
+    "cwncgabxti09zmf36t4phvaz1xzv10wu.png"
+   ],
+   [
+    "Delta Air Lines",
+    "1sz0kf8wcmj0q8n3pu6mg61gl158vvz1.png"
+   ],
+   [
+    "Discover Airlines",
+    "nqr1pjql5qs3dp8rz2a4zzq7rn0xyp6k.png"
+   ],
+   [
+    "Edelweiss Air",
+    "6zpijbg5jv4jftpftpmla6xbizne28d9.png"
+   ],
+   [
+    "Virgin Atlantic",
+    "antbx4oxst0z5o6pe2g1thrjr0dz073j.png"
+   ]
+  ]
+ }
+}

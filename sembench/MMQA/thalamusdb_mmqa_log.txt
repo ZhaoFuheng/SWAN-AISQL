@@ -1,0 +1,10 @@
+ThalamusDB MMQA gpt-5.6-luna via http://localhost:4001  dop=20  max_seconds=6000  queries=['q2a', 'q3a', 'q3f', 'q6a', 'q6b', 'q6c', 'q7']
+q2a   lat= 109.2s calls=   20 fresh=  20 tok=  39544 ~$0.0222  n=26/5  P=0.077 R=0.4 F1=0.129
+q3a   lat=  25.5s calls=  200 fresh=   0 tok=  30255 ~$0.0137  n=23/13  P=0.565 R=1.0 F1=0.722
+q3f   lat=  25.6s calls=  200 fresh=   0 tok=  30194 ~$0.0132  n=4/3  P=0.75 R=1.0 F1=0.857
+q6a   lat=  30.6s calls=  161 fresh=   0 tok=  16834 ~$0.0211  n=14/1  P=0.071 R=1.0 F1=0.133
+q6b   lat=  28.0s calls=  161 fresh=   0 tok=  18193 ~$0.0238  n=19/1  P=0.053 R=1.0 F1=0.1
+q6c   lat=  33.9s calls=  161 fresh= 161 tok=  17963 ~$0.0233  n=32/5  P=0.156 R=1.0 F1=0.27
+q7    lat=1938.3s calls=  400 fresh= 400 tok= 769616 ~$0.4047  n=126/5  P=0.04 R=1.0 F1=0.076
+TOTAL(7q)  latency=2191.1s  calls=1303  ~cost=$0.5219  tokens=922599  macro-F1=0.327
+

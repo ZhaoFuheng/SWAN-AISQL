@@ -1,0 +1,16 @@
+Palimpzest ECOMM gpt-5.6-luna via http://localhost:4001  optimizer=pareto  policy=MaxQuality  workers=20  sf500  serial  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q11', 'q12', 'q13']
+q1   lat=   48.6s calls=   500 fresh=  500 tok=   347799 ~$0.1019  n=7/7  P=1.0 R=1.0 quality=1.0
+q2   lat=   60.7s calls=   500 fresh=  500 tok=  1842013 ~$0.4872  n=16/5  P=0.312 R=1.0 quality=0.476
+q3   lat=   55.3s calls=   500 fresh=  500 tok=   456842 ~$0.1459  n=500/500  P=1.0 R=1.0 quality=0.935
+q4   lat=   45.0s calls=   294 fresh=  294 tok=  1160774 ~$0.3035  n=294/294  P=1.0 R=1.0 quality=0.738
+q5   lat=   29.1s calls=   228 fresh=  228 tok=   255066 ~$0.0764  n=228/228  P=1.0 R=1.0 quality=1.0
+q6   lat=   72.5s calls=   500 fresh=  500 tok=  2027946 ~$0.5712  n=500/228  P=0.456 R=1.0 quality=0.876
+q7   lat=  537.3s calls=  7921 fresh= 7921 tok=  8728566 ~$2.6712  n=182/173  P=0.94 R=0.988 quality=0.963
+q8   lat=   66.2s calls=   500 fresh=  500 tok=  2436325 ~$0.6407  n=3/1  P=0.333 R=1.0 quality=0.5
+q9   lat=  118.1s calls=   784 fresh=  784 tok=  6411794 ~$1.6622  n=49/46  P=0.878 R=0.935 quality=0.905
+q10  lat=  259.2s calls=  2296 fresh= 1516 tok= 18570985 ~$4.8043  n=72/8  P=0.111 R=1.0 quality=0.2
+q11  lat=  288.7s calls=  2620 fresh= 2619 tok= 15780916 ~$4.1008  n=54/18  P=0.333 R=1.0 quality=0.5
+q12  lat=   58.6s calls=   540 fresh=  540 tok=   685181 ~$0.2084  n=63/58  P=0.0 R=0.0 quality=0.0
+q13  lat=   62.3s calls=   500 fresh=  500 tok=  2102273 ~$0.5584  n=12/12  P=0.75 R=0.75 quality=0.75
+TOTAL(13q)  latency=1701.6s  calls=17683  ~cost=$16.3319  tokens=60806480  macro-quality=0.68
+

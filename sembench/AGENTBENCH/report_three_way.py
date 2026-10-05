@@ -17,13 +17,17 @@ SWAN_TAG = os.environ.get("SWAN_TAG", "swan")
 SYSTEMS = [("SWAN", SWAN_TAG), ("PLOP", "plop"), ("LOTUS", "lotus")]
 if os.path.exists(os.path.join(HERE, "results", "blendsql_agentbench_results.json")):
     SYSTEMS.append(("BlendSQL", "blendsql"))
+if os.path.exists(os.path.join(HERE, "results", "thalamusdb_agentbench_results.json")):
+    SYSTEMS.append(("ThalamusDB", "thalamusdb"))
+if os.path.exists(os.path.join(HERE, "results", "palimpzest_agentbench_results.json")):
+    SYSTEMS.append(("Palimpzest", "palimpzest"))
 
 ev_src = open(os.path.join(HERE, "eval_agentbench.py")).read().replace("\nmain()\n", "\n")
 ev = importlib.util.module_from_spec(importlib.util.spec_from_loader("ev", loader=None))
 ev.__dict__["__file__"] = os.path.join(HERE, "eval_agentbench.py")
 exec(compile(ev_src, "eval_agentbench.py", "exec"), ev.__dict__)
 
-HEADER = """# agent_bench Q1-Q30: SWAN vs PLOP-DP vs LOTUS vs BlendSQL (gpt-5.6-luna) -- {today}
+HEADER = """# agent_bench Q1-Q30: SWAN vs PLOP-DP vs LOTUS vs BlendSQL vs ThalamusDB vs Palimpzest (gpt-5.6-luna) -- {today}
 
 Quality = deterministic scorer (eval_agentbench.py): LIMIT-free PLOP execution as ground truth; LIMIT queries scored sound+complete. Calls = true request counts through the recording proxy (SWAN replays PLOP's samples via the shared-verdict alias; LOTUS Q1-Q18 replayed from 2026-09-21, Q19-Q30 recorded fresh 2026-09-26). LOTUS translations are ours (sembench/README.md, provenance table). SWAN run: results/{swan_tag}.
 
@@ -35,7 +39,10 @@ ground truth; LOTUS admitted 3 / 261 / 3,026 / 4 rows) any disagreement scores 0
 is a perfectly reasonable reading. Its macro therefore measures verdict agreement with PLOP's samples as
 much as correctness; the calls / latency / cost columns are the like-for-like comparison. BlendSQL (our
 mechanical translation, translate_to_blendsql.py; zero-shot; cost estimated from its token counts) is in
-the same position as LOTUS: independent samples.
+the same position as LOTUS: independent samples. ThalamusDB (our formulation, thalamusdb_queries/; exact
+mode under SemBench's runner settings; cost estimated from its token counts) likewise; Q1-Q3's
+classification runs as a CASE cascade of its boolean filters. Palimpzest (Abacus optimizer on; the LOTUS
+programs with their semantic operators served by Palimpzest; cost estimated from its token counts) likewise.
 
 """
 
@@ -61,7 +68,7 @@ def main():
             cells.append(f"{(v or 0.0):.3f}")
         for key, fmt in (("calls", "{:,}"), ("lat", "{:.1f}"), ("cost", "{:.4f}")):
             for name, _ in SYSTEMS:
-                r = runs[name][q]
+                r = runs[name].get(q, {"llm_calls": 0, "latency_s": 0.0, "cost_usd": 0.0})  # a system not yet run on q
                 val = {"calls": r["llm_calls"], "lat": r["latency_s"],
                        "cost": r.get("cost_usd", r.get("cost_usd_est", 0.0))}[key]
                 tot[name][key] += val

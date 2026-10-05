@@ -6,7 +6,7 @@ Per query: a fresh CLI process (query-scoped local cache by construction), route
 SELECT's rows go to results/swan/QN.csv for cross-system agreement.
 
   run:  python3 swan_agentbench.py [Q1 Q2 ...]
-  env:  DUCKDB_BIN, AI_PROXY_URL (:4001), AI_MODEL (gpt-5.6-luna), AI_MAX_CONCURRENCY (20)
+  env:  DUCKDB_BIN, AI_PROXY_URL (:4001), AI_MODEL (gpt-5.6-luna), AI_MAX_CONCURRENCY (20), AI_PROMPT_VARIANT (plain)
 """
 import json
 import os
@@ -38,8 +38,10 @@ TAG = os.environ.get("SWAN_TAG", "swan")
 # the SWAN translations of the 30 PLOP queries (SWAN_QUERY_DIR overrides for an A/B against a variant set)
 QUERY_DIR = os.environ.get("SWAN_QUERY_DIR", "swan_queries")
 
+# the hybrid-bench protocol sends ai_filter's prompt bare (PLOP's exact text, no system message), so that the
+# proxy's shared-verdict alias (CACHE_ALIAS_CHAT=1) serves SWAN the verdict recorded for PLOP's identical prompt
 ENV = {**os.environ, "AI_MODEL": MODEL, "AI_API_KEY": "sk-test", "AI_MAX_CONCURRENCY": CONC,
-       "AI_TIMEOUT_MS": "180000"}
+       "AI_TIMEOUT_MS": "180000", "AI_PROMPT_VARIANT": os.environ.get("AI_PROMPT_VARIANT", "plain")}
 
 
 def csv_row_count(text):

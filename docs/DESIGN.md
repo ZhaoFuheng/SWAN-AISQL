@@ -245,10 +245,13 @@ Three layers, each with one job:
   structure (`prefix`, expected reuse); the client owns the economics: when to spend a cache write,
   parking same-prefix calls until the write lands, re-priming after the provider's TTL, failing
   open. Caching changes cost, never answers, replay hits or tests.
-* **Recording proxy** (bench only) — replays recorded cost and latency so experiments are free and
-  reproducible. Replayed latency reproduces the provider's load *at recording time*; the cleanest
-  cross-system latency comparison records both systems back to back, per query, and the result tables
-  state the recording dates where the systems were recorded on different days.
+* **Recording proxy** (bench only) — replays recorded answers, cost and latency so experiments are free
+  and reproducible. Model inference at temperature 0 is treated as deterministic, so one cache is the
+  single source of answers and latencies for every system and every reported number is a replay of it;
+  asking the provider afresh is a different experiment. Replayed latency reproduces the provider's load
+  *at recording time*; the cleanest cross-system latency comparison records both systems back to back,
+  per query, and the result tables state the recording dates where the systems were recorded on different
+  days.
 
 **Shared-verdict protocol (cross-engine benches).** Two engines agree on a verdict only if they key
 the same recorded sample, so compared engines send byte-identical prompts, including any
@@ -295,24 +298,28 @@ back-to-back session. Quality, calls and cost are comparable throughout.
 
 | benchmark | SWAN | SWAN + Jev (ai_filter/ai_classify on TypeSafe) | LOTUS / PLOP / BlendSQL |
 |---|---|---|---|
-| SemBench MOVIE (10q) | **0.832**, 18.8k calls, $2.28, 1,686s† | 0.795, 18.8k, **$0.39**, 511s | LOTUS 0.780, 201k, $14.45, 10,654s; PLOP-DP 0.726, 19.1k, ~$1.69, 1,665s; BlendSQL 0.763, 18.7k, ~$1.44, 1,188s |
-| SemBench ECOMM (14q) | **0.724**, 16.4k, $8.32, 2,882s† | 0.688, 16.6k, $7.39, 826s | LOTUS 0.637, 17.8k, $6.40, 1,990s |
-| SemBench MMQA (11q) | **0.692**, 15.9k, $2.31, 1,314s† | 0.603, 14.1k, $1.53, 884s | LOTUS 0.449, 19.0k, $2.43, 1,720s |
-| agent_bench Q1–Q30 | **1.000**, 11,172 calls, $0.29, 799s | — | PLOP-DP 1.000, 13,602, $0.53, 1,080s; LOTUS 0.607*, 25,749, $2.90, 1,802s†; BlendSQL 0.758*, 24,631, ~$2.76, 1,960s† |
-| SWAN 2.0 (120q, 4 BIRD databases) | 0.757, **22,398** calls, **$2.39**, **2,181s** | — | BlendSQL 0.773, 59,564, $5.00, 4,367s; LOTUS 0.751, 69,211, $4.07, 4,190s; PLOP-DP 0.703, 25,645, ~$1.73, 10,264s |
+| SemBench MOVIE (10q) | **0.832**, 18.8k calls, $2.28, 1,686s† | 0.795, 18.8k, **$0.39**, 511s | LOTUS 0.780, 201k, $14.45, 10,654s; PLOP-DP 0.726, 19.1k, ~$1.69, 1,665s; BlendSQL 0.763, 18.7k, ~$1.44, 1,188s; ThalamusDB 0.841 on 8 of 10, 1.0k, ~$0.52, 3,661s; Palimpzest 1.5.3 (Abacus on) 0.776, 68.5k, ~$17.89, 4,865s |
+| SemBench ECOMM (14q) | **0.724**, 16.4k, $8.32, 2,882s† | 0.688, 16.6k, $7.39, 826s | LOTUS 0.637, 17.8k, $6.40, 1,990s; ThalamusDB 0.596 on 5 of 14, 2.8k, ~$3.45, 12,305s; Palimpzest 0.680 on q1–q13 (SWAN 0.703 / LOTUS 0.648 there), 17.7k, ~$16.33, 1,494s |
+| SemBench MMQA (11q) | **0.692**, 15.9k, $2.31, 1,314s† | 0.603, 14.1k, $1.53, 884s | LOTUS 0.449, 19.0k, $2.43, 1,720s; ThalamusDB 0.327 on 7 of 11, 1.3k, ~$0.52, 2,191s; Palimpzest 0.687, 46.3k, ~$13.79, 3,284s |
+| agent_bench Q1–Q30 | **1.000**, 11,172 calls, $0.29, 799s | — | PLOP-DP 1.000, 13,602, $0.53, 1,080s; LOTUS 0.607*, 25,749, $2.90, 1,802s†; BlendSQL 0.758*, 24,631, ~$2.76, 1,960s†; ThalamusDB 0.661*, 19,512, ~$2.09, 8,542s† (Q19 at the 6,000 s cap); Palimpzest 1.5.3 (Abacus on) 0.710*, 25,785, ~$6.82, 2,088s† |
+| SWAN 2.0 (120q, 4 BIRD databases) | 0.757, **22,340** calls, **$2.38**, **2,153s** | — | BlendSQL 0.773, 59,564, $5.00, 4,359s; LOTUS 0.760, 69,204, $4.04, 4,101s; PLOP-DP 0.690, 25,604, ~$1.72, 10,431s; ThalamusDB 0.396 (0.689 on the 69 questions its filters express), 158,290, ~$12.73, 36,945s; Palimpzest (Abacus on) 0.769, 70,645, $9.76, 2,799s (recorded 2026-10-04) |
 
 Quality is each suite's own metric (F1 / ARI / row-multiset F1; agent_bench uses the deterministic
 LIMIT-free PLOP ground truth). PLOP and BlendSQL do not support images, so ECOMM and MMQA are not run for
-them; their costs are token-based estimates. *LOTUS's agent_bench quality is not like-for-like: SWAN and PLOP
-consume the same recorded verdict per shared prompt, LOTUS's verdicts are independent samples, and
+them; their costs are token-based estimates, as is ThalamusDB's, which runs SemBench's own ThalamusDB queries
+(MOVIE 8 of 10, ECOMM 5 of 14, MMQA 7 of 11) in exact mode under SemBench's runner settings, and on
+agent_bench our NLfilter formulation of the 30 queries. Palimpzest's latency is the time its programs report
+(interpreter start-up excluded). *LOTUS's, BlendSQL's, ThalamusDB's and Palimpzest's
+agent_bench quality is not like-for-like: SWAN and PLOP
+consume the same recorded verdict per shared prompt, the others' verdicts are independent samples, and
 where an answer hinges on a few judgments any disagreement scores 0; its calls, latency and cost are
 comparable. Per-query tables: `sembench/AGENTBENCH/results/agentbench_comparison_three_way.md`,
 `sembench/typesafe_comparison_20260925.md`, and `sembench/compare.py SUITE` for the SemBench suites.
 SWAN 2.0 is the benchmark in github.com/ZhaoFuheng/SWAN: one AISQL query per question that every system
 plans itself, with scaled and duplicated databases; its results folder holds the four systems' answers.
-Its row is one back-to-back session (2026-10-03, every system fresh through an empty cache), so its
-latencies are comparable, and the ±0.02–0.03 run-to-run noise it measured applies to all of its quality
-numbers (SWAN, BlendSQL and LOTUS are at parity; calls, cost and latency separate them).
+Its row is the replay, from the published cache, of one back-to-back session (2026-10-03, every system
+fresh through an empty cache), so its latencies are comparable and the numbers reproduce; SWAN, BlendSQL and
+LOTUS are at parity on quality (the model's verdicts bound it) and calls, cost and latency separate them.
 
 ---
 

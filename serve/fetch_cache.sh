@@ -8,7 +8,7 @@
 # Without a URL the script asks Zenodo for the LATEST version of the record (concept DOI
 # 10.5281/zenodo.23112764; published versions are immutable, so an updated cache is always a new version),
 # checks the download against the md5 Zenodo publishes for it, and unpacks it (the published file is the
-# gzip-compressed DuckDB file: about 140 MB to download, about 1 GB on disk). A URL ending in .gz is
+# gzip-compressed DuckDB file: about 225 MB to download, about 1.6 GB on disk). A URL ending in .gz is
 # unpacked the same way; any other URL is taken as the DuckDB file itself.
 #
 # Replay serves byte-identical requests only: the repository's queries, model gpt-5.6-luna, the engine's

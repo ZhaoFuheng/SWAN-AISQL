@@ -1,0 +1,7 @@
+-- Q14: our ThalamusDB formulation of swan_queries/Q14.sql (see make_thalamusdb_queries.py for the rule).
+-- Statements end with ';' at a line end; thalamusdb_exec.py runs the plain ones as setup, a CREATE TABLE ... AS <select with
+-- NLfilter> through ThalamusDB as a stage, and the last statement as the query.
+CREATE TABLE business_description AS SELECT * FROM read_csv_auto('./dataset/googlelocal/business_description.csv');
+CREATE TABLE reviews AS SELECT * FROM read_csv_auto('./dataset/googlelocal/review.csv');
+CREATE TABLE biz_src AS SELECT bd.*, 'Name: ' || coalesce(CAST(bd.name AS VARCHAR), '') || E'\n' || 'Description: ' || coalesce(CAST(bd.description AS VARCHAR), '') || E'\n' || 'Misc: ' || coalesce(CAST(bd.misc AS VARCHAR), '') AS item_biz_src FROM business_description bd WHERE bd.num_of_reviews IS NOT NULL AND CAST(bd.num_of_reviews AS INTEGER) >= 5;
+SELECT biz_src.gmap_id, biz_src.name, CAST(biz_src.num_of_reviews AS INTEGER) AS num_reviews, biz_src.state, r.time AS review_time, CAST(r.rating AS DOUBLE) AS rating, r.text FROM biz_src JOIN reviews r ON r.gmap_id = biz_src.gmap_id WHERE r.text IS NOT NULL AND LENGTH(r.text) >= 80 AND CAST(r.rating AS DOUBLE) >= 4 AND r.time ILIKE '%2021%' AND (LOWER(r.text) LIKE '%dirt bike%' OR LOWER(r.text) LIKE '%trail%' OR LOWER(r.text) LIKE '%off-road%' OR LOWER(r.text) LIKE '%camp%') AND NLfilter(biz_src.item_biz_src, 'Return true only if this place is a campground, RV park, off-road recreation area, or outdoor trailhead. Otherwise return false.') ORDER BY rating DESC, review_time DESC;

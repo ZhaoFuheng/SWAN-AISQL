@@ -1,0 +1,14 @@
+ThalamusDB ECOMM gpt-5.6-luna via http://localhost:4001  dop=20  max_seconds=6000  sf500  serial  queries=['q1', 'q2', 'q7', 'q8', 'q9']
+q1   lat=   38.4s calls=   499 fresh=    0 tok=   112652 ~$0.0328  n=7/7  P=1.0 R=1.0 quality=1.0
+q2   lat=   56.0s calls=   500 fresh=  500 tok=   144143 ~$0.0459  n=17/5  P=0.294 R=1.0 quality=0.455
+q7   lat=    4.9s calls=     0 fresh=    0 tok=        0 ~$0.0000  n=0/173  ERR litellm.exceptions.UnsupportedParamsError: litellm.UnsupportedParamsError: gpt-5 models don't support temperature=0. Only temperature=1 is supported. To drop unsupported params set `litellm.drop_params = True`
+q8   lat=    5.8s calls=     0 fresh=    0 tok=        0 ~$0.0000  n=0/1  ERR litellm.exceptions.UnsupportedParamsError: litellm.UnsupportedParamsError: gpt-5 models don't support temperature=0. Only temperature=1 is supported. To drop unsupported params set `litellm.drop_params = True`
+q9   lat=    5.1s calls=     0 fresh=    0 tok=        0 ~$0.0000  n=0/46  ERR litellm.exceptions.UnsupportedParamsError: litellm.UnsupportedParamsError: gpt-5 models don't support temperature=0. Only temperature=1 is supported. To drop unsupported params set `litellm.drop_params = True`
+TOTAL(5q)  latency=110.2s  calls=999  ~cost=$0.0787  tokens=256795  macro-quality=0.291
+
+ThalamusDB ECOMM gpt-5.6-luna via http://localhost:4001  dop=20  max_seconds=6000  sf500  serial  queries=['q7', 'q8', 'q9']
+q7   lat=  194.2s calls=    81 fresh=   81 tok=   252462 ~$0.0815  n=168/173  P=0.911 R=0.884 quality=0.897
+q8   lat= 6008.2s calls=   911 fresh=  911 tok=  4279713 ~$1.6333  n=0/1  P=0.0 R=0.0 quality=0.0
+q9   lat= 6008.4s calls=   850 fresh=  850 tok=  4417561 ~$1.6611  n=21/46  P=1.0 R=0.457 quality=0.627
+TOTAL(5q)  latency=12305.2s  calls=2841  ~cost=$3.4546  tokens=9206531  macro-quality=0.596
+

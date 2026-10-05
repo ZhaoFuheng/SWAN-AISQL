@@ -1,0 +1,17 @@
+ThalamusDB MOVIE gpt-5.6-luna via http://localhost:4001  dop=20  max_seconds=6000  sf2000  serial  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8']
+q1   lat=    6.2s calls=    20 fresh=   17 tok=     1860 ~$0.0014  n=12/1487  P=1.0 R=1.0 quality=1.0
+q2   lat=    9.9s calls=    40 fresh=    0 tok=     3263 ~$0.0024  n=5/14  P=0.6 R=0.6 quality=0.6
+q3   lat=   17.9s calls=   119 fresh=   79 tok=    10067 ~$0.0076  n=1/1  value=15.0 rel_err=0.0714 quality=0.929
+q4   lat=   18.0s calls=   119 fresh=    0 tok=    10067 ~$0.0076  n=1/1  value=0.125 rel_err=0.0714 quality=0.929
+q5   lat=    4.9s calls=     0 fresh=    0 tok=        0 ~$0.0000  n=0/32288  ERR litellm.exceptions.UnsupportedParamsError: litellm.UnsupportedParamsError: gpt-5 models don't support temperature=0. Only temperature=1 is supported. To drop unsupported params set `litellm.drop_params = True`
+q6   lat=    4.6s calls=     0 fresh=    0 tok=        0 ~$0.0000  n=0/32736  ERR litellm.exceptions.UnsupportedParamsError: litellm.UnsupportedParamsError: gpt-5 models don't support temperature=0. Only temperature=1 is supported. To drop unsupported params set `litellm.drop_params = True`
+q7   lat=    4.6s calls=     0 fresh=    0 tok=        0 ~$0.0000  n=0/32736  ERR litellm.exceptions.UnsupportedParamsError: litellm.UnsupportedParamsError: gpt-5 models don't support temperature=0. Only temperature=1 is supported. To drop unsupported params set `litellm.drop_params = True`
+q8   lat=   30.4s calls=   238 fresh=    0 tok=    20134 ~$0.0152  n=2/2  value=0.0 rel_err=0.0404 quality=0.96
+TOTAL(8q)  latency=96.5s  calls=536  ~cost=$0.0343  tokens=45391  macro-quality=0.552
+
+ThalamusDB MOVIE gpt-5.6-luna via http://localhost:4001  dop=20  max_seconds=6000  sf2000  serial  queries=['q5', 'q6', 'q7']
+q5   lat=   11.5s calls=     1 fresh=    1 tok=     1714 ~$0.0015  n=40/32288  P=0.889 R=0.8 quality=0.842
+q6   lat=   12.3s calls=     1 fresh=    1 tok=     1687 ~$0.0015  n=50/32736  P=0.7 R=0.7 quality=0.7
+q7   lat= 3554.7s calls=   483 fresh=  485 tok=   507375 ~$0.4861  n=7896/32736  P=0.747 R=0.783 quality=0.765
+TOTAL(8q)  latency=3660.9s  calls=1021  ~cost=$0.5234  tokens=556167  macro-quality=0.841
+

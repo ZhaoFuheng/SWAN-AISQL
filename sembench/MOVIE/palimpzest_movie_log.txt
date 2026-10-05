@@ -1,0 +1,13 @@
+Palimpzest MOVIE gpt-5.6-luna via http://localhost:4001  optimizer=pareto  policy=MaxQuality  workers=20  sf2000  serial  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10']
+q1   lat=   24.0s calls=    25 fresh=   22 tok=    10970 ~$0.0040  n=5/1487  P=1.0 R=1.0 quality=1.0
+q2   lat=   67.8s calls=    79 fresh=    0 tok=    33421 ~$0.0107  n=5/14  P=1.0 R=1.0 quality=1.0
+q3   lat=   25.3s calls=   120 fresh=   40 tok=    50935 ~$0.0165  n=1/1  value=8.0 rel_err=0.4286 quality=0.571
+q4   lat=   24.9s calls=   120 fresh=  120 tok=    79019 ~$0.0273  n=1/1  value=0.1417 rel_err=0.2143 quality=0.786
+q5   lat=   22.2s calls=   100 fresh=  100 tok=    67349 ~$0.0274  n=10/32288  P=0.4 R=0.4 quality=0.4
+q6   lat=   21.7s calls=   100 fresh=  100 tok=    66908 ~$0.0267  n=10/32736  P=1.0 R=1.0 quality=1.0
+q7   lat= 4596.8s calls= 65536 fresh=18378 tok= 43421418 ~$17.1018  n=34278/32736  P=0.726 R=0.834 quality=0.776
+q8   lat=   30.7s calls=   120 fresh=  119 tok=    77807 ~$0.0259  n=2/2  value=0.0 rel_err=0.0 quality=1.0
+q9   lat=   33.9s calls=   256 fresh=  141 tok=   202672 ~$0.0763  n=256/256  P=0.781 R=0.604 quality=0.781
+q10  lat=  163.3s calls=  2000 fresh= 1736 tok=  1552174 ~$0.5749  n=105/116  P=0.444 R=0.314 quality=0.444
+TOTAL(10q)  latency=5010.6s  calls=68456  ~cost=$17.8915  tokens=45562673  macro-quality=0.776
+

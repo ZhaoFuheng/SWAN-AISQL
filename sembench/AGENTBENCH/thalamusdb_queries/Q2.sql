@@ -1,0 +1,6 @@
+-- Q2: our ThalamusDB formulation of swan_queries/Q2.sql (see make_thalamusdb_queries.py for the rule).
+-- Statements end with ';' at a line end; thalamusdb_exec.py runs the plain ones as setup, a CREATE TABLE ... AS <select with
+-- NLfilter> through ThalamusDB as a stage, and the last statement as the query.
+CREATE TABLE biz_src AS SELECT name, description, coalesce(CAST(name AS VARCHAR), '') || ' - ' || coalesce(CAST(description AS VARCHAR), '') AS item_biz_src FROM read_csv_auto('./dataset/yelp/yelp_business_csv/business.csv', maximum_line_size=1048576);
+CREATE TABLE expansion AS SELECT * FROM (VALUES (1), (2), (3), (4), (5), (6), (7), (8), (9), (10)) AS t(exp_id);
+SELECT biz_src.name, expansion.exp_id, CASE WHEN NLfilter(biz_src.item_biz_src, 'Classify business quality as Poor, Fair, Good or Excellent: the quality of this business is best described as Poor') THEN 'Poor' WHEN NLfilter(biz_src.item_biz_src, 'Classify business quality as Poor, Fair, Good or Excellent: the quality of this business is best described as Fair') THEN 'Fair' WHEN NLfilter(biz_src.item_biz_src, 'Classify business quality as Poor, Fair, Good or Excellent: the quality of this business is best described as Excellent') THEN 'Excellent' ELSE 'Good' END AS quality_tier FROM biz_src CROSS JOIN expansion LIMIT 3;
