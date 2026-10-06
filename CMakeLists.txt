@@ -52,9 +52,12 @@ set(EXTENSION_SOURCES
 # (src/include/ai_httplib.hpp). Without it the build is http-only and https
 # endpoints go through the local proxies in serve/.
 set(OPENSSL_USE_STATIC_LIBS TRUE)
-if(APPLE
-   AND NOT DEFINED OPENSSL_ROOT_DIR
-   AND NOT DEFINED ENV{OPENSSL_ROOT_DIR})
+if(EMSCRIPTEN)
+  set(OPENSSL_FOUND FALSE) # no sockets in WebAssembly anyway
+elseif(
+  APPLE
+  AND NOT DEFINED OPENSSL_ROOT_DIR
+  AND NOT DEFINED ENV{OPENSSL_ROOT_DIR})
   foreach(candidate /opt/homebrew/opt/openssl@3 /usr/local/opt/openssl@3)
     if(EXISTS "${candidate}/include/openssl/ssl.h")
       set(OPENSSL_ROOT_DIR "${candidate}")
@@ -62,7 +65,9 @@ if(APPLE
     endif()
   endforeach()
 endif()
-find_package(OpenSSL)
+if(NOT EMSCRIPTEN)
+  find_package(OpenSSL)
+endif()
 if(OPENSSL_FOUND)
   message(STATUS "aisql: TLS client enabled (OpenSSL ${OPENSSL_VERSION})")
   add_compile_definitions(AISQL_TLS=1)

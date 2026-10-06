@@ -19,6 +19,8 @@ jobs:
       duckdb_version: 96063b9e39749cc0f087bb11501d7edbee527957
       ci_tools_version: v2.0-cyanoptera
       extension_name: aisql
+      # No WebAssembly: the LLM client needs threads and sockets. No MinGW: the MSVC build is the Windows binary.
+      exclude_archs: 'wasm_mvp;wasm_eh;wasm_threads;windows_amd64_mingw'
 
   code-quality-check:
     name: Code Quality Check

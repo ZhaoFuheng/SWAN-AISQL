@@ -1,5 +1,5 @@
 {
-        "dependencies": ["openssl"],
+        "dependencies": [{"name": "openssl", "platform": "!emscripten"}],
         "vcpkg-configuration": {
                 "overlay-ports": [
                         "./extension-ci-tools/vcpkg_ports"
