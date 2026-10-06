@@ -49,6 +49,12 @@ private:
 	bool TryPushBelowPreservingJoin(LogicalOperator &join_op, int64_t k);
 	//! Cap the AI-bearing side of a CROSS PRODUCT with its own LIMIT k.
 	bool TryPushBelowCrossProduct(LogicalOperator &cross_op, int64_t k);
+	//! A LIMIT k over a plain DISTINCT (through row-preserving projections) over Filter[colref] -> Region:
+	//! push k into the region as "k DISTINCT passing tuples" over the DISTINCT's columns, mapped down to the
+	//! region's child columns through the projections (a column must survive them unchanged, or through
+	//! DuckDB's injective compress/decompress wrappers). Sound because any k distinct passers are a valid
+	//! answer to an unordered DISTINCT ... LIMIT k, exactly as any k passers are for a plain LIMIT k.
+	bool TryPushThroughDistinct(LogicalOperator &distinct_op, int64_t k);
 	//! Bind an ai_function_with_embed(tree_str, prompts.., preds.., inputs..) call. Null on bind failure.
 	unique_ptr<Expression> BuildNode(vector<unique_ptr<Expression>> args);
 };

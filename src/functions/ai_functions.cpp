@@ -331,6 +331,29 @@ static bool CoalesceConcatColumns(ClientContext &context, unique_ptr<Expression>
 	return changed;
 }
 
+//! True when the tail of `arguments` already carries `key_exprs`: a RE-BIND. DuckDB re-binds a function whenever
+//! it duplicates a plan (LogicalOperator::Copy serializes and deserializes, CTE inlining copies the body per
+//! reference), and by then the argument list already ends with the key columns the first bind appended.
+//! Appending them again shifted key_start, grew the list (which could select another overload: ai_complete(prompt)
+//! -> ai_complete(prompt, json_schema) read a key column as the schema and agent_bench Q26 returned 0 rows), and
+//! since DuckDB 2.0 is refused outright ("cannot add or remove arguments in its bind callback"; SWAN 2.0
+//! formula_1-23 and european_football_2-09, whose CTE is read twice). `min_user_args` = the arguments the
+//! function takes before the keys (1: the prompt), so a user argument is never mistaken for a key.
+static bool AIKeysAlreadyAppended(const vector<unique_ptr<Expression>> &arguments,
+                                  const vector<unique_ptr<Expression>> &key_exprs, idx_t min_user_args) {
+	const idx_t n = key_exprs.size();
+	if (n == 0 || arguments.size() < min_user_args + n) {
+		return false;
+	}
+	const idx_t start = arguments.size() - n;
+	for (idx_t i = 0; i < n; i++) {
+		if (!arguments[start + i] || !arguments[start + i]->Equals(*key_exprs[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
 static unique_ptr<FunctionData> AIKeyBind(BindScalarFunctionInput &input) {
 	auto &arguments = input.GetArguments();
 	auto &bound_function = input.GetBoundFunction();
@@ -338,29 +361,13 @@ static unique_ptr<FunctionData> AIKeyBind(BindScalarFunctionInput &input) {
 	if (!arguments.empty() && arguments[0]) {
 		CollectColumnRefs(*arguments[0], key_exprs);
 	}
-	// IDEMPOTENCE. Binding must be a no-op the second time: DuckDB RE-BINDS a function whenever
-	// it duplicates a plan (LogicalOperator::Copy serializes and deserializes, and CTE inlining
-	// copies the body per reference). By then the argument list ALREADY carries the appended key
-	// columns, and appending them again both shifts key_start and grows the arg list -- which can
-	// select a different overload (ai_complete(prompt) -> ai_complete(prompt, json_schema), so a
-	// key column is read as the schema). The call then produces nothing, silently: agent_bench
-	// Q26's inlined a_candidates self-cross-join returned 0 rows instead of 671 x 671.
+	// IDEMPOTENCE: a re-bind returns the keys already in place (see AIKeysAlreadyAppended).
 	const idx_t n = key_exprs.size();
-	if (n > 0 && arguments.size() == 1 + n) {
-		bool already_appended = true;
-		for (idx_t i = 0; i < n; i++) {
-			if (!arguments[1 + i] || !arguments[1 + i]->Equals(*key_exprs[i])) {
-				already_appended = false;
-				break;
-			}
-		}
-		if (already_appended) {
-			// keys are in place from the first bind
-			return make_uniq<AIKeyBindData>(1, n,
-			                                bound_function.GetName() == "ai_filter"
-			                                    ? AIBindPredText(input.GetClientContext(), *arguments[0])
-			                                    : string());
-		}
+	if (AIKeysAlreadyAppended(arguments, key_exprs, 1)) {
+		return make_uniq<AIKeyBindData>(arguments.size() - n, n,
+		                                bound_function.GetName() == "ai_filter"
+		                                    ? AIBindPredText(input.GetClientContext(), *arguments[0])
+		                                    : string());
 	}
 	// ai_filter takes exactly one argument, the prompt. Its varargs signature exists only so this bind can
 	// append the key columns; a re-bind (keys already in place) returned above, so any other extra argument
@@ -736,9 +743,16 @@ struct AIScoreBindData : public AIKeyBindData {
 static unique_ptr<FunctionData> AIScoreBind(BindScalarFunctionInput &input) {
 	auto &arguments = input.GetArguments();
 	auto &bound_function = input.GetBoundFunction();
+	// Implicit history keys from the input (arg 0), exactly like AIKeyBind; on a re-bind they are already in
+	// place and the argument count must not change (AIKeysAlreadyAppended).
+	vector<unique_ptr<Expression>> key_exprs;
+	if (!arguments.empty() && arguments[0]) {
+		CollectColumnRefs(*arguments[0], key_exprs);
+	}
+	const bool rebind = AIKeysAlreadyAppended(arguments, key_exprs, 1);
 	// ai_score(input, criteria, lo, hi): read the constant bounds; int-ness comes from the overload (the
 	// BIGINT-bounds overload -> integer output, rounded; the DOUBLE-bounds overload -> double output).
-	const idx_t declared = arguments.size();
+	const idx_t declared = rebind ? arguments.size() - key_exprs.size() : arguments.size();
 	bool has_range = false;
 	double lo = 0, hi = 1;
 	bool is_int = false;
@@ -752,12 +766,10 @@ static unique_ptr<FunctionData> AIScoreBind(BindScalarFunctionInput &input) {
 			has_range = false; // non-constant bounds -> fall back to the default 0-1 double scale
 		}
 	}
-	// Append implicit history keys from the input (arg 0), exactly like AIKeyBind.
-	const idx_t key_start = arguments.size();
-	vector<unique_ptr<Expression>> key_exprs;
-	if (!arguments.empty() && arguments[0]) {
-		CollectColumnRefs(*arguments[0], key_exprs);
+	if (rebind) {
+		return make_uniq<AIScoreBindData>(declared, key_exprs.size(), has_range, lo, hi, is_int);
 	}
+	const idx_t key_start = arguments.size();
 	for (auto &key_expr : key_exprs) {
 		bound_function.GetArguments().push_back(key_expr->GetReturnType());
 		arguments.push_back(std::move(key_expr));
@@ -1967,6 +1979,11 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 	// A/B comparison. The MLP lazily adapts to whichever input width it first sees.
 	const char *feat_env = std::getenv("AI_MLP_FEATURE");
 	const bool feature_prompt_mode = feat_env && string(feat_env) == "prompt";
+	// Features (one embed per leaf per row) only matter where a prediction can change behaviour: ordering
+	// the leaves of a tree with more than one, or a speculative gate. A one-leaf plain tree has nothing to
+	// order, so it embeds nothing and records no training example (MOVIE's LIMIT queries spent more time in
+	// these per-row embeds than in the model calls they could never influence).
+	const bool needs_features = n > 1 || bind_data.speculative;
 	// Fixed LLM batch size (default 20, matching Sembench): each round's evaluations are sent in
 	// batches of this many and one MLP training step overlaps each batch, so the training cadence is
 	// ~1 step per `batch_size` calls. Reuses the fixed-concurrency knob so a batch runs in one wave.
@@ -2223,7 +2240,7 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 			// labels evenly across the leaves (a biased cold model would keep probing one leaf) and is
 			// reproducible run-to-run. The speculative gate is already skipped while cold (it force-evaluates
 			// to collect labels), so it never needs the p_row that embed-all would otherwise produce.
-			bool warm_pick = cold;
+			bool warm_pick = cold && needs_features;
 			idx_t warm_leaf = warm_pick ? AIWarmupPickLeaf(row, leaf_values[row], n) : n;
 			// Never warm-pick an image leaf that cannot be embedded: it would yield no MLP label and a vision
 			// call is expensive. Fall through to the DP instead, which defers the image behind cheaper text
@@ -2248,7 +2265,7 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 			// Embed this row's still-undetermined leaves (predicate + input text) in one cache-aware,
 			// deduplicated call -- the shared document embeds once -- then JIT-predict p_true against
 			// the live model. Embedding happens here (not upfront) so its CPU overlaps the LLM waits.
-			if (!warm_pick) {
+			if (!warm_pick && needs_features) {
 				// With a CLIP image model on the server (ai_embed_images, default) an image leaf is estimable like a
 				// text leaf: its predicate text and image embed into one space and the MLP learns the pair. Without
 				// one, image embeds are refused anyway, so pay for them only where the estimate can change behavior: a
@@ -2523,7 +2540,7 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 	// rides inside LLM latency instead of adding to it. Purely an accelerator: workers embed any
 	// miss inline, so correctness never depends on the prefetcher's progress.
 	std::thread prefetcher;
-	if (!feature_prompt_mode && std::getenv("AISQL_NO_PREFETCH") == nullptr) {
+	if (needs_features && !feature_prompt_mode && std::getenv("AISQL_NO_PREFETCH") == nullptr) {
 		prefetcher = std::thread([&]() {
 			try {
 				while (resolved.load() < rep_count && !limit_hit.load()) {

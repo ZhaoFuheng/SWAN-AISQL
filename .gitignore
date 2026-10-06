@@ -50,3 +50,10 @@ aisql-bench/AGENTBENCH/parse-answer-errors/
 aisql-bench/AGENTBENCH/results/*/Q19.csv
 aisql-bench/parse-answer-errors/
 docs/port_regression_20260925.md
+
+# python wheel build outputs (python/build_wheel.sh copies the extension binary into the package)
+python/swan_aisql/aisql.duckdb_extension
+python/swan_aisql/_build.py
+python/dist/
+python/build/
+python/*.egg-info/

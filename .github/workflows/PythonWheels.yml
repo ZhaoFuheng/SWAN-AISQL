@@ -1,0 +1,91 @@
+#
+# Builds the swan-aisql Python wheels (one per platform, each bundling that platform's aisql.duckdb_extension)
+# from the extension binaries of the distribution pipeline, smoke-tests them against the pinned duckdb wheel,
+# and publishes them on a version tag (TestPyPI for v*-test tags, PyPI otherwise) through trusted publishing.
+#
+name: Python Wheels
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  extensions:
+    name: Build extension binaries
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v2.0-cyanoptera
+    with:
+      duckdb_version: 96063b9e39749cc0f087bb11501d7edbee527957
+      ci_tools_version: v2.0-cyanoptera
+      extension_name: aisql
+      exclude_archs: 'wasm_mvp;wasm_eh;wasm_threads;windows_amd64_mingw;linux_amd64_musl;linux_arm64_musl'
+
+  wheels:
+    name: Pack wheels
+    needs: extensions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # the revision extension-ci-tools pairs with its upload-artifact
+        with:
+          pattern: aisql-*-extension-*
+          path: ci-artifacts
+      - name: Pack one wheel per platform
+        run: |
+          set -euo pipefail
+          pip install build wheel
+          pip install --pre "duckdb==$(sed -n 's/^dependencies = \["duckdb==\([^"]*\)"\]/\1/p' python/pyproject.toml)"
+          mkdir -p wheelhouse
+          for ext in $(find ci-artifacts -name 'aisql.duckdb_extension'); do
+            python/build_wheel.sh "$ext"
+            mv python/dist/*.whl wheelhouse/
+          done
+          ls -l wheelhouse
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels
+          path: wheelhouse/*.whl
+
+  smoke:
+    name: Smoke test ${{ matrix.os }}
+    needs: wheels
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, macos-13, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # the revision extension-ci-tools pairs with its upload-artifact
+        with:
+          name: wheels
+          path: wheelhouse
+      - name: Install the wheel for this platform and run the smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          pip install --pre --find-links wheelhouse swan-aisql
+          python python/tests/test_smoke.py
+
+  publish:
+    name: Publish
+    needs: smoke
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: ${{ endsWith(github.ref, '-test') && 'testpypi' || 'pypi' }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # the revision extension-ci-tools pairs with its upload-artifact
+        with:
+          name: wheels
+          path: wheelhouse
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: wheelhouse
+          repository-url: ${{ endsWith(github.ref, '-test') && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}

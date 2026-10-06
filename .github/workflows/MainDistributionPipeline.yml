@@ -14,17 +14,17 @@ concurrency:
 jobs:
   duckdb-stable-build:
     name: Build extension binaries
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v2.0-cyanoptera
     with:
-      duckdb_version: main
-      ci_tools_version: main
+      duckdb_version: 96063b9e39749cc0f087bb11501d7edbee527957
+      ci_tools_version: v2.0-cyanoptera
       extension_name: aisql
 
   code-quality-check:
     name: Code Quality Check
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@main
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@v2.0-cyanoptera
     with:
-      duckdb_version: main
-      ci_tools_version: main
+      duckdb_version: 96063b9e39749cc0f087bb11501d7edbee527957
+      ci_tools_version: v2.0-cyanoptera
       extension_name: aisql
       format_checks: 'format;tidy'

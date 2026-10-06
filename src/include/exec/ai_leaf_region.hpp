@@ -24,6 +24,7 @@
 
 #include <chrono>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace duckdb {
 
@@ -39,16 +40,20 @@ struct AILeafWave {
 
 class AILeafRegionState {
 public:
+	//! `limit_distinct_cols`: with a LIMIT that reached the region through a plain DISTINCT, the child columns
+	//! the DISTINCT keys on -- the early stop then counts distinct passing tuples over them, not passing rows.
 	AILeafRegionState(ClientContext &context, const BoundFunctionExpression &eval_call,
-	                  const vector<LogicalType> &child_types, int64_t limit);
+	                  const vector<LogicalType> &child_types, int64_t limit, vector<idx_t> limit_distinct_cols = {});
 	~AILeafRegionState();
 
 	//! Fold a child chunk in slices of 100 rows: each slice is deduped, its new reps get texts + predictions
 	//! (one batched embed per leaf), and each new row picks its first leaf. Between slices, landed verdicts
 	//! are applied and pending reps dispatched (or, under a LIMIT, floor-sized waves are evaluated inline), so
 	//! the first calls start after the first slice's features and later slices are decided by a model already
-	//! trained on earlier verdicts. Returns true once the LIMIT is met (the caller stops feeding).
-	bool Append(DataChunk &chunk, idx_t limit_floor);
+	//! trained on earlier verdicts. Returns the number of the chunk's rows ingested (whole slices); fewer than
+	//! the chunk holds only when the LIMIT was met part-way (`limit_met`), after which the caller stops
+	//! feeding and must buffer only the ingested prefix, so the buffered rows and the results stay aligned.
+	idx_t Append(DataChunk &chunk, idx_t limit_floor, bool &limit_met);
 	//! Apply every landed verdict and dispatch every pending rep, without blocking; under a LIMIT, evaluate
 	//! inline waves of at least `limit_floor` reps instead. Returns true once the LIMIT is met.
 	bool Pump(idx_t limit_floor);
@@ -56,6 +61,14 @@ public:
 	void Drain();
 	//! Finish: evaluate whatever is still needed until every row is decided (or the LIMIT is met).
 	void Finish();
+	//! Streaming output (no LIMIT): apply landed verdicts and dispatch every pending rep, without waiting.
+	void FlushDispatch();
+	//! Streaming output: wait until `row` is decided (verdicts keep landing from the pool meanwhile).
+	void DecideThrough(idx_t row);
+	//! Streaming output: how many rows from `from` (exclusive end `to`) are decided, without waiting.
+	idx_t DecidedPrefix(idx_t from, idx_t to) const;
+	//! The result of one decided row (see Results).
+	Value RowValue(idx_t row) const;
 	//! One result per appended row, in append order: BOOLEAN, NULL (a needed leaf had no verdict), or
 	//! FALSE for rows left undecided by a LIMIT early-stop.
 	void Results(vector<Value> &out) const;
@@ -66,6 +79,15 @@ public:
 	int64_t Passed() const {
 		return passed;
 	}
+	//! The LIMIT is met: k passing rows, or k distinct passing tuples in distinct mode.
+	bool LimitMet() const {
+		if (limit < 0) {
+			return false;
+		}
+		return distinct_cols.empty() ? passed >= limit : passed_keys.size() >= NumericCast<idx_t>(limit);
+	}
+	//! Distinct mode: add this segment's passing tuples (their key strings) to `out`.
+	void MergePassedKeys(std::unordered_set<string> &out) const;
 	//! Calls dispatched (or, under a LIMIT, reps evaluated in inline waves).
 	idx_t Dispatched() const {
 		return dispatched;
@@ -114,17 +136,24 @@ private:
 	void ReapLanded();
 	//! Wait for at least one verdict, then apply what landed.
 	void WaitAndReap();
-	//! LIMIT path: evaluate one inline wave of leaf `l`'s pending reps.
+	//! LIMIT path: evaluate one inline wave of up to `wave_cap` of leaf `l`'s pending reps.
 	void RunInlineWave(idx_t l);
-	bool LimitMet() const {
-		return limit >= 0 && passed >= limit;
-	}
+	//! Distinct mode: the row's tuple over `distinct_cols`, interned to an id (one string per distinct tuple).
+	uint32_t DistinctKeyOf(DataChunk &chunk, idx_t row);
 
 	ClientContext &context;
 	const BoundFunctionExpression &call;
 	shared_ptr<AIFilterTreeNode> tree;
 	const idx_t n;
 	const int64_t limit;
+	//! LIMIT path: reps per inline wave, max(k, ai_concurrency) (see AIRegionWaveSize): a wave fills the
+	//! pool once, and the next wave is asked only if the passers so far are fewer than k.
+	const idx_t wave_cap;
+	const vector<idx_t> distinct_cols;
+	std::unordered_map<string, uint32_t> dkey_dict; //! distinct tuple -> id
+	vector<string> dkeys;                           //! id -> distinct tuple
+	vector<uint32_t> row_dkey;                      //! per row, its distinct tuple id (distinct mode only)
+	std::unordered_set<uint32_t> passed_keys;       //! distinct tuples of the rows decided TRUE
 	const string query_text;
 	vector<LogicalType> child_types;
 	vector<Leaf> leaves;

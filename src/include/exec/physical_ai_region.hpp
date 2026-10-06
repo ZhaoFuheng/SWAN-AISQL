@@ -38,12 +38,17 @@ public:
 
 public:
 	PhysicalAIRegion(PhysicalPlan &physical_plan, vector<LogicalType> types, unique_ptr<Expression> eval_call,
-	                 idx_t estimated_cardinality, int64_t limit = -1);
+	                 idx_t estimated_cardinality, int64_t limit = -1, vector<idx_t> limit_distinct_cols = {});
+	//! With streaming output a consumer may stop early while calls are still in flight; those workers
+	//! evaluate `eval_call`, so the sink state (which joins them) must go before the expression does.
+	~PhysicalAIRegion() override;
 
 	//! The AI call (a BoundFunctionExpression) evaluated once per distinct input and broadcast to all rows.
 	unique_ptr<Expression> eval_call;
 	//! LIMIT k (see LogicalAIRegion::limit); -1 = evaluate every distinct input.
 	int64_t limit;
+	//! With `limit`: count DISTINCT passing tuples over these child columns (see LogicalAIRegion).
+	vector<idx_t> limit_distinct_cols;
 
 public:
 	string GetName() const override {

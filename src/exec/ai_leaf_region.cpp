@@ -1,6 +1,7 @@
 #include "exec/ai_leaf_region.hpp"
 
 #include "duckdb/common/allocator.hpp"
+#include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "filter_tree_order.hpp"
@@ -13,10 +14,14 @@
 namespace duckdb {
 
 AILeafRegionState::AILeafRegionState(ClientContext &context, const BoundFunctionExpression &eval_call,
-                                     const vector<LogicalType> &child_types_p, int64_t limit)
+                                     const vector<LogicalType> &child_types_p, int64_t limit,
+                                     vector<idx_t> limit_distinct_cols)
     : context(context), call(eval_call), tree(AILeafTree(eval_call)), n(AILeafCount(eval_call)), limit(limit),
-      query_text(context.GetCurrentQuery()), child_types(child_types_p), leaves(n), landed(n, 0),
-      evaluator(make_uniq<AILeafUnitEvaluator>(eval_call)) {
+      wave_cap(limit >= 0
+                   ? MaxValue<idx_t>(MaxValue<idx_t>(AIConfig::Get().max_concurrency, 1), NumericCast<idx_t>(limit))
+                   : STANDARD_VECTOR_SIZE),
+      distinct_cols(std::move(limit_distinct_cols)), query_text(context.GetCurrentQuery()), child_types(child_types_p),
+      leaves(n), landed(n, 0), evaluator(make_uniq<AILeafUnitEvaluator>(eval_call)) {
 	for (idx_t l = 0; l < n; l++) {
 		leaves[l].key_cols = AILeafKeyCols(eval_call, l);
 		leaves[l].stage.Initialize(Allocator::Get(context), child_types);
@@ -48,11 +53,17 @@ void AILeafRegionState::FlushStage(idx_t l) {
 		}
 	}
 	// Embed once per rep (batched, cold or warm): the feature stays on the rep, so every later
-	// re-prediction is a forward pass and never a request.
+	// re-prediction is a forward pass and never a request. A single-leaf tree has nothing to order, so its
+	// reps carry no feature (neutral p, no training example): MOVIE's LIMIT queries spent more time in these
+	// per-slice embed requests than in the model calls they never influenced.
 	vector<vector<float>> feats;
 	const uint64_t step = AISelectivityTrainSteps();
 	const auto t0 = std::chrono::steady_clock::now();
-	AILeafFeatures(call, fresh, query_text, feats);
+	if (n > 1) {
+		AILeafFeatures(call, fresh, query_text, feats);
+	} else {
+		feats.assign(fresh.Size(), vector<float>());
+	}
 	t_embed += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 	for (idx_t i = 0; i < fresh.Size(); i++) {
 		auto &rep = leaf.reps[leaf.stage_reps[i]];
@@ -72,8 +83,10 @@ void AILeafRegionState::FlushStage(idx_t l) {
 	leaf.stage_reps.clear();
 }
 
-bool AILeafRegionState::Append(DataChunk &chunk, idx_t limit_floor) {
+idx_t AILeafRegionState::Append(DataChunk &chunk, idx_t limit_floor, bool &limit_met) {
 	const idx_t count = chunk.size();
+	const idx_t rows_before = row_result.size();
+	limit_met = false;
 	// Rows ingested per slice before the region embeds, decides and dispatches. Slicing lets the first
 	// calls start after the first slice's features instead of the chunk's (500 CLIP image embeds are ~80 s
 	// of ingest time), and lets this query's own verdicts order the later rows: text regions too (agent_bench
@@ -93,14 +106,16 @@ bool AILeafRegionState::Append(DataChunk &chunk, idx_t limit_floor) {
 			t_warm_gate += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 		}
 		if (AppendSlice(chunk, begin, begin + slice)) {
-			return true;
+			limit_met = true;
+			return row_result.size() - rows_before;
 		}
 		begin += slice;
 		if (begin < count && Pump(limit_floor)) {
-			return true;
+			limit_met = true;
+			return row_result.size() - rows_before;
 		}
 	}
-	return false;
+	return count;
 }
 
 bool AILeafRegionState::AppendSlice(DataChunk &chunk, idx_t begin, idx_t end) {
@@ -108,6 +123,11 @@ bool AILeafRegionState::AppendSlice(DataChunk &chunk, idx_t begin, idx_t end) {
 	const uint32_t first_row = NumericCast<uint32_t>(row_result.size());
 	row_reps.resize(row_reps.size() + count * n);
 	row_result.resize(row_result.size() + count, -2);
+	if (!distinct_cols.empty()) {
+		for (idx_t row = begin; row < end; row++) {
+			row_dkey.push_back(DistinctKeyOf(chunk, row));
+		}
+	}
 	// 1. Per-leaf dedup of every row; new reps are staged so their texts can be built in one pass.
 	for (idx_t l = 0; l < n; l++) {
 		auto &leaf = leaves[l];
@@ -212,6 +232,9 @@ void AILeafRegionState::DecideRow(uint32_t row) {
 		row_result[row] = static_cast<int8_t>(v == AITriState::TRI_TRUE ? 1 : (v == AITriState::TRI_FALSE ? 0 : -1));
 		if (v == AITriState::TRI_TRUE) {
 			passed++;
+			if (!distinct_cols.empty()) {
+				passed_keys.insert(row_dkey[row]);
+			}
 		}
 		return;
 	}
@@ -231,6 +254,32 @@ void AILeafRegionState::DecideRow(uint32_t row) {
 	if (rep.state == 0) {
 		rep.state = 1;
 		leaf.pending.push_back(rep_id);
+	}
+}
+
+uint32_t AILeafRegionState::DistinctKeyOf(DataChunk &chunk, idx_t row) {
+	string key;
+	for (const idx_t c : distinct_cols) {
+		const Value v = chunk.data[c].GetValue(row);
+		key.push_back(v.IsNull() ? '\x00' : '\x01');
+		if (!v.IsNull()) {
+			key += v.ToString();
+		}
+		key.push_back('\x1f');
+	}
+	auto it = dkey_dict.find(key);
+	if (it != dkey_dict.end()) {
+		return it->second;
+	}
+	const auto id = NumericCast<uint32_t>(dkeys.size());
+	dkeys.push_back(key);
+	dkey_dict.emplace(std::move(key), id);
+	return id;
+}
+
+void AILeafRegionState::MergePassedKeys(std::unordered_set<string> &out) const {
+	for (const uint32_t id : passed_keys) {
+		out.insert(dkeys[id]);
 	}
 }
 
@@ -355,7 +404,7 @@ void AILeafRegionState::RunInlineWave(idx_t l) {
 	auto &leaf = leaves[l];
 	AILeafWave wave;
 	wave.leaf = l;
-	const idx_t take = MinValue<idx_t>(leaf.pending.size(), STANDARD_VECTOR_SIZE);
+	const idx_t take = MinValue<idx_t>(leaf.pending.size(), wave_cap);
 	for (idx_t i = 0; i < take; i++) {
 		const uint32_t rep_id = leaf.pending[i];
 		leaf.reps[rep_id].state = 2;
@@ -435,6 +484,45 @@ void AILeafRegionState::Finish() {
 		}
 		WaitAndReap();
 	}
+}
+
+void AILeafRegionState::FlushDispatch() {
+	ReapLanded();
+	DispatchPending(/*flush=*/true);
+}
+
+void AILeafRegionState::DecideThrough(idx_t row) {
+	for (;;) {
+		FlushDispatch();
+		if (row_result[row] != -2) {
+			return;
+		}
+		// Invariant: an undecided row waits on a rep that is pending or in flight, and FlushDispatch just
+		// dispatched every pending rep, so something is outstanding; wait for a verdict and re-decide.
+		if (!dispatcher || dispatcher->Outstanding() == 0) {
+			throw InternalException("AI region: row %llu undecided with nothing in flight", row);
+		}
+		WaitAndReap();
+	}
+}
+
+idx_t AILeafRegionState::DecidedPrefix(idx_t from, idx_t to) const {
+	idx_t n_ready = 0;
+	for (idx_t r = from; r < to && row_result[r] != -2; r++) {
+		n_ready++;
+	}
+	return n_ready;
+}
+
+Value AILeafRegionState::RowValue(idx_t row) const {
+	const int8_t r = row_result[row];
+	if (r == 1) {
+		return Value::BOOLEAN(true);
+	}
+	if (r == -1) {
+		return Value(LogicalType::BOOLEAN);
+	}
+	return Value::BOOLEAN(false);
 }
 
 string AILeafRegionState::TimingSummary() const {

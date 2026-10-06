@@ -7,6 +7,7 @@
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/catalog_entry/scalar_function_catalog_entry.hpp"
 #include "duckdb/common/error_data.hpp"
+#include "duckdb/common/string_util.hpp"
 #include "ai_dedup.hpp" // AISetFilterLimit
 #include "duckdb/planner/logical_operator_visitor.hpp"
 #include "duckdb/function/function_binder.hpp"
@@ -16,9 +17,11 @@
 #include "duckdb/planner/expression/bound_constant_expression.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "plan/logical_ai_region.hpp"
+#include "duckdb/planner/operator/logical_distinct.hpp"
 #include "duckdb/planner/operator/logical_filter.hpp"
 #include "duckdb/planner/operator/logical_join.hpp"
 #include "duckdb/planner/operator/logical_limit.hpp"
+#include "duckdb/planner/operator/logical_projection.hpp"
 
 #include "duckdb/planner/expression_iterator.hpp"
 
@@ -189,6 +192,93 @@ bool AILimitPushdown::ApplyLimitToRegion(LogicalOperator &filter_op, int64_t k) 
 	return true;
 }
 
+// The column a projection output refers to, when the projection keeps it as a column: a plain column
+// reference, or one wrapped in DuckDB's compressed-materialization functions (`__internal_compress_*` /
+// `__internal_decompress_*`), which are injective, so distinct counts over the wrapped column equal distinct
+// counts over the column itself. Null for anything else (a computed value could merge distinct inputs).
+static const BoundColumnRefExpression *ProjectedColumn(const Expression &expr) {
+	const Expression *e = &expr;
+	while (e->GetExpressionClass() == ExpressionClass::BOUND_FUNCTION) {
+		auto &fn = e->Cast<BoundFunctionExpression>();
+		const string name(fn.Function().GetName().c_str());
+		if (fn.GetChildren().size() != 1 || (!StringUtil::StartsWith(name, "__internal_compress_") &&
+		                                     !StringUtil::StartsWith(name, "__internal_decompress_"))) {
+			return nullptr;
+		}
+		e = fn.GetChildren()[0].get();
+	}
+	if (e->GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF) {
+		return nullptr;
+	}
+	return &e->Cast<BoundColumnRefExpression>();
+}
+
+bool AILimitPushdown::TryPushThroughDistinct(LogicalOperator &distinct_op, int64_t k) {
+	auto &distinct = distinct_op.Cast<LogicalDistinct>();
+	if (distinct.distinct_type != DistinctType::DISTINCT || distinct.order_by || distinct.children.size() != 1) {
+		return false; // DISTINCT ON picks a row per key by order: not a plain set
+	}
+	// The DISTINCT keys: its explicit targets, else every column of its input.
+	vector<ColumnBinding> keys;
+	if (!distinct.distinct_targets.empty()) {
+		for (auto &target : distinct.distinct_targets) {
+			auto *col = ProjectedColumn(*target);
+			if (!col) {
+				return false;
+			}
+			keys.push_back(col->Binding());
+		}
+	} else {
+		keys = distinct.children[0]->GetColumnBindings();
+	}
+	// Map the keys down through the projections to the filter the DISTINCT sits on.
+	reference<LogicalOperator> cur = *distinct.children[0];
+	while (cur.get().type == LogicalOperatorType::LOGICAL_PROJECTION && cur.get().children.size() == 1) {
+		auto &proj = cur.get().Cast<LogicalProjection>();
+		for (auto &key : keys) {
+			if (key.table_index.index != proj.table_index.index ||
+			    key.column_index.GetIndex() >= proj.expressions.size()) {
+				return false;
+			}
+			auto *col = ProjectedColumn(*proj.expressions[key.column_index.GetIndex()]);
+			if (!col) {
+				return false;
+			}
+			key = col->Binding();
+		}
+		cur = *cur.get().children[0];
+	}
+	if (cur.get().type != LogicalOperatorType::LOGICAL_FILTER || cur.get().children.size() != 1) {
+		return false;
+	}
+	auto *region = LogicalAIRegion::TryCast(*cur.get().children[0]);
+	if (!region || region->children.size() != 1) {
+		return false;
+	}
+	// The keys must be columns of the region's CHILD (the filter passes them through unchanged); the region's
+	// own result column is never a DISTINCT key worth counting.
+	const auto child_bindings = region->children[0]->GetColumnBindings();
+	vector<idx_t> cols;
+	for (auto &key : keys) {
+		idx_t found = child_bindings.size();
+		for (idx_t i = 0; i < child_bindings.size(); i++) {
+			if (child_bindings[i] == key) {
+				found = i;
+				break;
+			}
+		}
+		if (found == child_bindings.size()) {
+			return false;
+		}
+		cols.push_back(found);
+	}
+	if (!ApplyLimitToRegion(cur.get(), k)) {
+		return false;
+	}
+	region->limit_distinct_cols = std::move(cols);
+	return true;
+}
+
 bool AILimitPushdown::TryPushBelowPreservingJoin(LogicalOperator &join_op, int64_t k) {
 	if (join_op.type != LogicalOperatorType::LOGICAL_COMPARISON_JOIN &&
 	    join_op.type != LogicalOperatorType::LOGICAL_ANY_JOIN) {
@@ -336,6 +426,10 @@ void AILimitPushdown::Visit(unique_ptr<LogicalOperator> &op) {
 		}
 	} else if (cur.get().type == LogicalOperatorType::LOGICAL_FILTER) {
 		ApplyLimit(cur.get(), k);
+	} else if (cur.get().type == LogicalOperatorType::LOGICAL_DISTINCT) {
+		// LIMIT k over a plain DISTINCT: k distinct passing tuples are enough, so push "k distinct" into the
+		// region below (SWAN 2.0's `SELECT DISTINCT name ... WHERE ai_filter(...) AND id IN (...) LIMIT 5`).
+		TryPushThroughDistinct(cur.get(), k);
 	} else if (cur.get().type == LogicalOperatorType::LOGICAL_CROSS_PRODUCT) {
 		// A CROSS PRODUCT has no join condition, so every row of one side pairs with every row of the
 		// other: the first k output rows need at most k rows from either side. Capping the AI-bearing

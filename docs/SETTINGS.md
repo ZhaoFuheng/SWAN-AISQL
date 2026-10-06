@@ -8,9 +8,13 @@ shows the live values.
 
 | setting | values | default | what it does |
 |---|---|---|---|
-| `ai_endpoint` | URL (http) | `http://localhost:4000` | OpenAI-compatible chat endpoint: litellm directly, or `http://localhost:4001` for the cache proxy (`AI_PROXY_URL`) |
+| `ai_endpoint` | URL (http; https in a build with OpenSSL, which the CI binaries and wheels are) | `http://localhost:4000` | OpenAI-compatible chat endpoint: litellm directly, or `http://localhost:4001` for the cache proxy (`AI_PROXY_URL`) |
 | `ai_model` | model id | `gpt-5.6-luna` | chat model for every AI function (`AI_MODEL`) |
 | `ai_api_key` | string | *(empty)* | bearer token sent to `ai_endpoint`; empty for the local stack (`AI_API_KEY`) |
+| `ai_price_input` / `ai_price_output` / `ai_price_cached` | USD per 1M tokens | `0` | price `ai_usage().cost_usd` from the token counts when the endpoint reports no cost; the litellm proxy reports it per response, so the local stack needs none (`AI_PRICE_INPUT` / `AI_PRICE_OUTPUT` / `AI_PRICE_CACHED`) |
+| `ai_ca_cert_file` | path | *(empty = system store)* | CA bundle that https endpoints are verified against (`AI_CA_CERT_FILE`, then `SSL_CERT_FILE`) |
+| `ai_tls_verify` | `true` / `false` | `true` | verify the server certificate of https endpoints; `false` for a self-signed local proxy (`AI_TLS_VERIFY`) |
+| *(temperature)* | — | `0` | every chat request carries `temperature: 0`; after a model rejects it with HTTP 400 the process omits it (litellm's `drop_params` does the same behind the proxy) |
 | `ai_reasoning_effort` | `low` / `medium` / `high` / *(empty)* | *(empty = omit)* | forwarded per request when set (`AI_REASONING_EFFORT`) |
 | `ai_concurrency` | integer ≥ 1 | `20` | in-flight LLM requests, process-wide (`AI_MAX_CONCURRENCY`) |
 | `ai_max_retries` | integer ≥ 0 | `6` | retries per request on 429/503/529 or a transient failure, exponential backoff (`AI_MAX_RETRIES`) |

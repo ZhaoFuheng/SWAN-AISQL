@@ -69,7 +69,7 @@ programs' `sem_filter` / `sem_map` with Palimpzest programs (the prompt's labell
 
 So on ECOMM and MOVIE the LOTUS side is SemBench's own code; on MMQA and agent_bench it is our translation, kept prompt-identical to the SWAN side.
 
-SWAN 2.0 (`SWAN2/`): the benchmark at github.com/ZhaoFuheng/SWAN writes one AISQL query per question that
+SWAN 2.0 (`SWAN2/`): the benchmark at github.com/ZhaoFuheng/SWANBench writes one AISQL query per question that
 every system runs; `SWAN2/aisql`, `SWAN2/oracle` and `SWAN2/questions` are a copy of its queries, oracle forms
 and question list (`SWAN2/sync.sh` refreshes them from a checkout), kept here so this repository holds every
 query behind its tables. The databases, harness, translations and results live in the benchmark.

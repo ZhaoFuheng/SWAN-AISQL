@@ -70,9 +70,32 @@ static void RegisterAISettings(DatabaseInstance &db) {
 	    "ai_max_retries", "Retries per request on throttle (429/503/529) or transient failure", LogicalType::UBIGINT,
 	    Value::UBIGINT(ai.max_retries),
 	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().max_retries = v.GetValue<uint64_t>(); });
+	// Cost accounting for a direct endpoint (the litellm proxy reports the cost per response instead)
 	config.AddExtensionOption(
-	    "ai_embed_endpoint", "Embeddings endpoint (text + image)", LogicalType::VARCHAR, Value(ai.embed_url),
-	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().embed_url = StringValue::Get(v); });
+	    "ai_price_input", "USD per 1M input tokens, for ai_usage().cost_usd on an endpoint that reports no cost",
+	    LogicalType::DOUBLE, Value::DOUBLE(ai.price_input_per_mtok),
+	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().price_input_per_mtok = v.GetValue<double>(); });
+	config.AddExtensionOption("ai_price_output", "USD per 1M output tokens (see ai_price_input)", LogicalType::DOUBLE,
+	                          Value::DOUBLE(ai.price_output_per_mtok), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().price_output_per_mtok = v.GetValue<double>();
+	                          });
+	config.AddExtensionOption(
+	    "ai_price_cached", "USD per 1M cached input tokens (see ai_price_input)", LogicalType::DOUBLE,
+	    Value::DOUBLE(ai.price_cached_per_mtok),
+	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().price_cached_per_mtok = v.GetValue<double>(); });
+	config.AddExtensionOption("ai_ca_cert_file", "CA bundle for https endpoints (empty = the system certificate store)",
+	                          LogicalType::VARCHAR, Value(ai.ca_cert_file), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().ca_cert_file = StringValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_tls_verify", "Verify the server certificate of https endpoints", LogicalType::BOOLEAN,
+	                          Value::BOOLEAN(ai.tls_verify), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().tls_verify = BooleanValue::Get(v);
+	                          });
+	config.AddExtensionOption("ai_embed_endpoint", "Embeddings endpoint (text + image)", LogicalType::VARCHAR,
+	                          Value(ai.embed_url), [](ClientContext &, SetScope, Value &v) {
+		                          AIConfig::Mutable().embed_url = StringValue::Get(v);
+		                          AIEmbedEndpointReset();
+	                          });
 	config.AddExtensionOption(
 	    "ai_embed_model", "Dual-encoder embedding model (text + image)", LogicalType::VARCHAR, Value(ai.embed_model),
 	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().embed_model = StringValue::Get(v); });

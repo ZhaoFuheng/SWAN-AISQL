@@ -68,7 +68,8 @@ PhysicalOperator &LogicalAIRegion::CreatePlan(ClientContext &context, PhysicalPl
 	// (nullptr bind_data -> crash) whenever no earlier pass cached the estimate.
 	auto card = EstimateCardinality(context);
 	auto &child = planner.CreatePlan(*children[0]);
-	auto &region = planner.Make<PhysicalAIRegion>(std::move(types), std::move(expressions[0]), card, limit);
+	auto &region =
+	    planner.Make<PhysicalAIRegion>(std::move(types), std::move(expressions[0]), card, limit, limit_distinct_cols);
 	region.children.push_back(child);
 	return region;
 }

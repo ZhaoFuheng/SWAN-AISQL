@@ -25,6 +25,10 @@ public:
 	//! LIMIT k pushed down from a plain LIMIT above (never ORDER BY ... LIMIT): stop evaluating
 	//! distinct inputs once the fan-out counts of PASSING ones sum to >= k. -1 = no limit.
 	int64_t limit = -1;
+	//! When the LIMIT reached the region through a plain DISTINCT, the child columns the DISTINCT keys on
+	//! (positions in the region's child output): the early stop then counts DISTINCT passing tuples over
+	//! these columns, not passing rows. Empty = count rows.
+	vector<idx_t> limit_distinct_cols;
 
 public:
 	//! Downcast helper replacing the fork's enum check: matches on the verification identifier,

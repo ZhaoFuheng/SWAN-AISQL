@@ -79,6 +79,7 @@ semantic decision**, and semantic placement happens before physical factorisatio
   4  region            place the node, or a lone AI call, in a region: row -> distinct-value currency
   5  join factorize    a node over a cross product becomes a factor graph (pair domain, never the product)
   6  limit / exists    push a LIMIT k or an EXISTS into the region or graph: stop once k survivors are known
+                       (through a plain DISTINCT too: then k *distinct* survivors over the DISTINCT's columns)
 ```
 
 **Why this order.** 1 and 2 decide *how many distinct inputs exist*; 3 decides *which predicates
@@ -145,6 +146,15 @@ the data allows.
   Within a pair, the leaves run in the node's order and stop at the first false answer.
 * **A LIMIT stops the operator, not the scan.** Once the region or graph has confirmed enough
   passing rows for the pushed `LIMIT k` (counted by fan-out, so k *output* rows), it stops asking.
+  Under a LIMIT the region asks in waves of max(k, `ai_concurrency`) inputs and re-checks after each,
+  so a small k is settled by one wave, not by a hundred. A LIMIT above a plain DISTINCT reaches the
+  region as "k distinct passing tuples" over the DISTINCT's columns (mapped down through the
+  projections), so `SELECT DISTINCT name ... WHERE ai_filter(...) LIMIT 5` stops after five names.
+* **Rows leave the region as they are decided.** Without a LIMIT the region does not wait for its
+  whole input to be decided: once every input is known it puts every remaining call in flight and
+  hands rows out in input order as their verdicts land. A consumer that stops early -- a LIMIT the
+  push-down cannot place, say above an inner join or a UNION -- ends the query with the calls still
+  queued behind the pool never made.
 * **The request pool is the bound.** With the calls fixed, a query's latency is roughly its calls
   times the mean call latency divided by `ai_concurrency`. Sending each input as soon as it is known
   only matters where the pool would otherwise sit idle; the largest benchmark queries keep it full.
@@ -152,8 +162,10 @@ the data allows.
   read the answer, a prompt expression that fails — is carried back to the query and fails it, exactly
   as the per-row evaluation would. No worker thread drops an error, and none lets one escape.
 
-**Selectivity is learned, not assumed.** The region's predictions come from a small model trained
-in-process on the verdicts the query itself produces: one full-batch gradient step over the most
+**Selectivity is learned, not assumed.** A tree with one leaf has nothing to order, so it embeds
+nothing and records no training example; the model is consulted and trained only where a prediction
+can change behaviour (two or more leaves, or a speculative gate). The region's predictions come from a
+small model trained in-process on the verdicts the query itself produces: one full-batch gradient step over the most
 recent 256 verdicts every 3 × `ai_concurrency` calls. The cadence is what decides how early the order
 follows the model: stepping more often orders rows on too few labels, stepping less often learns only
 after most rows are decided. Its feature for a leaf is the embedding of the
@@ -315,7 +327,7 @@ consume the same recorded verdict per shared prompt, the others' verdicts are in
 where an answer hinges on a few judgments any disagreement scores 0; its calls, latency and cost are
 comparable. Per-query tables: `aisql-bench/AGENTBENCH/results/agentbench_comparison_three_way.md`,
 `aisql-bench/typesafe_comparison_20260925.md`, and `aisql-bench/compare.py SUITE` for the SemBench suites.
-SWAN 2.0 is the benchmark in github.com/ZhaoFuheng/SWAN: one AISQL query per question that every system
+SWAN 2.0 is the benchmark in github.com/ZhaoFuheng/SWANBench: one AISQL query per question that every system
 plans itself, with scaled and duplicated databases; its results folder holds the four systems' answers.
 Its row is the replay, from the published cache, of each system's fresh recording through an empty cache
 (LOTUS and PLOP from the session of 2026-10-03; SWAN, BlendSQL and Palimpzest re-recorded on 2026-10-05), so

@@ -1,7 +1,7 @@
 //===----------------------------------------------------------------------===//
 // In-process deterministic mock LLM backend for tests.
 //
-// CALL ai_mock_start() spins a duckdb_httplib server on an ephemeral port serving
+// CALL ai_mock_start() spins an httplib server on an ephemeral port serving
 // /v1/chat/completions and /v1/embeddings with answers that are a stable md5 hash of the prompt
 // (semantics ported 1:1 from the fork's test/ai-sql/mock_backend.py, including python's
 // json.dumps(sort_keys=True) seed for multimodal content), and points the live AIConfig at it.
@@ -27,7 +27,7 @@
 #include <cstdlib>
 #include <thread>
 
-#include "httplib.hpp"
+#include "ai_httplib.hpp"
 
 namespace duckdb {
 
@@ -203,7 +203,7 @@ string GenFromSchema(yyjson_val *schema, const string &seed) {
 }
 
 struct MockServerState {
-	std::unique_ptr<duckdb_httplib::Server> server;
+	std::unique_ptr<aisql_http::Server> server;
 	//! The listener thread. Joined in AIMockStop BEFORE the server is destroyed: is_running() turns false
 	//! while listen_after_bind() is still tearing down its task queue, so destroying the server on that
 	//! signal alone freed it under the listener (a silent crash in the next test file on Windows).
@@ -232,7 +232,7 @@ static MockServerState &Mock() {
 	return state;
 }
 
-void HandlePost(const duckdb_httplib::Request &req, duckdb_httplib::Response &res) {
+void HandlePost(const aisql_http::Request &req, aisql_http::Response &res) {
 	yyjson_doc *doc = yyjson_read(req.body.c_str(), req.body.size(), 0);
 	yyjson_val *root = doc ? yyjson_doc_get_root(doc) : nullptr;
 	// PROVIDER FIDELITY: a body that is not valid JSON is a 400, not a benign answer. Silently
@@ -458,14 +458,14 @@ int AIMockStart() {
 		Mock().server.reset();
 		Mock().port = 0;
 	}
-	auto server = std::make_unique<duckdb_httplib::Server>();
+	auto server = std::make_unique<aisql_http::Server>();
 	// Keep-alive clients hold one server thread per persistent connection; the default pool
 	// (~hardware threads) starves under 20+ pooled engine connections, so size it explicitly.
 	server->new_task_queue = [] {
-		return new duckdb_httplib::ThreadPool(64);
+		return new aisql_http::ThreadPool(64);
 	};
 	server->Post(R"(.*)", HandlePost);
-	server->Get(R"(.*)", [](const duckdb_httplib::Request &, duckdb_httplib::Response &res) {
+	server->Get(R"(.*)", [](const aisql_http::Request &, aisql_http::Response &res) {
 		res.set_content("{\"status\": \"ok\"}", "application/json");
 	});
 	const int port = server->bind_to_any_port("127.0.0.1");

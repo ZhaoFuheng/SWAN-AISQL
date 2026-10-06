@@ -94,6 +94,11 @@ struct AIConfig {
 	//! requests, and no request may outlive the client timeout (a 500-image request took 80 s).
 	idx_t embed_concurrency = 4;
 	idx_t embed_batch_images = 8;
+	//! TLS towards https endpoints (builds with OpenSSL, see ai_httplib.hpp): the CA bundle to verify against
+	//! (AI_CA_CERT_FILE / SSL_CERT_FILE / SET ai_ca_cert_file; empty = the system store) and whether to verify
+	//! the server certificate at all (SET ai_tls_verify, default true).
+	string ca_cert_file;
+	bool tls_verify = true;
 	//! Debug log channels (csv: region, spec, yann, leaftexts, mock).
 	string debug_log;
 	//! Local cache (layer 1): process-global response caches (chat + embed) serving repeats
@@ -257,6 +262,8 @@ void AIInstallCrashReporter();
 //! image item (a text-only model answers image items with an error entry; the client latches that once
 //! per process so no later request pays for images it cannot get).
 bool AIEmbedImagesSupported();
+//! Clear the embeddings-endpoint-down latch (a SET ai_embed_endpoint names a new server).
+void AIEmbedEndpointReset();
 
 //! Execute a batch of requests concurrently, with query-scoped de-duplication + response caching
 //! (identical prompts are cached within a query, across its chunks, but never shared between queries).

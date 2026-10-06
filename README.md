@@ -6,12 +6,12 @@ optimizer and executor built around **factorized ("two-currency") execution**: e
 cross product, and learned predicate ordering, Yannakakis semi-join reduction and LIMIT early-stop minimize
 calls. Benchmarked against LOTUS on SemBench (MOVIE / ECOMM / MMQA), against PLOP's recorded runs and LOTUS
 on the 30-query hybrid bench the PLOP authors shared with us, and against BlendSQL and LOTUS on
-[SWAN 2.0](https://github.com/ZhaoFuheng/SWAN). The design is in [docs/DESIGN.md](docs/DESIGN.md).
+[SWAN 2.0](https://github.com/ZhaoFuheng/SWANBench). The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
 This repository is a DuckDB **extension** built on the
 [extension template](https://github.com/duckdb/extension-template): the engine is the `aisql` extension,
 DuckDB is the `duckdb/` submodule, CI comes from `extension-ci-tools/`, and dependencies are declared in
-`vcpkg.json` (none required today).
+`vcpkg.json` (OpenSSL, so the LLM client can speak https; optional for a local build).
 
 The results come first; then the numbered sections are a path: build, keys, Python environment, start the
 serving stack, run a query, then run SemBench MOVIE for SWAN and LOTUS and compare them. Reference material
@@ -91,9 +91,22 @@ GEN=ninja make reldebug        # or: make release / make debug   (~25 min, build
 - `build/reldebug/extension/aisql/aisql.duckdb_extension` — the loadable extension
 - `build/reldebug/test/unittest` — the test runner with the extension's sqllogictests registered
 
-The `duckdb/` submodule is pinned to the DuckDB commit the engine is written against. No vcpkg dependencies
-are needed: the LLM client uses DuckDB's bundled http-only `httplib`, and the local proxies in `serve/`
-terminate TLS towards the providers.
+The `duckdb/` submodule is pinned to the DuckDB commit the engine is written against: a DuckDB 2.0 pre-release,
+the commit the `duckdb` 2.0 nightly wheel on PyPI is built from, so the Python package below loads into that
+wheel. If CMake finds OpenSSL (Homebrew's `openssl@3`, or `libssl-dev` / the vcpkg port in CI) the LLM client
+speaks https directly and `SET ai_endpoint = 'https://api.openai.com'` works; without it the build is http-only
+and the local proxies in `serve/` terminate TLS towards the providers, which is how every benchmark here runs.
+
+To load the loadable extension you build into the `duckdb` wheel from PyPI (rather than into the CLI and test
+runner above, which do not care), the build has to carry that wheel's version string: `SELECT version()` in it
+(`v2.0.0-alpha43763` for the pinned pre-release) goes into the configure step as
+`DUCKDB_VERSION=v2.0.0-alpha43763 GEN=ninja make reldebug`. `python/build_wheel.sh` also accepts a plain build
+and re-stamps it.
+
+**Python instead of a build.** `pip install swan-aisql` installs a wheel with the extension for your platform and
+the pinned `duckdb`; `swan_aisql.connect()` returns a DuckDB connection with the functions loaded
+([python/README.md](python/README.md)). The wheels come out of the `Python Wheels` workflow; from a checkout,
+`python/build_wheel.sh` packs the binary you just built.
 
 To check the build, run the test suite. It uses an in-process deterministic mock LLM, so it needs no
 network or keys:
@@ -102,6 +115,10 @@ network or keys:
 make test_reldebug                                      # every sqllogictest under test/sql/ (python3 >= 3.10 on PATH)
 build/reldebug/test/unittest "*test/sql/region/*"       # one group
 ```
+
+CI also runs DuckDB's code-quality checks on every push. Locally: `make format-check` (or `format-fix`) needs
+clang-format 11.0.1 on PATH (`pip install clang-format==11.0.1`), and `make tidy-check` needs clang-tidy
+(Homebrew's `llvm` on macOS, where the Makefile also passes the SDK to the tidy build).
 
 ## 2. Keys
 
@@ -388,7 +405,7 @@ measures verdict variance (`aisql-bench/README.md` rule 7). Calls, cost and late
 
 ## SWAN 2.0: SWAN vs BlendSQL, LOTUS, PLOP and Palimpzest
 
-[SWAN 2.0](https://github.com/ZhaoFuheng/SWAN) is a 120-question benchmark over four BIRD databases (scaled to
+[SWAN 2.0](https://github.com/ZhaoFuheng/SWANBench) is a 120-question benchmark over four BIRD databases (scaled to
 ~10k rows and duplicated): one AISQL query per question, which every system runs as written — SWAN-AISQL
 directly, BlendSQL and LOTUS through mechanical translations — so each system's planner decides the LLM
 calls. Its `scripts/run_swan_aisql.sh` clones and builds this repository, starts the serving stack and runs
@@ -433,6 +450,7 @@ aisql-bench/            SemBench MOVIE / ECOMM / MMQA and agent_bench: queries, 
                      SWAN, LOTUS, PLOP, BlendSQL, ThalamusDB and Palimpzest, ground truth, compare.py, PLOP_FORK.md
                      (running the Morrila fork), setup_thalamusdb.sh / setup_palimpzest.sh (their own environments);
                      SWAN2/ = a copy of the SWAN 2.0 benchmark's 120 queries, oracle forms and question list
+python/              the swan-aisql pip package: swan_aisql.connect(), build_wheel.sh, the wheel smoke test
 docs/DESIGN.md       the design: two currencies, pipeline, boundary rule, duplication safety, caching, measured state
 docs/SETTINGS.md     every setting, its default and the environment variable that seeds it
 ```

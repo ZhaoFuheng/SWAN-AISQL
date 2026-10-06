@@ -1,0 +1,42 @@
+# name: test/sql/functions/tls_settings.test
+# description: The TLS settings exist in every build; an https endpoint in a build without TLS fails visibly
+# group: [functions]
+
+#              (failed_calls, no exception), exactly like an unreachable http endpoint. A TLS build cannot be
+#              exercised offline, so only the settings and the failure path are checked here.
+
+require aisql
+
+statement ok
+SET ai_ca_cert_file = '';
+
+statement ok
+SET ai_tls_verify = false;
+
+query I
+SELECT current_setting('ai_tls_verify');
+----
+false
+
+statement ok
+SET ai_tls_verify = true;
+
+# nothing listens on 127.0.0.1:1 over https either: the request fails, the function stays NULL
+statement ok
+SET ai_endpoint = 'https://127.0.0.1:1';
+
+statement ok
+SET ai_max_retries = 0;
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT ai_filter('some text') IS NULL;
+----
+true
+
+query I
+SELECT failed_calls > 0 FROM ai_usage() WHERE query_text LIKE '%some text%';
+----
+true

@@ -1,0 +1,55 @@
+# name: test/sql/functions/rebind_idempotent.test
+# description: A CTE read twice makes DuckDB copy (serialize + deserialize) its plan, which RE-BINDS every
+# group: [functions]
+
+#              function in it with the history-key columns the first bind appended already in place. The bind
+#              must then leave the argument list alone: DuckDB 2.0 refuses a bind callback that changes the
+#              argument count ("cannot add or remove arguments"), and before that the re-appended keys shifted
+#              key_start silently. Covers every key-appending function with more than one user argument
+#              (ai_classify, ai_score with and without bounds) and the one-argument ones (ai_filter, ai_complete).
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE items AS SELECT 'item ' || x AS name, x AS n FROM range(6) t(x);
+
+# ai_classify with a list of labels: the labels argument sits between the prompt and the keys
+query I
+WITH g AS (SELECT name, ai_classify('Which bucket? ' || name, ['a', 'b', 'c']) AS c FROM items)
+SELECT count(*) >= 1 FROM g WHERE c = (SELECT min(c) FROM g);
+----
+true
+
+# ai_score, two user arguments
+query I
+WITH g AS (SELECT name, ai_score('How good is ' || name, 'quality') AS s FROM items)
+SELECT count(*) >= 1 FROM g WHERE s >= (SELECT min(s) FROM g);
+----
+true
+
+# ai_score with integer bounds, four user arguments
+query I
+WITH g AS (SELECT name, ai_score('How good is ' || name, 'quality', 1, 5) AS s FROM items)
+SELECT count(*) >= 1 FROM g WHERE s >= (SELECT min(s) FROM g);
+----
+true
+
+# a prompt over two columns appends two keys
+query I
+WITH g AS (SELECT ai_classify('Bucket for ' || name || ' number ' || n, ['a', 'b']) AS c FROM items)
+SELECT count(*) >= 1 FROM g WHERE c = (SELECT min(c) FROM g);
+----
+true
+
+# the one-argument functions
+query I
+WITH g AS (SELECT name, ai_filter('Is ' || name || ' good?') AS f, ai_complete('Describe ' || name) AS d FROM items)
+SELECT count(*) >= 0 FROM g WHERE f = (SELECT bool_or(f) FROM g) AND d IS NOT DISTINCT FROM (SELECT min(d) FROM g);
+----
+true
+
+statement ok
+CALL ai_mock_stop();

@@ -29,7 +29,7 @@
 #include <utility>
 
 // httplib pulls in socket headers; keep it last and isolated in this TU.
-#include "httplib.hpp"
+#include "ai_httplib.hpp"
 
 using namespace duckdb_yyjson; // NOLINT
 
@@ -124,6 +124,9 @@ static AIConfig BuildDefaultConfig() {
 		auto embed_imgs = std::atoi(GetEnvOr("AI_EMBED_BATCH_IMAGES", "8").c_str());
 		c.embed_batch_images = embed_imgs > 0 ? static_cast<idx_t>(embed_imgs) : 8;
 		c.embed_images = !(embed_images == "off" || embed_images == "0" || embed_images == "false");
+		c.ca_cert_file = GetEnvOr("AI_CA_CERT_FILE", GetEnvOr("SSL_CERT_FILE", ""));
+		const string tls_verify = GetEnvOr("AI_TLS_VERIFY", "");
+		c.tls_verify = !(tls_verify == "off" || tls_verify == "0" || tls_verify == "false");
 		auto agg_budget = std::atoll(GetEnvOr("AI_AGG_CHAR_BUDGET", "48000").c_str());
 		c.agg_char_budget = agg_budget > 0 ? static_cast<idx_t>(agg_budget) : 48000;
 		c.price_input_per_mtok = std::atof(GetEnvOr("AI_PRICE_INPUT", "0").c_str());
@@ -560,9 +563,18 @@ static void EmitContentBlocks(string &arr, bool &first, const string &prompt) {
 	}
 }
 
+//! Set when an endpoint answered HTTP 400 to the temperature parameter: later requests leave it out.
+static std::atomic<bool> &TemperatureRejected() {
+	static std::atomic<bool> value {false};
+	return value;
+}
+
 static string BuildRequestBody(const AIConfig &config, const AIRequest &request) {
-	// temperature=0 for determinism; proxy drop_params handles models that reject it.
-	string body = "{\"model\":\"" + AIJsonEscape(config.model) + "\",\"temperature\":0,";
+	// temperature=0 for determinism. Some models reject the parameter outright (the gpt-5 reasoning models answer
+	// HTTP 400 "'temperature' does not support 0"); the litellm proxy drops it for them, and a direct endpoint
+	// latches TemperatureRejected() on that 400 so the rest of the process omits it.
+	string body = "{\"model\":\"" + AIJsonEscape(config.model) + "\"," +
+	              (TemperatureRejected().load() ? string() : string("\"temperature\":0,"));
 	if (!config.reasoning_effort.empty()) {
 		body += "\"reasoning_effort\":\"" + AIJsonEscape(config.reasoning_effort) + "\",";
 	}
@@ -694,7 +706,7 @@ enum class AICallOutcome : uint8_t {
 };
 
 //! Read a Retry-After / retry-after-ms hint (in ms) from a throttle response; -1 if absent.
-static int32_t ParseRetryAfterMs(const duckdb_httplib::Response &response) {
+static int32_t ParseRetryAfterMs(const aisql_http::Response &response) {
 	const string ms = response.get_header_value("retry-after-ms");
 	if (!ms.empty()) {
 		try {
@@ -759,15 +771,25 @@ static std::mutex &ConnPoolMutex() {
 	static std::mutex value;
 	return value;
 }
-static std::unordered_map<string, vector<duckdb::unique_ptr<duckdb_httplib::Client>>> &ConnPool() {
-	static std::unordered_map<string, vector<duckdb::unique_ptr<duckdb_httplib::Client>>> value;
+static std::unordered_map<string, vector<duckdb::unique_ptr<aisql_http::Client>>> &ConnPool() {
+	static std::unordered_map<string, vector<duckdb::unique_ptr<aisql_http::Client>>> value;
 	return value;
 }
 static constexpr idx_t CONN_POOL_MAX_IDLE = 64; // per URL; > concurrency + hedges + embed callers
 
-static duckdb::unique_ptr<duckdb_httplib::Client> NewConn(const string &url, const AIConfig &config) {
-	auto client = duckdb::make_uniq<duckdb_httplib::Client>(url);
+static duckdb::unique_ptr<aisql_http::Client> NewConn(const string &url, const AIConfig &config) {
+	auto client = duckdb::make_uniq<aisql_http::Client>(url);
 	client->set_keep_alive(true); // pooled per endpoint: a fresh handshake per call is ~a minute at suite scale
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+	if (url.rfind("https://", 0) == 0) {
+		// httplib verifies against the system store (macOS keychain / OpenSSL's default paths) unless a bundle is
+		// named; ai_tls_verify=false is the escape hatch for a self-signed proxy.
+		if (!config.ca_cert_file.empty()) {
+			client->set_ca_cert_path(config.ca_cert_file);
+		}
+		client->enable_server_certificate_verification(config.tls_verify);
+	}
+#endif
 	return client;
 }
 
@@ -807,15 +829,19 @@ struct ConnLease {
 		if (!healthy || !client) {
 			return; // drop a broken socket
 		}
-		std::lock_guard<std::mutex> lock(ConnPoolMutex());
-		auto &idle = ConnPool()[url];
-		if (idle.size() < CONN_POOL_MAX_IDLE) {
-			idle.push_back(std::move(client));
+		try {
+			std::lock_guard<std::mutex> lock(ConnPoolMutex());
+			auto &idle = ConnPool()[url];
+			if (idle.size() < CONN_POOL_MAX_IDLE) {
+				idle.push_back(std::move(client));
+			}
+		} catch (...) {
+			// a destructor must not throw: the socket is simply not returned to the pool
 		}
 	}
 	string url;
 	const AIConfig &config;
-	duckdb::unique_ptr<duckdb_httplib::Client> client;
+	duckdb::unique_ptr<aisql_http::Client> client;
 	bool reused = false;
 	bool healthy = false; // set by the caller once an HTTP exchange completed on this socket
 };
@@ -842,12 +868,14 @@ static AIResult DoSingleRequest(const AIConfig &config, const AIRequest &request
 		// e.g. an https URL in a build without TLS support: a permanent, reported failure -- never
 		// an uncaught exception on a worker thread.
 		error = string("cannot open a connection: ") + e.what() +
-		        " (route it through an http proxy, e.g. serve/ai_cache_server.py)";
+		        (AIClientHasTLS() ? ""
+		                          : " (this build has no TLS: route https endpoints through an http proxy, e.g. "
+		                            "serve/ai_cache_server.py, or build with OpenSSL)");
 		return result;
 	}
 	ConnLease &lease = *lease_holder;
 
-	duckdb_httplib::Headers headers;
+	aisql_http::Headers headers;
 	const string &api_key = typesafe ? config.typesafe_api_key : config.api_key;
 	if (!api_key.empty()) {
 		headers.emplace("Authorization", "Bearer " + api_key);
@@ -870,10 +898,22 @@ static AIResult DoSingleRequest(const AIConfig &config, const AIRequest &request
 	}
 	if (!response) {
 		outcome = AICallOutcome::TRANSIENT; // network error (timeout / reset): retry
-		error = "no response (" + duckdb_httplib::to_string(response.error()) + ")";
+		error = "no response (" + aisql_http::to_string(response.error()) + ")";
 		return result;
 	}
 	lease.healthy = true; // full HTTP exchange completed: socket reusable regardless of status
+	if (response->status == 400 && !typesafe && !TemperatureRejected().load() &&
+	    response->body.find("temperature") != string::npos) {
+		// the model takes no temperature parameter: drop it process-wide and send this request again
+		TemperatureRejected().store(true);
+		const string retry_body = BuildRequestBody(config, request);
+		response = lease.client->Post(path, headers, retry_body, "application/json");
+		if (!response) {
+			outcome = AICallOutcome::TRANSIENT;
+			error = "no response (" + aisql_http::to_string(response.error()) + ")";
+			return result;
+		}
+	}
 	auto http_error = [&](const char *what) {
 		error = string(what) + " HTTP " + std::to_string(response->status) + ": " + response->body.substr(0, 200);
 	};
@@ -1627,16 +1667,32 @@ bool AIEmbedImagesSupported() {
 	return AIConfig::Get().embed_images && !EmbedImagesUnsupportedLatch().load();
 }
 
+//! Set once an embeddings request got no response at all (nothing listening, or a timeout): the rest of the
+//! process skips embeddings and the learned ordering falls back to prompt cost, instead of every later query
+//! waiting out the client timeout per batch. A SET ai_embed_endpoint clears it (see RegisterAISettings).
+static std::atomic<bool> &EmbedEndpointDownLatch() {
+	static std::atomic<bool> value {false};
+	return value;
+}
+
+void AIEmbedEndpointReset() {
+	EmbedEndpointDownLatch().store(false);
+}
+
 //! POST one embeddings request for `inputs`; fill `out[i]` with the i-th embedding. Returns false on
-//! any transport/parse failure. An item the server answers without an embedding (an image the model
-//! cannot embed, an unreadable file) leaves out[i] empty without failing the batch -- the text items
-//! beside it still land. Accounts one llm_call + usage tokens against the query.
+//! any transport/parse failure (and without a request once the endpoint latched as down). An item the
+//! server answers without an embedding (an image the model cannot embed, an unreadable file) leaves out[i]
+//! empty without failing the batch -- the text items beside it still land. Accounts one llm_call + usage
+//! tokens against the query.
 static bool DoEmbedBatchRequest(const AIConfig &config, const vector<string> &inputs, idx_t query_index,
                                 vector<vector<float>> &out) {
 	out.assign(inputs.size(), {});
+	if (EmbedEndpointDownLatch().load()) {
+		return false;
+	}
 	ConnLease lease(config.embed_url, config);
 
-	duckdb_httplib::Headers headers;
+	aisql_http::Headers headers;
 	if (!config.api_key.empty()) {
 		headers.emplace("Authorization", "Bearer " + config.api_key);
 	}
@@ -1651,6 +1707,12 @@ static bool DoEmbedBatchRequest(const AIConfig &config, const vector<string> &in
 		response = lease.client->Post("/v1/embeddings", headers, body, "application/json");
 	}
 	if (!response) {
+		if (!EmbedEndpointDownLatch().exchange(true)) {
+			fprintf(stderr,
+			        "[aisql] embeddings endpoint %s gave no response (%s): predicates are ordered by prompt cost "
+			        "from here on; SET ai_embed_endpoint re-enables it\n",
+			        config.embed_url.c_str(), aisql_http::to_string(response.error()).c_str());
+		}
 		return false;
 	}
 	lease.healthy = true;
@@ -1996,6 +2058,7 @@ uint64_t AIHistoryReset() {
 void AIConfig::ResetToDefaults() {
 	ConfigInstance() = BuildDefaultConfig();
 	EmbedImagesUnsupportedLatch().store(false);
+	EmbedEndpointDownLatch().store(false);
 	TurboState().store(-1);
 	{
 		std::lock_guard<std::mutex> lock(TokratioMutex());

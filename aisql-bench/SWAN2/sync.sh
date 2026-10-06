@@ -1,5 +1,5 @@
 #!/bin/sh
-# Refresh this copy of the SWAN 2.0 queries from a checkout of github.com/ZhaoFuheng/SWAN.
+# Refresh this copy of the SWAN 2.0 queries from a checkout of github.com/ZhaoFuheng/SWANBench.
 #   aisql-bench/SWAN2/sync.sh [path-to-SWAN-checkout]   (default: ../../../SWAN_bench)
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)

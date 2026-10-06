@@ -2,7 +2,7 @@
 
 A copy of the SWAN 2.0 benchmark's queries, so that this repository holds every query behind its results
 tables. The benchmark itself (harness, scaled databases, scoring, the five systems' adapters, results) is
-[github.com/ZhaoFuheng/SWAN](https://github.com/ZhaoFuheng/SWAN); this copy was taken from its commit
+[github.com/ZhaoFuheng/SWANBench](https://github.com/ZhaoFuheng/SWANBench); this copy was taken from its commit
 `ef70911` (2026-10-03) and is refreshed with `sync.sh` from a sibling checkout. The benchmark's copy is the
 one its harness runs; edit there, then sync.
 

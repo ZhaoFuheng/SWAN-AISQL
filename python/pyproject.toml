@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]  # >=77 for the SPDX license field
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swan-aisql"
+version = "0.1.0"
+description = "SWAN AI-SQL: semantic SQL (ai_filter, ai_classify, ai_score, ai_complete, ai_agg, ai_embed) as a DuckDB extension with the two-currency optimizer"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "Fuheng Zhao" }]
+keywords = ["duckdb", "llm", "semantic-sql", "ai-sql", "query-optimization"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: SQL",
+    "Topic :: Database",
+]
+# Each release of swan-aisql is built against ONE exact DuckDB build (a DuckDB extension only loads into the
+# engine it was compiled for). build_wheel.sh verifies the bundled binary against this pin.
+dependencies = ["duckdb==2.0.0.dev2610011535"]
+
+[project.urls]
+Homepage = "https://github.com/ZhaoFuheng/SWAN-AISQL"
+Repository = "https://github.com/ZhaoFuheng/SWAN-AISQL"
+Benchmark = "https://github.com/ZhaoFuheng/SWANBench"
+
+[tool.setuptools]
+packages = ["swan_aisql"]
+
+[tool.setuptools.package-data]
+swan_aisql = ["aisql.duckdb_extension", "_build.py"]
