@@ -1,5 +1,6 @@
 #include "ai_selectivity_model.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 
@@ -86,6 +87,128 @@ double AISelectivityParams::Forward(const float *embedding, idx_t dim) const {
 	return SelSigmoid(z);
 }
 
+void AISelectivityParams::ForwardBatch(const float *const *inputs, idx_t count, idx_t dim, double *out) const {
+	if (input_dim == 0 || dim != input_dim) {
+		for (idx_t k = 0; k < count; k++) {
+			out[k] = 0.5;
+		}
+		return;
+	}
+	// Blocks of inputs: for each hidden unit its weight row is read once and dotted with every input of the
+	// block (the block's inputs stay in cache), in the same j order as Forward() so each result is identical.
+	constexpr idx_t kBlock = 64;
+	vector<double> a1(kBlock * h1), a2(kBlock * h2);
+	for (idx_t start = 0; start < count; start += kBlock) {
+		const idx_t nb = MinValue<idx_t>(kBlock, count - start);
+		for (idx_t i = 0; i < h1; i++) {
+			const float *row = &w1[i * input_dim];
+			for (idx_t k = 0; k < nb; k++) {
+				const float *embedding = inputs[start + k];
+				double acc = b1[i];
+				for (idx_t j = 0; j < input_dim; j++) {
+					acc += static_cast<double>(row[j]) * static_cast<double>(embedding[j]);
+				}
+				a1[k * h1 + i] = SelReLU(acc);
+			}
+		}
+		for (idx_t i = 0; i < h2; i++) {
+			const float *row = &w2[i * h1];
+			for (idx_t k = 0; k < nb; k++) {
+				const double *in1 = &a1[k * h1];
+				double acc = b2[i];
+				for (idx_t j = 0; j < h1; j++) {
+					acc += static_cast<double>(row[j]) * in1[j];
+				}
+				a2[k * h2 + i] = SelReLU(acc);
+			}
+		}
+		for (idx_t k = 0; k < nb; k++) {
+			const double *in2 = &a2[k * h2];
+			double z = b3[0];
+			for (idx_t j = 0; j < h2; j++) {
+				z += static_cast<double>(w3[j]) * in2[j];
+			}
+			out[start + k] = SelSigmoid(z);
+		}
+	}
+}
+
+void AISelectivityParams::ForwardBatchShared(const float *prefix, idx_t prefix_len, const float *const *tails,
+                                             idx_t tail_len, idx_t count, double *out) const {
+	const idx_t dim = prefix_len + tail_len;
+	if (input_dim == 0 || dim != input_dim) {
+		for (idx_t k = 0; k < count; k++) {
+			out[k] = 0.5;
+		}
+		return;
+	}
+	// First layer, shared half: exactly the first prefix_len steps of Forward()'s accumulation per unit.
+	vector<double> pre(h1);
+	for (idx_t i = 0; i < h1; i++) {
+		const float *row = &w1[i * input_dim];
+		double acc = b1[i];
+		for (idx_t j = 0; j < prefix_len; j++) {
+			acc += static_cast<double>(row[j]) * static_cast<double>(prefix[j]);
+		}
+		pre[i] = acc;
+	}
+	constexpr idx_t kBlock = 64;
+	vector<float> xt(tail_len * kBlock); // tails transposed: xt[j * nb + k]
+	vector<double> acc(kBlock), a1(kBlock * h1), a2(kBlock * h2);
+	for (idx_t start = 0; start < count; start += kBlock) {
+		const idx_t nb = MinValue<idx_t>(kBlock, count - start);
+		for (idx_t k = 0; k < nb; k++) {
+			const float *tail = tails[start + k];
+			for (idx_t j = 0; j < tail_len; j++) {
+				xt[j * nb + k] = tail[j];
+			}
+		}
+		for (idx_t i = 0; i < h1; i++) {
+			const float *row = &w1[i * input_dim + prefix_len];
+			for (idx_t k = 0; k < nb; k++) {
+				acc[k] = pre[i];
+			}
+			for (idx_t j = 0; j < tail_len; j++) {
+				const double w = static_cast<double>(row[j]);
+				const float *x = &xt[j * nb];
+				for (idx_t k = 0; k < nb; k++) {
+					acc[k] += w * static_cast<double>(x[k]);
+				}
+			}
+			for (idx_t k = 0; k < nb; k++) {
+				a1[k * h1 + i] = SelReLU(acc[k]);
+			}
+		}
+		for (idx_t i = 0; i < h2; i++) {
+			const float *row = &w2[i * h1];
+			for (idx_t k = 0; k < nb; k++) {
+				const double *in1 = &a1[k * h1];
+				double s2 = b2[i];
+				for (idx_t j = 0; j < h1; j++) {
+					s2 += static_cast<double>(row[j]) * in1[j];
+				}
+				a2[k * h2 + i] = SelReLU(s2);
+			}
+		}
+		for (idx_t k = 0; k < nb; k++) {
+			const double *in2 = &a2[k * h2];
+			double z = b3[0];
+			for (idx_t j = 0; j < h2; j++) {
+				z += static_cast<double>(w3[j]) * in2[j];
+			}
+			out[start + k] = SelSigmoid(z);
+		}
+	}
+#ifdef DEBUG
+	// The shared kernel must reproduce Forward() bit for bit (same sums, same order).
+	if (count > 0) {
+		vector<float> full(prefix, prefix + prefix_len);
+		full.insert(full.end(), tails[0], tails[0] + tail_len);
+		D_ASSERT(Forward(full.data(), dim) == out[0]);
+	}
+#endif
+}
+
 //===--------------------------------------------------------------------===//
 // Model lifecycle
 //===--------------------------------------------------------------------===//
@@ -133,6 +256,42 @@ double AISelectivityModel::Predict(const float *embedding, idx_t dim) {
 	return p->Forward(embedding, dim);
 }
 
+void AISelectivityModel::PredictBatch(const float *const *embeddings, idx_t count, idx_t dim, double *out) {
+	if (count == 0) {
+		return;
+	}
+	if (dim == 0) {
+		for (idx_t k = 0; k < count; k++) {
+			out[k] = 0.5;
+		}
+		return;
+	}
+	auto p = GetParams();
+	if (!p || p->input_dim != dim) {
+		p = EnsureParams(dim);
+	}
+	p->ForwardBatch(embeddings, count, dim, out);
+}
+
+void AISelectivityModel::PredictBatchShared(const float *prefix, idx_t prefix_len, const float *const *tails,
+                                            idx_t tail_len, idx_t count, double *out) {
+	if (count == 0) {
+		return;
+	}
+	const idx_t dim = prefix_len + tail_len;
+	if (dim == 0) {
+		for (idx_t k = 0; k < count; k++) {
+			out[k] = 0.5;
+		}
+		return;
+	}
+	auto p = GetParams();
+	if (!p || p->input_dim != dim) {
+		p = EnsureParams(dim);
+	}
+	p->ForwardBatchShared(prefix, prefix_len, tails, tail_len, count, out);
+}
+
 void AISelectivityModel::AddExample(const vector<float> &embedding, bool label) {
 	if (embedding.empty()) {
 		return;
@@ -149,6 +308,7 @@ void AISelectivityModel::AddExample(const vector<float> &embedding, bool label) 
 // Training: one SGD step on a random mini-batch (BCE loss)
 //===--------------------------------------------------------------------===//
 void AISelectivityModel::TrainMiniBatchStep() {
+	const auto t_step = std::chrono::steady_clock::now();
 	// Snapshot the full FIFO (under buffer_mutex) so the actual gradient work happens lock-free and
 	// cannot deadlock against Predict/AddExample. Full-batch gradient -> low variance, more stable.
 	vector<Sample> batch;
@@ -303,6 +463,7 @@ void AISelectivityModel::TrainMiniBatchStep() {
 		}
 		last_loss = loss;
 		train_steps++;
+		train_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - t_step).count();
 	}
 }
 
@@ -341,6 +502,7 @@ AISelectivityStats AISelectivityModel::Stats() {
 		stats.train_steps = train_steps;
 		stats.first_loss = first_loss;
 		stats.last_loss = last_loss;
+		stats.train_seconds = train_seconds;
 	}
 	auto p = GetParams();
 	stats.input_dim = p ? p->input_dim : 0;
@@ -357,6 +519,7 @@ uint64_t AISelectivityModel::Reset() {
 		train_steps = 0;
 		first_loss = -1.0;
 		last_loss = -1.0;
+		train_seconds = 0.0;
 	}
 	{
 		std::lock_guard<std::mutex> lock(params_mutex);

@@ -65,10 +65,17 @@ void AILeafRegionState::FlushStage(idx_t l) {
 		feats.assign(fresh.Size(), vector<float>());
 	}
 	t_embed += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+	// One blocked forward pass for the slice's new reps (same values as one pass per rep).
+	vector<const vector<float> *> feat_ptrs(feats.size());
+	for (idx_t i = 0; i < feats.size(); i++) {
+		feat_ptrs[i] = &feats[i];
+	}
+	vector<double> p_fresh;
+	AILeafPredictFeatures(feat_ptrs, p_fresh);
 	for (idx_t i = 0; i < fresh.Size(); i++) {
 		auto &rep = leaf.reps[leaf.stage_reps[i]];
 		rep.feat = std::move(feats[i]);
-		rep.p = AILeafPredictFeature(rep.feat);
+		rep.p = p_fresh[i];
 		rep.p_step = step;
 		rep.cost = fresh.cost[i];
 		rep.valid = fresh.valid[i] != 0;
@@ -168,6 +175,13 @@ bool AILeafRegionState::AppendSlice(DataChunk &chunk, idx_t begin, idx_t end) {
 		FlushStage(l);
 	}
 	// 3. Each new row chooses its first leaf (or is already decided by verdicts landed earlier).
+	{
+		vector<uint32_t> new_rows(count);
+		for (idx_t row = 0; row < count; row++) {
+			new_rows[row] = first_row + NumericCast<uint32_t>(row);
+		}
+		RefreshStalePredictions(new_rows.data(), new_rows.size());
+	}
 	for (idx_t row = 0; row < count; row++) {
 		DecideRow(first_row + NumericCast<uint32_t>(row));
 		if (LimitMet()) {
@@ -188,6 +202,56 @@ void AILeafRegionState::RefreshPrediction(Leaf &leaf, uint32_t rep_id) {
 	t_refresh += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 	refreshes++;
 	rep.p_step = step;
+}
+
+void AILeafRegionState::RefreshStalePredictions(const uint32_t *rows, idx_t count) {
+	if (n <= 1 || count == 0) {
+		return;
+	}
+	const uint64_t step = AISelectivityTrainSteps();
+	vector<const vector<float> *> feats;
+	vector<std::pair<idx_t, uint32_t>> which;
+	for (idx_t r = 0; r < count; r++) {
+		const uint32_t row = rows[r];
+		if (row_result[row] != -2) {
+			continue;
+		}
+		for (idx_t l = 0; l < n; l++) {
+			const uint32_t rep_id = row_reps[row * n + l];
+			auto &rep = leaves[l].reps[rep_id];
+			if (rep.state == 3 || !rep.valid || rep.feat.empty() || rep.p_step == step) {
+				continue;
+			}
+			rep.p_step = step; // claimed: listed once even if several of the rows share it
+			which.emplace_back(l, rep_id);
+			feats.push_back(&rep.feat);
+		}
+	}
+	if (which.empty()) {
+		return;
+	}
+	const auto t0 = std::chrono::steady_clock::now();
+	// One pass per leaf: a leaf's reps share the predicate half of their feature (see AILeafPredictFeatures).
+	for (idx_t l = 0; l < n; l++) {
+		vector<const vector<float> *> leaf_feats;
+		vector<idx_t> slots;
+		for (idx_t k = 0; k < which.size(); k++) {
+			if (which[k].first == l) {
+				leaf_feats.push_back(feats[k]);
+				slots.push_back(k);
+			}
+		}
+		if (leaf_feats.empty()) {
+			continue;
+		}
+		vector<double> p;
+		AILeafPredictFeatures(leaf_feats, p);
+		for (idx_t k = 0; k < slots.size(); k++) {
+			leaves[l].reps[which[slots[k]].second].p = p[k];
+		}
+	}
+	refreshes += which.size();
+	t_refresh += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 }
 
 // Tree-evaluate a row over its reps' verdicts; finish it, or register it on its next leaf's rep.
@@ -384,6 +448,7 @@ void AILeafRegionState::ReapLanded() {
 		rep.waiters.clear();
 		rep.waiters.shrink_to_fit();
 	}
+	RefreshStalePredictions(waiters.data(), waiters.size());
 	for (idx_t i = 0; i < waiters.size(); i++) {
 		DecideRow(waiters[i]);
 		// A verdict on a shared rep re-decides every row behind it (above a join: hundreds of thousands).
@@ -430,6 +495,7 @@ void AILeafRegionState::RunInlineWave(idx_t l) {
 		rep.waiters.clear();
 		rep.waiters.shrink_to_fit();
 	}
+	RefreshStalePredictions(waiters.data(), waiters.size());
 	for (const auto row : waiters) {
 		DecideRow(row);
 	}

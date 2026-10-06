@@ -171,7 +171,12 @@ follows the model: stepping more often orders rows on too few labels, stepping l
 after most rows are decided. Its feature for a leaf is the embedding of the
 predicate text, the embedding of the row's input, and their cosine; text inputs use a sentence
 encoder, image inputs a CLIP dual encoder so that an `ai_image` predicate is compared with its image
-in one joint space. A query starts cold — the first rows are ordered by cost alone — and warms as its
+in one joint space. Every training step makes the stored predictions stale; before the rows a landed
+verdict re-decides are decided, their open inputs are re-predicted in one blocked forward pass per leaf
+rather than one pass each, and since a leaf's inputs share the predicate half of the feature, the first
+layer's product with that half is formed once per pass. The arithmetic per input is the same sequence as a
+lone pass, so the predictions are identical; only the cost changes (on the heaviest benchmark queries, half
+the time it took). A query starts cold — the first rows are ordered by cost alone — and warms as its
 own verdicts land: the region ingests in slices, and while it is cold it sends a predicate's inputs
 only once a concurrency-wide batch of them is pending, and before deciding the next slice it waits for
 the calls already out. Once every leaf has a batch of verdicts, everything is sent as soon as it is

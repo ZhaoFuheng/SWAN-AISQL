@@ -139,6 +139,9 @@ void AILeafFeatures(const BoundFunctionExpression &eval_call, const AILeafTexts 
                     vector<vector<float>> &feats_out);
 //! P(true) from a stored feature: the live model's forward pass (0.5 for an empty feature or a cold model).
 double AILeafPredictFeature(const vector<float> &feat);
+//! AILeafPredictFeature for many features in one blocked forward pass (identical values). Features of a width
+//! other than the first non-empty one's get the neutral 0.5, as a lone mismatched Forward would.
+void AILeafPredictFeatures(const vector<const vector<float> *> &feats, vector<double> &p_out);
 //! The selectivity model's training-step counter, so a stored prediction can be recognised as stale.
 uint64_t AISelectivityTrainSteps();
 //! Evaluate leaf `leaf` over `texts`: the LLM verdict per rep, through the same worker pool, single-flight,

@@ -36,6 +36,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <fstream>
 #include <mutex>
@@ -2844,6 +2845,55 @@ double AILeafPredictFeature(const vector<float> &feat) {
 	return AIEstimateFilterTrueProb(feat.data(), feat.size());
 }
 
+void AILeafPredictFeatures(const vector<const vector<float> *> &feats, vector<double> &p_out) {
+	p_out.assign(feats.size(), 0.5);
+	if (feats.empty() || AISelectivityModel::Global().Stats().train_steps == 0) {
+		return;
+	}
+	idx_t dim = 0;
+	vector<const float *> inputs;
+	vector<idx_t> slots;
+	for (idx_t i = 0; i < feats.size(); i++) {
+		if (!feats[i] || feats[i]->empty()) {
+			continue;
+		}
+		if (dim == 0) {
+			dim = feats[i]->size();
+		}
+		if (feats[i]->size() != dim) {
+			continue;
+		}
+		inputs.push_back(feats[i]->data());
+		slots.push_back(i);
+	}
+	if (inputs.empty()) {
+		return;
+	}
+	vector<double> p(inputs.size());
+	// A leaf's features are [predicate embedding | input embedding | cosine] (BuildPredicateFeature) with the
+	// SAME predicate embedding on every rep: when the batch shares that half, the first layer's product with
+	// it is computed once and only the input half is multiplied per feature (half the arithmetic, the same
+	// sums in the same order).
+	const idx_t prefix_len = (dim - 1) / 2;
+	bool shared = dim >= 3 && dim % 2 == 1;
+	for (idx_t k = 1; shared && k < inputs.size(); k++) {
+		shared = std::memcmp(inputs[k], inputs[0], prefix_len * sizeof(float)) == 0;
+	}
+	if (shared) {
+		vector<const float *> tails(inputs.size());
+		for (idx_t k = 0; k < inputs.size(); k++) {
+			tails[k] = inputs[k] + prefix_len;
+		}
+		AISelectivityModel::Global().PredictBatchShared(inputs[0], prefix_len, tails.data(), dim - prefix_len,
+		                                                inputs.size(), p.data());
+	} else {
+		AISelectivityModel::Global().PredictBatch(inputs.data(), inputs.size(), dim, p.data());
+	}
+	for (idx_t k = 0; k < slots.size(); k++) {
+		p_out[slots[k]] = p[k];
+	}
+}
+
 void AILeafPredict(const BoundFunctionExpression &eval_call, const AILeafTexts &texts, const string &query_text,
                    vector<double> &p_out) {
 	p_out.assign(texts.Size(), 0.5);
@@ -3091,9 +3141,9 @@ struct AISelectivityStatsState : public GlobalTableFunctionState {
 
 static unique_ptr<FunctionData> AISelectivityStatsBind(ClientContext &context, TableFunctionBindInput &input,
                                                        vector<LogicalType> &return_types, vector<Identifier> &names) {
-	names = {"input_dim", "buffered", "examples_seen", "train_steps", "first_loss", "last_loss"};
-	return_types = {LogicalType::UBIGINT, LogicalType::UBIGINT, LogicalType::UBIGINT,
-	                LogicalType::UBIGINT, LogicalType::DOUBLE,  LogicalType::DOUBLE};
+	names = {"input_dim", "buffered", "examples_seen", "train_steps", "first_loss", "last_loss", "train_seconds"};
+	return_types = {LogicalType::UBIGINT, LogicalType::UBIGINT, LogicalType::UBIGINT, LogicalType::UBIGINT,
+	                LogicalType::DOUBLE,  LogicalType::DOUBLE,  LogicalType::DOUBLE};
 	return nullptr;
 }
 
@@ -3117,6 +3167,7 @@ static void AISelectivityStatsFunction(ClientContext &context, TableFunctionInpu
 	output.data[3].SetValue(0, Value::UBIGINT(s.train_steps));
 	output.data[4].SetValue(0, Value::DOUBLE(s.first_loss));
 	output.data[5].SetValue(0, Value::DOUBLE(s.last_loss));
+	output.data[6].SetValue(0, Value::DOUBLE(s.train_seconds));
 	data.emitted = true;
 }
 

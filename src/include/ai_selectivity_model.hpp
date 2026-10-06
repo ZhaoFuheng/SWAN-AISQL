@@ -36,6 +36,17 @@ struct AISelectivityParams {
 
 	//! Forward pass -> P(true) in (0, 1). Returns 0.5 if `dim` does not match input_dim.
 	double Forward(const float *embedding, idx_t dim) const;
+	//! The same forward pass over `count` inputs at once, bit-identical per input to Forward(). A pass is
+	//! compute-bound (1025 x 256 scalar double multiply-adds, ~0.35 ms), so batching alone saves only the
+	//! per-call parameter lookup; the shared-prefix variant below is the one that halves the arithmetic.
+	void ForwardBatch(const float *const *inputs, idx_t count, idx_t dim, double *out) const;
+	//! ForwardBatch for inputs that all start with the same `prefix_len` values (`prefix`) and differ only in
+	//! their `tail_len` tail: the first layer's partial sums over the prefix are formed once, then each input
+	//! continues them over its tail -- the same sequence of operations per input as Forward(), so the same
+	//! bits, at half the work when the halves are equal. The tails are transposed per block so the per-input
+	//! accumulators advance together (vectorizable across inputs, not across the sum).
+	void ForwardBatchShared(const float *prefix, idx_t prefix_len, const float *const *tails, idx_t tail_len,
+	                        idx_t count, double *out) const;
 };
 
 //! Snapshot of the model's training counters, for ai_selectivity_stats().
@@ -46,6 +57,7 @@ struct AISelectivityStats {
 	uint64_t train_steps = 0;
 	double first_loss = -1.0;
 	double last_loss = -1.0;
+	double train_seconds = 0.0; //! CPU-wall time spent inside training steps (they run on a request worker)
 };
 
 //! Process-global online selectivity model. Thread-safe: Predict() reads the current weights
@@ -58,6 +70,11 @@ public:
 	//! P(ai_filter true) for a row's prompt embedding. Lazily inits weights on first use for `dim`.
 	//! Returns 0.5 when `dim == 0`.
 	double Predict(const float *embedding, idx_t dim);
+	//! Predict() for many embeddings of one width in one blocked pass (see AISelectivityParams::ForwardBatch).
+	void PredictBatch(const float *const *embeddings, idx_t count, idx_t dim, double *out);
+	//! PredictBatch for embeddings = [prefix | tail_k] (see AISelectivityParams::ForwardBatchShared).
+	void PredictBatchShared(const float *prefix, idx_t prefix_len, const float *const *tails, idx_t tail_len,
+	                        idx_t count, double *out);
 
 	//! Push a (embedding, label) pair into the fixed-size FIFO (capacity 64; oldest evicted).
 	void AddExample(const vector<float> &embedding, bool label);
@@ -98,6 +115,7 @@ private:
 	std::deque<Sample> buffer;  // fixed-size FIFO of the most recent examples
 	uint64_t examples_seen = 0; // total AddExample calls
 	uint64_t train_steps = 0;   // total completed mini-batch steps
+	double train_seconds = 0.0; //! accumulated TrainMiniBatchStep wall time (buffer_mutex)
 	double first_loss = -1.0;   // BCE of the first step (-1 = none yet)
 	double last_loss = -1.0;    // BCE of the most recent step
 

@@ -121,8 +121,13 @@ private:
 	bool AppendSlice(DataChunk &chunk, idx_t begin, idx_t end);
 	void FlushStage(idx_t leaf);
 	//! Re-predict a rep's P(true) if the model has trained since it was predicted: a forward pass over the
-	//! rep's stored feature, never a request; bounded by reps x training steps, never rows.
+	//! rep's stored feature, never a request; bounded by reps x training steps, never rows. The fallback
+	//! behind RefreshStalePredictions for a rep that one missed (a step landing between the two).
 	void RefreshPrediction(Leaf &leaf, uint32_t rep_id);
+	//! Before deciding `rows`, re-predict their open reps whose prediction predates the model's latest
+	//! training step, all in ONE blocked forward pass (the same values as one pass per rep). Exactly the reps
+	//! the lazy per-rep refresh would have touched, without a lock, allocation and weight-matrix walk each.
+	void RefreshStalePredictions(const uint32_t *rows, idx_t count);
 	void DecideRow(uint32_t row);
 	//! A verdict landed on (leaf, rep): record it, then re-decide every row waiting on it.
 	void ApplyVerdict(idx_t leaf, uint32_t rep_id, bool value, bool valid);
