@@ -24,7 +24,8 @@ con.sql("""
 con.sql("SELECT llm_calls, cache_hits, cost_usd FROM ai_usage()").show()
 ```
 
-`connect()` returns a plain `duckdb.DuckDBPyConnection`; `swan_aisql.load(con)` adds the extension to a
+[examples/swan2_formula_1.ipynb](examples/swan2_formula_1.ipynb) walks through this on a SWAN 2.0 benchmark
+database, with the model calls each question costs. `connect()` returns a plain `duckdb.DuckDBPyConnection`; `swan_aisql.load(con)` adds the extension to a
 connection you opened yourself (with `allow_unsigned_extensions`).
 
 **Endpoint.** Any OpenAI-compatible chat endpoint: `connect(endpoint="https://api.openai.com")`, a litellm

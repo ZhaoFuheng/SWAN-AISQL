@@ -13,6 +13,33 @@ This repository is a DuckDB **extension** built on the
 DuckDB is the `duckdb/` submodule, CI comes from `extension-ci-tools/`, and dependencies are declared in
 `vcpkg.json` (OpenSSL, so the LLM client can speak https; optional for a local build).
 
+## Quick start
+
+```sh
+pip install "swan-aisql[embed]"        # the extension, the DuckDB it runs in, and the local embeddings server
+export OPENAI_API_KEY=sk-...
+```
+
+```python
+import swan_aisql
+
+con = swan_aisql.connect()             # OpenAI directly, model gpt-5.6-luna; any DuckDB connection otherwise
+con.sql("CREATE TABLE reviews AS SELECT * FROM 'reviews.parquet'")
+con.sql("""
+    SELECT critic, review
+    FROM reviews
+    WHERE ai_filter('Is this movie review clearly positive? Review: ' || review)
+    LIMIT 10
+""").show()
+con.sql("SELECT llm_calls, cache_hits FROM ai_usage()").show()
+```
+
+`connect()` returns an ordinary DuckDB connection with the AI functions loaded. The notebook
+[python/examples/swan2_formula_1.ipynb](python/examples/swan2_formula_1.ipynb) does this on a SWAN 2.0 benchmark
+database: five of its questions, each with the model calls it cost, and a LIMIT push-down comparison.
+[python/README.md](python/README.md) has the package details (endpoints, settings, the embeddings server).
+Everything below is the repository itself: the results, then how to build the engine and reproduce them.
+
 The results come first; then the numbered sections are a path: build, keys, Python environment, start the
 serving stack, run a query, then run SemBench MOVIE for SWAN and LOTUS and compare them. Reference material
 (settings, the hybrid bench, SWAN 2.0, layout) follows.
@@ -103,11 +130,9 @@ runner above, which do not care), the build has to carry that wheel's version st
 `DUCKDB_VERSION=v2.0.0-alpha43763 GEN=ninja make reldebug`. `python/build_wheel.sh` also accepts a plain build
 and re-stamps it.
 
-**Python instead of a build.** `pip install "swan-aisql[embed]"` installs a wheel with the extension for your
-platform, the pinned `duckdb` and the embeddings server; `swan_aisql.connect()` returns a DuckDB connection with
-the functions loaded, talking to OpenAI with `OPENAI_API_KEY` from the environment and starting the embeddings
-server on demand ([python/README.md](python/README.md)). The wheels come out of the `Python Wheels` workflow; from a checkout,
-`python/build_wheel.sh` packs the binary you just built.
+**Python instead of a build.** The pip package in the quick start above is this extension prebuilt for each
+platform, pinned to the `duckdb` wheel it loads into. The wheels come out of the `Python Wheels` workflow; from a
+checkout, `python/build_wheel.sh` packs the binary you just built.
 
 To check the build, run the test suite. It uses an in-process deterministic mock LLM, so it needs no
 network or keys:

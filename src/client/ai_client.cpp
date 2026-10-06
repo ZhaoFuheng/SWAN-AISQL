@@ -902,9 +902,11 @@ static AIResult DoSingleRequest(const AIConfig &config, const AIRequest &request
 		return result;
 	}
 	lease.healthy = true; // full HTTP exchange completed: socket reusable regardless of status
-	if (response->status == 400 && !typesafe && !TemperatureRejected().load() &&
+	if (response->status == 400 && !typesafe && body.find("\"temperature\"") != string::npos &&
 	    response->body.find("temperature") != string::npos) {
-		// the model takes no temperature parameter: drop it process-wide and send this request again
+		// The model takes no temperature parameter: drop it process-wide and send this request again. Every
+		// request of the first wave meets this 400 at once, so each one that carried the parameter retries
+		// (not only the one that flipped the latch).
 		TemperatureRejected().store(true);
 		const string retry_body = BuildRequestBody(config, request);
 		response = lease.client->Post(path, headers, retry_body, "application/json");

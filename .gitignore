@@ -57,3 +57,4 @@ python/swan_aisql/_build.py
 python/dist/
 python/build/
 python/*.egg-info/
+python/examples/SWANBench/

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "swan-aisql"
-version = "0.1.0"
+version = "0.1.1"
 description = "SWAN AI-SQL: semantic SQL (ai_filter, ai_classify, ai_score, ai_complete, ai_agg, ai_embed) as a DuckDB extension with the two-currency optimizer"
 readme = "README.md"
 license = "MIT"
