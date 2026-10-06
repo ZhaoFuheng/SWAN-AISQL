@@ -35,7 +35,7 @@ jobs:
       - name: Pack one wheel per platform
         run: |
           set -euo pipefail
-          pip install build wheel
+          pip install build wheel "setuptools>=77"
           pip install --pre "duckdb==$(sed -n 's/^dependencies = \["duckdb==\([^"]*\)"\]/\1/p' python/pyproject.toml)"
           mkdir -p wheelhouse
           for ext in $(find ci-artifacts -name 'aisql.duckdb_extension'); do

@@ -61,7 +61,7 @@ EXTENSION_VERSION = "$EXT_VERSION"
 EOF
 
 rm -rf "$HERE/dist" "$HERE/build" "$HERE"/*.egg-info
-(cd "$HERE" && "$PYTHON" -m build --wheel --no-isolation >/dev/null)
+(cd "$HERE" && "$PYTHON" -m build --wheel >/dev/null)  # isolated: build installs setuptools>=77 itself
 GENERIC="$(ls "$HERE"/dist/*.whl)"
 "$PYTHON" -m wheel tags --python-tag py3 --abi-tag none --platform-tag "$TAG" --remove "$GENERIC" >/dev/null
 ls "$HERE"/dist/*.whl
