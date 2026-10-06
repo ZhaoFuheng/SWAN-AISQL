@@ -39,12 +39,17 @@ private:
 	//! as a reason to reduce (the semantic filter still feeds off the joins, before it is pulled up).
 	bool check_leaves = true;
 
-	//! An equi-join column pair discovered inside an inner-join cluster.
+	//! One equi-join edge discovered inside an inner-join cluster: a column of one leaf against a column of another.
+	//! Either side may be the column under a chain of CASTs the binder added for type coercion (an INTEGER key against
+	//! a BIGINT one); then `*_expr` holds that side's full expression (the colref inside carries the binding) and the
+	//! reducer's SEMI compares the same expression, so a width mismatch no longer loses the reduction.
 	struct Edge {
 		ColumnBinding left;
 		LogicalType left_type;
 		ColumnBinding right;
 		LogicalType right_type;
+		shared_ptr<Expression> left_expr;  //! null = the bare column
+		shared_ptr<Expression> right_expr; //! null = the bare column
 	};
 
 	//! Does this operator's expressions or join conditions call a row-wise AI function

@@ -11,6 +11,7 @@
 
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
+#include "duckdb/planner/expression/bound_cast_expression.hpp"
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "duckdb/planner/expression_iterator.hpp"
@@ -134,13 +135,29 @@ void SemiJoinReducer::GatherCluster(unique_ptr<LogicalOperator> &op,
 			}
 			auto &lhs = cond.GetLHS();
 			auto &rhs = cond.GetRHS();
-			if (lhs.GetExpressionType() != ExpressionType::BOUND_COLUMN_REF ||
-			    rhs.GetExpressionType() != ExpressionType::BOUND_COLUMN_REF) {
+			// A side is a column, possibly under the CASTs the binder adds to coerce the two key types.
+			auto key_column = [](const Expression &side) -> const BoundColumnRefExpression * {
+				const Expression *e = &side;
+				while (BoundCastExpression::IsCast(*e)) {
+					e = &BoundCastExpression::Child(e->Cast<BoundFunctionExpression>());
+				}
+				return e->GetExpressionType() == ExpressionType::BOUND_COLUMN_REF ? &e->Cast<BoundColumnRefExpression>()
+				                                                                  : nullptr;
+			};
+			const auto *lref = key_column(lhs);
+			const auto *rref = key_column(rhs);
+			if (!lref || !rref) {
 				continue;
 			}
-			auto &lref = lhs.Cast<BoundColumnRefExpression>();
-			auto &rref = rhs.Cast<BoundColumnRefExpression>();
-			edges.push_back({lref.Binding(), lref.GetReturnType(), rref.Binding(), rref.GetReturnType()});
+			Edge edge {lref->Binding(), lref->GetReturnType(), rref->Binding(), rref->GetReturnType(), nullptr,
+			           nullptr};
+			if (&lhs != lref) {
+				edge.left_expr = shared_ptr<Expression>(lhs.Copy().release());
+			}
+			if (&rhs != rref) {
+				edge.right_expr = shared_ptr<Expression>(rhs.Copy().release());
+			}
+			edges.push_back(std::move(edge));
 		}
 	}
 	for (auto &child : op->children) {
@@ -271,7 +288,7 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 			continue;
 		}
 		reductions[{i, j}].push_back(e);
-		reductions[{j, i}].push_back({e.right, e.right_type, e.left, e.left_type});
+		reductions[{j, i}].push_back({e.right, e.right_type, e.left, e.left_type, e.right_expr, e.left_expr});
 	}
 
 	// Apply one reducer: leaves[i] <- leaves[i] SEMI JOIN copy-of-leaves[j] on `redu_edges`. The SEMI join is
@@ -311,8 +328,27 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 			if (!found) {
 				return false;
 			}
-			lhs_exprs.push_back(make_uniq<BoundColumnRefExpression>(cp.left_type, cp.left));
-			rhs_exprs.push_back(make_uniq<BoundColumnRefExpression>(cp.right_type, copy_binding));
+			// The copy side's key, rebound from j's original column to the copy's; a CAST around it is kept.
+			unique_ptr<Expression> rhs_key;
+			if (cp.right_expr) {
+				rhs_key = cp.right_expr->Copy();
+				std::function<void(unique_ptr<Expression> &)> rebind = [&](unique_ptr<Expression> &e) {
+					if (e->GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
+						auto &colref = e->Cast<BoundColumnRefExpression>();
+						if (colref.Binding() == cp.right) {
+							e = make_uniq<BoundColumnRefExpression>(colref.GetReturnType(), copy_binding);
+						}
+						return;
+					}
+					ExpressionIterator::EnumerateChildren(*e, [&](unique_ptr<Expression> &child) { rebind(child); });
+				};
+				rebind(rhs_key);
+			} else {
+				rhs_key = make_uniq<BoundColumnRefExpression>(cp.right_type, copy_binding);
+			}
+			lhs_exprs.push_back(cp.left_expr ? cp.left_expr->Copy()
+			                                 : make_uniq<BoundColumnRefExpression>(cp.left_type, cp.left));
+			rhs_exprs.push_back(std::move(rhs_key));
 		}
 		if (lhs_exprs.empty()) {
 			return false;

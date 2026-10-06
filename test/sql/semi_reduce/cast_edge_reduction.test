@@ -1,0 +1,100 @@
+# name: test/sql/semi_reduce/cast_edge_reduction.test
+# description: Yannakakis semi-reduction must take a join edge whose key the binder wrapped in a CAST (an
+# group: [semi_reduce]
+
+#              INTEGER column joined to a BIGINT one becomes `CAST(id AS BIGINT) = kid`). The reducer only
+#              read `colref = colref` edges, so a width mismatch between two tables' keys silently lost the
+#              reduction: with a COMPUTED key on the AI side (where DuckDB's own runtime join filter cannot
+#              reach the scan either) every row went to the model (100 calls where 2 survive the join).
+#              Each case asserts the call count and exact parity against the reduction disabled.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE docs AS SELECT range AS id, 'k_'||range::VARCHAR AS key, 'doc '||range::VARCHAR AS text FROM range(100);
+
+# the narrower key: INTEGER against the BIGINT the computed key produces
+statement ok
+CREATE TABLE sel AS SELECT range::INTEGER AS id FROM range(100);
+
+# --- AI projection with a computed BIGINT key, joined to the INTEGER key ---
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE on_reduce AS
+WITH extracted AS (
+  SELECT CAST(SPLIT_PART(key, '_', 2) AS BIGINT) AS kid, ai_complete('name of ' || text) AS name FROM docs
+)
+SELECT s.id, e.name FROM sel s JOIN extracted e ON e.kid = s.id WHERE s.id IN (1, 50);
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+2
+
+statement ok
+SET ai_semi_reduce = false;
+
+# the two prompts the reduced run answered must not be served from the local cache
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE off_reduce AS
+WITH extracted AS (
+  SELECT CAST(SPLIT_PART(key, '_', 2) AS BIGINT) AS kid, ai_complete('name of ' || text) AS name FROM docs
+)
+SELECT s.id, e.name FROM sel s JOIN extracted e ON e.kid = s.id WHERE s.id IN (1, 50);
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+100
+
+query I
+SELECT count(*) FROM (SELECT * FROM on_reduce EXCEPT SELECT * FROM off_reduce) UNION ALL
+SELECT count(*) FROM (SELECT * FROM off_reduce EXCEPT SELECT * FROM on_reduce);
+----
+0
+0
+
+statement ok
+SET ai_semi_reduce = true;
+
+# --- ai_filter leaf below the join, the cast on the AI side's own key (BIGINT vs the other table's INTEGER) ---
+statement ok
+CREATE TABLE reviews AS SELECT range::BIGINT AS book, 'review '||range::VARCHAR AS text FROM range(100);
+
+statement ok
+CREATE TABLE books AS SELECT range::INTEGER AS id, range % 10 AS shelf FROM range(100);
+
+statement ok
+SET ai_pullup = false;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM reviews r JOIN books b ON r.book = b.id
+WHERE b.shelf = 3 AND ai_filter('[p=50] positive? ' || r.text);
+----
+5
+
+# 10 books on shelf 3 -> at most 10 review prompts, not 100
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT <= 10 FROM ai_usage();
+----
+true
+
+statement ok
+SET ai_pullup = true;
