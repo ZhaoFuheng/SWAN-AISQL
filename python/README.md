@@ -6,13 +6,14 @@ orders predicates by learned selectivity, pushes `LIMIT` into the model calls an
 requests in flight. Engine, design and benchmarks: <https://github.com/ZhaoFuheng/SWAN-AISQL>.
 
 ```sh
-pip install swan-aisql
+pip install "swan-aisql[embed]"      # the extension, the pinned duckdb, and the local embeddings server
+pip install swan-aisql               # without the embeddings server (sentence-transformers + torch)
 ```
 
 ```python
 import os, swan_aisql
 
-con = swan_aisql.connect(api_key=os.environ["OPENAI_API_KEY"])      # OpenAI directly, model gpt-5.6-luna
+con = swan_aisql.connect()        # OPENAI_API_KEY from the environment -> OpenAI directly, model gpt-5.6-luna
 con.sql("CREATE TABLE reviews AS SELECT * FROM 'reviews.parquet'")
 con.sql("""
     SELECT critic, review
@@ -38,12 +39,17 @@ tokens, so `ai_usage().cost_usd` prices a direct endpoint's calls) are keywords;
 through, e.g. `connect(ai_concurrency=50, ai_limit=False)`. The full list is `SELECT * FROM
 duckdb_settings() WHERE name LIKE 'ai_%'` and the repository README.
 
-**Embeddings.** The learned predicate ordering embeds prompts and inputs. Any OpenAI-compatible embeddings
-endpoint serves: `connect(ai_embed_endpoint="https://api.openai.com", ai_embed_model="text-embedding-3-small")`
-uses OpenAI's (text only), and the repository's `serve/ai_embed_server.py` (`pip install sentence-transformers`)
-is the local server every published number used, which also embeds images for `ai_image` predicates. Without
-one the engine notices on the first request, orders predicates by prompt cost alone from then on, and every
-query still runs.
+**Embeddings.** The learned predicate ordering embeds prompts and inputs through a local server: MiniLM for
+text and CLIP for `ai_image` predicates, the setup every published number used. With the `embed` extra
+installed, `connect()` starts it when nothing answers on the embeddings endpoint (localhost:4002 unless
+`ai_embed_endpoint` or `AI_EMBED_URL` says otherwise) and waits for it to listen; the first start downloads
+the two models (about 1.2 GB into `~/.cache/huggingface`), later starts take a few seconds. The server
+outlives the Python process so the next one finds it running; `swan_aisql.stop_embed_server()` ends it,
+`swan-aisql-embed [port]` runs it by hand, and `connect(embed_server=False)` never starts one. Any
+OpenAI-compatible embeddings endpoint works instead, text only:
+`connect(ai_embed_endpoint="https://api.openai.com", ai_embed_model="text-embedding-3-small")`. With no
+server at all the engine notices on the first request, orders predicates by prompt cost alone from then on,
+and every query still runs.
 
 **Version coupling.** A DuckDB extension loads only into the exact DuckDB build it was compiled for, so each
 swan-aisql release pins one `duckdb` version (this release: the version in the package metadata, a 2.0

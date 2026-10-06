@@ -23,6 +23,20 @@ classifiers = [
 # engine it was compiled for). build_wheel.sh verifies the bundled binary against this pin.
 dependencies = ["duckdb==2.0.0.dev2610011535"]
 
+[project.optional-dependencies]
+# The embeddings server behind the learned predicate ordering (MiniLM for text, CLIP for images), started by
+# connect() on demand or by `swan-aisql-embed`. The Intel-macOS pins: PyTorch's last x86 mac wheel is 2.2.2.
+embed = [
+    "sentence-transformers>=3.0,<4",
+    "torch",
+    "pillow>=10",
+    "transformers>=4.40,<4.50; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "numpy<2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+]
+
+[project.scripts]
+swan-aisql-embed = "swan_aisql.embed_server:main"
+
 [project.urls]
 Homepage = "https://github.com/ZhaoFuheng/SWAN-AISQL"
 Repository = "https://github.com/ZhaoFuheng/SWAN-AISQL"

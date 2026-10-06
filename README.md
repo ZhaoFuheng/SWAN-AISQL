@@ -103,9 +103,10 @@ runner above, which do not care), the build has to carry that wheel's version st
 `DUCKDB_VERSION=v2.0.0-alpha43763 GEN=ninja make reldebug`. `python/build_wheel.sh` also accepts a plain build
 and re-stamps it.
 
-**Python instead of a build.** `pip install swan-aisql` installs a wheel with the extension for your platform and
-the pinned `duckdb`; `swan_aisql.connect()` returns a DuckDB connection with the functions loaded
-([python/README.md](python/README.md)). The wheels come out of the `Python Wheels` workflow; from a checkout,
+**Python instead of a build.** `pip install "swan-aisql[embed]"` installs a wheel with the extension for your
+platform, the pinned `duckdb` and the embeddings server; `swan_aisql.connect()` returns a DuckDB connection with
+the functions loaded, talking to OpenAI with `OPENAI_API_KEY` from the environment and starting the embeddings
+server on demand ([python/README.md](python/README.md)). The wheels come out of the `Python Wheels` workflow; from a checkout,
 `python/build_wheel.sh` packs the binary you just built.
 
 To check the build, run the test suite. It uses an in-process deterministic mock LLM, so it needs no
@@ -178,7 +179,8 @@ The embedding server downloads its two models from Hugging Face on first start (
 `clip-ViT-B-32` for image predicates. They feed the selectivity model that orders AI predicates; the server
 runs them on the CPU. Without an embedding server every predicate is treated as equally selective: results
 are unchanged, call counts can be higher. `requirements-embed-mlx.txt` is an optional Apple-Silicon
-alternative through `mlx-embeddings` (`AI_EMBED_BACKEND=mlx`), untested against the recorded runs.
+alternative through `mlx-embeddings` (`AI_EMBED_BACKEND=mlx`), untested against the recorded runs. The server's
+code is the pip package's `swan_aisql.embed_server`; `serve/ai_embed_server.py` runs it from the checkout.
 
 ## 4. Start the serving stack
 
