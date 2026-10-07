@@ -3,6 +3,7 @@
 #include "ai_prompt_cost.hpp"
 #include "duckdb/common/types/blob.hpp"
 #include "duckdb/common/file_system.hpp"
+#include "duckdb/main/client_context.hpp"
 #include "duckdb/common/types/string_type.hpp"
 #include "yyjson.hpp"
 
@@ -1028,8 +1029,10 @@ static string CacheScopePrefix(const AIConfig &config, idx_t query_index) {
 }
 
 static string RequestSignature(const AIConfig &config, const AIRequest &request) {
-	string sig = config.model + "\x1f" + config.reasoning_effort + "\x1f" + request.system_prompt + "\x1f" +
-	             request.json_schema + "\x1f" + request.prompt_prefix + request.prompt;
+	// The endpoint is part of the identity: two endpoints can serve different models under one name, so a
+	// SET ai_endpoint mid-process must not be answered from the other endpoint's cached replies.
+	string sig = config.base_url + "\x1f" + config.model + "\x1f" + config.reasoning_effort + "\x1f" +
+	             request.system_prompt + "\x1f" + request.json_schema + "\x1f" + request.prompt_prefix + request.prompt;
 	if (AIUsesTypeSafe(request)) {
 		// A System One answer is a different sample from a chat answer to the same prompt.
 		sig += "\x1e"
@@ -1050,8 +1053,9 @@ static string RequestSignature(const AIConfig &config, const AIRequest &request)
 //! call on a miss. Backs cache-only speculative pruning (LIMIT stand-down): pruning is free when
 //! the answer is already known, and a miss must never spend a call the k-bounded evaluation above
 //! may not need. A hit counts as a cache hit in ai_usage().
-bool AICacheProbe(const AIRequest &request, const string &query_text, AIResult &out) {
-	const auto &config = AIConfig::Get();
+bool AICacheProbe(const AIRequest &request, const string &query_text, AIResult &out, const AIConfig *config_override) {
+	// The probing connection's view, so its key (endpoint, model) matches what its own batches wrote.
+	const AIConfig &config = config_override ? *config_override : AIConfig::Get();
 	if (!config.local_cache) {
 		return false;
 	}
@@ -1480,8 +1484,16 @@ static AIResult HedgedRequest(const AIConfig &config, const AIRequest &request, 
 	return winner;
 }
 
-vector<AIResult> AIBatchComplete(const vector<AIRequest> &requests, const string &query_text, bool force_fixed) {
-	const auto &config = AIConfig::Get();
+vector<AIResult> AIBatchCompleteFor(ClientContext &context, const vector<AIRequest> &requests, bool force_fixed) {
+	const AIConfig config = AIConfigForContext(context);
+	return AIBatchComplete(requests, context.GetCurrentQuery(), force_fixed, &config);
+}
+
+vector<AIResult> AIBatchComplete(const vector<AIRequest> &requests, const string &query_text, bool force_fixed,
+                                 const AIConfig *config_override) {
+	// The caller's connection view when it has one (endpoint, model, key, ... of THAT connection); else the
+	// process-wide configuration.
+	const AIConfig &config = config_override ? *config_override : AIConfig::Get();
 	const idx_t n = requests.size();
 	vector<AIResult> results(n);
 	if (n == 0) {
@@ -1799,7 +1811,8 @@ vector<AIEmbedResult> AIEmbedBatch(const vector<string> &texts, const string &qu
 
 	// Query-scoped, embed-namespaced cache keys (no chat/embed collision; no cross-query sharing).
 	vector<string> keys(n);
-	const string scope = CacheScopePrefix(config, query_index) + "emb" + "\x1f" + config.embed_model + "\x1f";
+	const string scope = CacheScopePrefix(config, query_index) + "emb" + "\x1f" + config.embed_url + "\x1f" +
+	                     config.embed_model + "\x1f";
 	for (idx_t i = 0; i < n; i++) {
 		keys[i] = scope + texts[i];
 	}

@@ -499,6 +499,15 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 		}
 		ExpressionIterator::EnumerateChildren(e, [&](const Expression &child) { collect_sides(child, leaf_sides); });
 	};
+	// The graph keeps one byte per (left, right) pair of each edge's two sides (its pair domain) before any
+	// pruning: two sides of 100,000 distinct inputs are 10 GB for one edge. Above ai_factor_pair_limit pairs
+	// (estimated from the sides' cardinalities, an upper bound on their distinct inputs) the plan is left to
+	// the region over the cross product, which streams the pairs and never holds the domain.
+	const uint64_t pair_limit = AIUBigintSetting(optimizer.context, "ai_factor_pair_limit", 100000000ULL);
+	vector<idx_t> side_card(sides.size(), 0);
+	for (idx_t s = 0; s < sides.size(); s++) {
+		side_card[s] = (*sides[s])->EstimateCardinality(optimizer.context);
+	}
 	for (idx_t l = 0; l < n && ok; l++) {
 		vector<idx_t> leaf_sides;
 		for (idx_t part = 0; part < 3; part++) {
@@ -506,6 +515,13 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 		}
 		if (leaf_sides.empty() || leaf_sides.size() > 2) {
 			ok = false;
+		}
+		if (leaf_sides.size() == 2) {
+			const double pairs =
+			    static_cast<double>(side_card[leaf_sides[0]]) * static_cast<double>(side_card[leaf_sides[1]]);
+			if (pairs > static_cast<double>(pair_limit)) {
+				ok = false; // too large a pair domain for the graph's per-pair state
+			}
 		}
 		any_edge = any_edge || leaf_sides.size() == 2;
 	}

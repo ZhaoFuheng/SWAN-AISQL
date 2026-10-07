@@ -411,10 +411,10 @@ void AILeafRegionState::DispatchPending(bool flush) {
 			const AILeafUnitEvaluator &eval = *evaluator;
 			ClientContext &ctx = context;
 			const string &qt = query_text;
-			dispatcher->Submit(
-			    (static_cast<idx_t>(l) << 32) | rep_id,
-			    [&eval, &ctx, &qt, l, prompt = leaf.texts.prompt[rep_id], pred = leaf.texts.pred_text[rep_id],
-			     feat = rep.feat]() { return Value::BOOLEAN(eval.Evaluate(ctx, l, prompt, pred, feat, qt)); });
+			dispatcher->Submit((static_cast<idx_t>(l) << 32) | rep_id,
+			                   [&eval, &ctx, &qt, l, prompt = leaf.texts.prompt[rep_id],
+			                    pred = leaf.texts.pred_text[rep_id],
+			                    feat = rep.feat]() { return eval.Evaluate(ctx, l, prompt, pred, feat, qt); });
 		}
 		if (!any) {
 			break;
@@ -442,7 +442,10 @@ void AILeafRegionState::ReapLanded() {
 	for (auto &g : got) {
 		const idx_t l = g.key >> 32;
 		const auto rep_id = static_cast<uint32_t>(g.key & 0xFFFFFFFFULL);
-		ApplyVerdict(l, rep_id, BooleanValue::Get(g.value), true);
+		// A NULL value is a call that got no answer: the rep is decided but invalid, exactly as the inline
+		// wave path records it, so the row's tree evaluates with an unknown there.
+		const bool valid = !g.value.IsNull();
+		ApplyVerdict(l, rep_id, valid && BooleanValue::Get(g.value), valid);
 		auto &rep = leaves[l].reps[rep_id];
 		waiters.insert(waiters.end(), rep.waiters.begin(), rep.waiters.end());
 		rep.waiters.clear();

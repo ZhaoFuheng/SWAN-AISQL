@@ -154,13 +154,15 @@ void AILeafEvaluate(ClientContext &context, const BoundFunctionExpression &eval_
 //! asks exactly what AILeafEvaluate asks for that input: the leaf's call and its comparison or wrapper, or,
 //! for a speculative node, a probe of the query cache only (unknown passes through). An answered call
 //! records its training label against `feature`, and every 3 x `ai_concurrency` calls take one training
-//! step. A failed call is false. Thread-safe; built once per region on the owning thread.
+//! step. A failed call is a NULL verdict (the Value is NULL), never false: under NOT or IS NULL the two
+//! differ, and the row's answer must stay unknown. Thread-safe; built once per region on the owning thread.
 class AILeafUnitEvaluator {
 public:
 	explicit AILeafUnitEvaluator(const BoundFunctionExpression &eval_call);
 	~AILeafUnitEvaluator();
-	bool Evaluate(ClientContext &context, idx_t leaf, const string &prompt, const string &pred_text,
-	              const vector<float> &feature, const string &query_text) const;
+	//! BOOLEAN true/false, or a NULL Value when the call got no usable answer.
+	Value Evaluate(ClientContext &context, idx_t leaf, const string &prompt, const string &pred_text,
+	               const vector<float> &feature, const string &query_text) const;
 
 private:
 	struct Impl;

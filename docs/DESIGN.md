@@ -54,7 +54,9 @@ Three consequences follow.
   it, in the order decided per row at run time (§4).
 * **A semantic join never materialises its cross product.** The factor graph keeps one dictionary
   per side and enumerates only surviving pairs, so intermediate size is bounded by the pair domain
-  that is still live, not by `|A| × |B|`.
+  that is still live, not by `|A| × |B|`. The graph holds one byte per pair of an edge before pruning, so a
+  pair domain it could not hold (`ai_factor_pair_limit`, 10^8 estimated pairs) is left to the region over
+  the cross product, which streams the pairs.
 
 ---
 
@@ -161,6 +163,9 @@ the data allows.
 * **Errors travel like verdicts.** An error raised while evaluating an input — a wrapper that cannot
   read the answer, a prompt expression that fails — is carried back to the query and fails it, exactly
   as the per-row evaluation would. No worker thread drops an error, and none lets one escape.
+* **A missing answer is `NULL`, never `false`.** A call that fails after its retries yields a NULL verdict
+  on every path — scalar, region and factor graph — so a filter drops the row, `NOT` never passes it, and
+  a wrapper such as `IS NULL` is evaluated over the missing answer. `ai_usage()` counts it in `failed_calls`.
 
 **Selectivity is learned, not assumed.** A tree with one leaf has nothing to order, so it embeds
 nothing and records no training example; the model is consulted and trained only where a prediction
@@ -253,7 +258,9 @@ deep-copies a neighbour as its build side. `LogicalOperator::Copy` serialises an
 Three layers, each with one job:
 
 * **Local cache** (in-process, query-scoped by default) — serves fan-out duplicates and repeated
-  prompts within a query, which is what allows a duplicated subtree to agree with its original.
+  prompts within a query, which is what allows a duplicated subtree to agree with its original. Its key
+  carries the endpoint with the model and prompt, so `SET ai_endpoint` never serves the previous
+  endpoint's answers.
 * **In-flight registry** — batches that *start* the same prompt concurrently share one request:
   a batch either owns a key or waits on its owner, issuing everything it owns before waiting on
   anything, which keeps it deadlock-free. Value-level dedup is the only layer that works here:
@@ -297,7 +304,10 @@ Each plan stage has one setting: `ai_inline_ai_ctes` (the pre-optimize hook), `a
 A/B runs; the defaults are the measured composition. Everything that was
 measured to be right — the ingest slice, the warm gate, the training cadence, the speculative gate,
 connection reuse — is a constant in the code, not a knob. The remaining settings name the
-endpoints, models, keys and concurrency of the LLM, embedding and TypeSafe backends. Two debug
+endpoints, models, keys and concurrency of the LLM, embedding and TypeSafe backends. Where a
+connection's requests go (endpoint, model, key, retries, prices, TLS) and every optimizer flag are per
+connection, with `SET GLOBAL` for the process default; the request pool, the embedding client and the
+local cache are process-wide. Two debug
 settings stay: `ai_debug_log` (diagnostics per subsystem) and `ai_debug_prompt_variant` (the
 cross-engine protocol above). The full list, with defaults and environment variables, is
 [SETTINGS.md](SETTINGS.md).
@@ -319,7 +329,7 @@ back-to-back session. Quality, calls and cost are comparable throughout.
 | SemBench ECOMM (14q) | **0.724**, 16.4k, $8.32, 2,882s† | 0.688, 16.6k, $7.39, 826s | LOTUS 0.637, 17.8k, $6.40, 1,990s; Palimpzest 0.680 on q1–q13 (SWAN 0.703 / LOTUS 0.648 there), 17.7k, $16.33, 1,494s; ThalamusDB 0.596 on 5 of 14, 2.8k, $3.45, 12,305s |
 | SemBench MMQA (11q) | **0.692**, 15.9k, $2.31, 1,314s† | 0.603, 14.1k, $1.53, 884s | LOTUS 0.449, 19.0k, $2.43, 1,720s; Palimpzest 0.687, 46.3k, $13.79, 3,284s; ThalamusDB 0.327 on 7 of 11, 1.3k, $0.52, 2,191s |
 | agent_bench Q1–Q30 | **1.000**, 11,172 calls, $0.29, 799s | — | LOTUS 0.607*, 25,749, $2.90, 1,802s†; BlendSQL 0.758*, 24,631, $2.76, 1,960s†; Palimpzest 1.5.3 (Abacus optimizer) 0.710*, 25,785, $6.82, 2,088s†; ThalamusDB 0.661*, 19,512, $2.09, 8,542s† (Q19 at the 6,000 s cap); PLOP-DP 1.000, 13,602, $0.53, 1,080s |
-| SWAN 2.0 (120q, 4 BIRD databases) | 0.763, **22,327** calls, **$2.42**, **2,331s** | — | LOTUS 0.760, 69,204, $4.04, 4,101s; BlendSQL 0.761, 59,620, $4.95, 4,608s; Palimpzest (Abacus optimizer) 0.766, 70,933, $9.85, 2,991s; ThalamusDB 0.396 (0.689 on the 69 questions its filters express), 158,290, $12.73, 36,945s; PLOP-DP 0.690, 25,604, $1.72, 10,431s |
+| SWAN 2.0 (120q, 4 BIRD databases) | 0.755, **19,695** calls, **$2.13**, **2,055s** | — | LOTUS 0.760, 69,204, $4.04, 4,101s; BlendSQL 0.761, 59,620, $4.95, 4,608s; Palimpzest (Abacus optimizer) 0.766, 70,933, $9.85, 2,991s; ThalamusDB 0.396 (0.689 on the 69 questions its filters express), 158,290, $12.73, 36,945s; PLOP-DP 0.690, 25,604, $1.72, 10,431s |
 
 Quality is each suite's own metric (F1 / ARI / row-multiset F1; agent_bench uses the deterministic
 LIMIT-free PLOP ground truth). PLOP and BlendSQL do not support images, so ECOMM and MMQA are not run for
@@ -335,9 +345,9 @@ comparable. Per-query tables: `aisql-bench/AGENTBENCH/results/agentbench_compari
 SWAN 2.0 is the benchmark in github.com/ZhaoFuheng/SWANBench: one AISQL query per question that every system
 plans itself, with scaled and duplicated databases; its results folder holds the four systems' answers.
 Its row is the replay, from the published cache, of each system's fresh recording through an empty cache
-(LOTUS and PLOP from the session of 2026-10-03; SWAN, BlendSQL and Palimpzest re-recorded on 2026-10-05), so
+(LOTUS and PLOP from the session of 2026-10-03; BlendSQL and Palimpzest re-recorded on 2026-10-05, SWAN on 2026-10-06), so
 the numbers reproduce; SWAN, BlendSQL, LOTUS and Palimpzest are at parity on quality (the model's verdicts
-bound it: three fresh SWAN recordings scored 0.775 / 0.757 / 0.763, BlendSQL's two 0.773 / 0.761,
+bound it: four fresh SWAN recordings scored 0.775 / 0.757 / 0.763 / 0.755, BlendSQL's two 0.773 / 0.761,
 Palimpzest's two 0.769 / 0.766) and calls, cost and latency separate them.
 
 ---

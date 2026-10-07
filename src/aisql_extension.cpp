@@ -12,10 +12,14 @@
 #include "optimizer/aisql_optimizer.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
+#include "duckdb/main/client_context.hpp"
 #include "duckdb/main/config.hpp"
+#include "duckdb/main/setting_info.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
 
 #include <csignal>
+#include <functional>
+#include <utility>
 #include <cstdlib>
 
 namespace duckdb {
@@ -39,113 +43,201 @@ static Value EnvOnUnlessOff(const char *env, bool def) {
 	return Value::BOOLEAN(!(s == "off" || s == "0"));
 }
 
-//! SET-callback bridge into the client's process-global AIConfig (env vars seed its initial
-//! values inside AIConfig::Get(); a SET afterwards wins).
+//! One AIConfig-backed setting: how a SET value lands in an AIConfig. The same table serves the process-wide
+//! defaults (registration, `SET GLOBAL`) and the per-connection view (AIConfigForContext): a plain `SET` is
+//! session-scoped in DuckDB, so it must change this connection's requests only -- the callback leaves the
+//! process-global AIConfig alone for it and the connection's value is read back when its queries run.
+struct AIConfigSetting {
+	const char *name;
+	const char *description;
+	LogicalType type;
+	Value default_value;
+	std::function<void(AIConfig &, const Value &)> apply;
+	//! True for the settings that identify WHERE a connection's requests go and how they are priced: a
+	//! session SET of one of these changes this connection only. The rest tune process-wide machinery
+	//! (the request pool, the embeddings server, caches, logging) and a session SET changes the process.
+	bool per_connection = false;
+};
+
+static const vector<AIConfigSetting> &AIConfigSettings() {
+	static const vector<AIConfigSetting> table = [] {
+		const auto &ai = AIConfig::Get(); // force env seeding before defaults are read
+		vector<AIConfigSetting> t;
+		auto str = [](string AIConfig::*field) {
+			return [field](AIConfig &c, const Value &v) {
+				c.*field = StringValue::Get(v);
+			};
+		};
+		auto flag = [](bool AIConfig::*field) {
+			return [field](AIConfig &c, const Value &v) {
+				c.*field = BooleanValue::Get(v);
+			};
+		};
+		auto price = [](double AIConfig::*field) {
+			return [field](AIConfig &c, const Value &v) {
+				c.*field = v.GetValue<double>();
+			};
+		};
+		t.push_back({"ai_endpoint", "OpenAI-compatible LLM endpoint", LogicalType::VARCHAR, Value(ai.base_url),
+		             str(&AIConfig::base_url), true});
+		t.push_back({"ai_model", "LLM model id", LogicalType::VARCHAR, Value(ai.model), str(&AIConfig::model), true});
+		t.push_back(
+		    {"ai_api_key", "LLM API key", LogicalType::VARCHAR, Value(ai.api_key), str(&AIConfig::api_key), true});
+		t.push_back({"ai_reasoning_effort", "Reasoning effort per request (low/medium/high; empty = omit)",
+		             LogicalType::VARCHAR, EnvOr("AI_REASONING_EFFORT", Value("")), str(&AIConfig::reasoning_effort),
+		             true});
+		t.push_back({"ai_concurrency", "Max in-flight LLM calls", LogicalType::UBIGINT,
+		             Value::UBIGINT(ai.max_concurrency), [](AIConfig &c, const Value &v) {
+			             const auto n = v.GetValue<uint64_t>();
+			             if (n == 0) {
+				             throw InvalidInputException("ai_concurrency must be >= 1");
+			             }
+			             c.max_concurrency = n;
+		             }});
+		t.push_back({"ai_max_retries", "Retries per request on throttle (429/503/529) or transient failure",
+		             LogicalType::UBIGINT, Value::UBIGINT(ai.max_retries),
+		             [](AIConfig &c, const Value &v) { c.max_retries = v.GetValue<uint64_t>(); }, true});
+		// Cost accounting for a direct endpoint (the litellm proxy reports the cost per response instead)
+		t.push_back({"ai_price_input",
+		             "USD per 1M input tokens, for ai_usage().cost_usd on an endpoint that reports no cost",
+		             LogicalType::DOUBLE, Value::DOUBLE(ai.price_input_per_mtok),
+		             price(&AIConfig::price_input_per_mtok), true});
+		t.push_back({"ai_price_output", "USD per 1M output tokens (see ai_price_input)", LogicalType::DOUBLE,
+		             Value::DOUBLE(ai.price_output_per_mtok), price(&AIConfig::price_output_per_mtok), true});
+		t.push_back({"ai_price_cached", "USD per 1M cached input tokens (see ai_price_input)", LogicalType::DOUBLE,
+		             Value::DOUBLE(ai.price_cached_per_mtok), price(&AIConfig::price_cached_per_mtok), true});
+		t.push_back({"ai_ca_cert_file", "CA bundle for https endpoints (empty = the system certificate store)",
+		             LogicalType::VARCHAR, Value(ai.ca_cert_file), str(&AIConfig::ca_cert_file), true});
+		t.push_back({"ai_tls_verify", "Verify the server certificate of https endpoints", LogicalType::BOOLEAN,
+		             Value::BOOLEAN(ai.tls_verify), flag(&AIConfig::tls_verify), true});
+		t.push_back({"ai_embed_endpoint", "Embeddings endpoint (text + image)", LogicalType::VARCHAR,
+		             Value(ai.embed_url), [](AIConfig &c, const Value &v) {
+			             c.embed_url = StringValue::Get(v);
+			             AIEmbedEndpointReset();
+		             }});
+		t.push_back({"ai_embed_model", "Dual-encoder embedding model (text + image)", LogicalType::VARCHAR,
+		             Value(ai.embed_model), str(&AIConfig::embed_model)});
+		t.push_back({"ai_embed_images",
+		             "Embed image leaves (predicate text x image via the CLIP server) for selectivity",
+		             LogicalType::BOOLEAN, Value::BOOLEAN(ai.embed_images), flag(&AIConfig::embed_images)});
+		t.push_back({"ai_embed_concurrency", "Embedding requests in flight at once", LogicalType::UBIGINT,
+		             Value::UBIGINT(ai.embed_concurrency), [](AIConfig &c, const Value &v) {
+			             c.embed_concurrency = MaxValue<idx_t>(v.GetValue<uint64_t>(), 1);
+		             }});
+		t.push_back({"ai_embed_batch_images", "Image items per embedding request", LogicalType::UBIGINT,
+		             Value::UBIGINT(ai.embed_batch_images), [](AIConfig &c, const Value &v) {
+			             c.embed_batch_images = MaxValue<idx_t>(v.GetValue<uint64_t>(), 1);
+		             }});
+		// TypeSafe System One (Jev) as an optional backend for ai_filter (Noul) / ai_classify (Choice)
+		t.push_back({"ai_typesafe", "Route these AI functions to TypeSafe System One (csv of filter,classify,score)",
+		             LogicalType::VARCHAR,
+		             Value(string(ai.typesafe_filter ? "filter," : "") + (ai.typesafe_classify ? "classify," : "") +
+		                   (ai.typesafe_score ? "score" : "")),
+		             [](AIConfig &c, const Value &v) {
+			             const string s = StringValue::Get(v);
+			             c.typesafe_filter = s.find("filter") != string::npos;
+			             c.typesafe_classify = s.find("classify") != string::npos;
+			             c.typesafe_score = s.find("score") != string::npos;
+		             }});
+		t.push_back({"ai_typesafe_endpoint", "TypeSafe API base URL (http; the cache proxy terminates TLS)",
+		             LogicalType::VARCHAR, Value(ai.typesafe_url), str(&AIConfig::typesafe_url)});
+		t.push_back({"ai_typesafe_model", "TypeSafe model id (jev-latest)", LogicalType::VARCHAR,
+		             Value(ai.typesafe_model), str(&AIConfig::typesafe_model)});
+		t.push_back({"ai_typesafe_api_key", "TypeSafe API key", LogicalType::VARCHAR, Value(ai.typesafe_api_key),
+		             str(&AIConfig::typesafe_api_key)});
+		t.push_back({"ai_typesafe_threshold", "Noul probability at or above which ai_filter is true",
+		             LogicalType::DOUBLE, Value::DOUBLE(ai.typesafe_threshold), [](AIConfig &c, const Value &v) {
+			             const double th = v.GetValue<double>();
+			             if (th < 0 || th > 1) {
+				             throw InvalidInputException("ai_typesafe_threshold must be in [0, 1]");
+			             }
+			             c.typesafe_threshold = th;
+		             }});
+		t.push_back({"ai_local_cache", "Local (in-process) response cache for chat + embeddings", LogicalType::BOOLEAN,
+		             Value::BOOLEAN(true), flag(&AIConfig::local_cache)});
+		t.push_back({"ai_prefix_cache", "Explicit provider prompt caching for factor-graph pair prompts (GPT-5.6+)",
+		             LogicalType::BOOLEAN,
+		             Value::BOOLEAN(!(std::getenv("AI_PREFIX_CACHE") != nullptr &&
+		                              string(std::getenv("AI_PREFIX_CACHE")) == "off")),
+		             flag(&AIConfig::prefix_cache)});
+		t.push_back({"ai_hedge", "Hedge straggler calls past the observed p99 latency", LogicalType::BOOLEAN,
+		             EnvOnUnlessOff("AI_HEDGE", true), flag(&AIConfig::hedge)});
+		t.push_back(
+		    {"ai_local_cache_scope",
+		     "Local response cache scope: query (Q1 never serves Q2) or cross_query (process-lifetime, lotus-style)",
+		     LogicalType::VARCHAR, EnvOr("AI_LOCAL_CACHE_SCOPE", Value("query")), [](AIConfig &c, const Value &v) {
+			     c.local_cache_cross_query = StringValue::Get(v) == "cross_query";
+		     }});
+		t.push_back({"ai_debug_log", "Debug logging channels (csv: region,spec,yann)", LogicalType::VARCHAR, Value(""),
+		             str(&AIConfig::debug_log)});
+		t.push_back({"ai_debug_prompt_variant", "ai_filter prompt variant: strict/soft/plain", LogicalType::VARCHAR,
+		             EnvOr("AI_PROMPT_VARIANT", Value("strict")), [](AIConfig &c, const Value &v) {
+			             const string pv = StringValue::Get(v);
+			             c.prompt_variant_soft = pv == "soft";
+			             c.prompt_variant_plain = pv == "plain";
+		             }});
+		return t;
+	}();
+	return table;
+}
+
+//! This connection's view of the client configuration: the process-wide AIConfig (environment seeds, `SET
+//! GLOBAL`, the mock) with every AIConfig-backed setting this connection has SET in session scope applied on
+//! top. Built per request batch; a few dozen setting lookups.
+AIConfig AIConfigForContext(ClientContext &context) {
+	AIConfig config = AIConfig::Get();
+	auto &db_config = DBConfig::GetConfig(context);
+	for (auto &setting : AIConfigSettings()) {
+		if (!setting.per_connection) {
+			continue; // process-wide: a session SET already went into AIConfig::Mutable()
+		}
+		optional_ptr<const ConfigurationOption> option;
+		const auto index = db_config.TryGetSettingIndex(Identifier(setting.name), option);
+		if (!index.IsValid()) {
+			continue;
+		}
+		Value value;
+		auto found = context.TryGetCurrentUserSetting(index.GetIndex(), value);
+		if (found && found.GetScope() == SettingScope::LOCAL) {
+			setting.apply(config, value);
+		}
+	}
+	return config;
+}
+
+// DuckDB takes a plain function pointer as the SET callback (no captures), so each table entry gets its own
+// instantiation that finds its row by index.
+constexpr size_t kAIConfigSettingCount = 27;
+
+template <size_t I>
+static void AIConfigSettingCallback(ClientContext &, SetScope scope, Value &v) {
+	const auto &setting = AIConfigSettings()[I];
+	if (setting.per_connection && scope != SetScope::GLOBAL) {
+		AIConfig trial = AIConfig::Get();
+		setting.apply(trial, v); // validate (a bad value throws); the connection reads the value back itself
+		return;
+	}
+	setting.apply(AIConfig::Mutable(), v);
+}
+
+template <size_t... Is>
+static void RegisterAIConfigSettings(DBConfig &config, std::index_sequence<Is...>) {
+	const auto &table = AIConfigSettings();
+	if (table.size() != kAIConfigSettingCount) {
+		throw InternalException("aisql: %llu AIConfig settings in the table, kAIConfigSettingCount is %llu",
+		                        static_cast<uint64_t>(table.size()), static_cast<uint64_t>(kAIConfigSettingCount));
+	}
+	(config.AddExtensionOption(table[Is].name, table[Is].description, table[Is].type, table[Is].default_value,
+	                           &AIConfigSettingCallback<Is>),
+	 ...);
+}
+
+//! Registers the settings. The AIConfig-backed ones come from the table: a `SET GLOBAL` changes the process
+//! default, a session `SET` is validated here and read back per connection (AIConfigForContext). The
+//! optimizer flags are read from the connection by the optimizer and need no bridge.
 static void RegisterAISettings(DatabaseInstance &db) {
 	auto &config = DBConfig::GetConfig(db);
-	const auto &ai = AIConfig::Get(); // force env seeding before defaults are read
-	// Connection surface (defaults mirror the seeded AIConfig; SET updates it live)
-	config.AddExtensionOption(
-	    "ai_endpoint", "OpenAI-compatible LLM endpoint", LogicalType::VARCHAR, Value(ai.base_url),
-	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().base_url = StringValue::Get(v); });
-	config.AddExtensionOption(
-	    "ai_model", "LLM model id", LogicalType::VARCHAR, Value(ai.model),
-	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().model = StringValue::Get(v); });
-	config.AddExtensionOption(
-	    "ai_api_key", "LLM API key", LogicalType::VARCHAR, Value(ai.api_key),
-	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().api_key = StringValue::Get(v); });
-	config.AddExtensionOption(
-	    "ai_reasoning_effort", "Reasoning effort per request (low/medium/high; empty = omit)", LogicalType::VARCHAR,
-	    EnvOr("AI_REASONING_EFFORT", Value("")),
-	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().reasoning_effort = StringValue::Get(v); });
-	config.AddExtensionOption("ai_concurrency", "Max in-flight LLM calls", LogicalType::UBIGINT,
-	                          Value::UBIGINT(ai.max_concurrency), [](ClientContext &, SetScope, Value &v) {
-		                          const auto c = v.GetValue<uint64_t>();
-		                          if (c == 0) {
-			                          throw InvalidInputException("ai_concurrency must be >= 1");
-		                          }
-		                          AIConfig::Mutable().max_concurrency = c;
-	                          });
-	config.AddExtensionOption(
-	    "ai_max_retries", "Retries per request on throttle (429/503/529) or transient failure", LogicalType::UBIGINT,
-	    Value::UBIGINT(ai.max_retries),
-	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().max_retries = v.GetValue<uint64_t>(); });
-	// Cost accounting for a direct endpoint (the litellm proxy reports the cost per response instead)
-	config.AddExtensionOption(
-	    "ai_price_input", "USD per 1M input tokens, for ai_usage().cost_usd on an endpoint that reports no cost",
-	    LogicalType::DOUBLE, Value::DOUBLE(ai.price_input_per_mtok),
-	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().price_input_per_mtok = v.GetValue<double>(); });
-	config.AddExtensionOption("ai_price_output", "USD per 1M output tokens (see ai_price_input)", LogicalType::DOUBLE,
-	                          Value::DOUBLE(ai.price_output_per_mtok), [](ClientContext &, SetScope, Value &v) {
-		                          AIConfig::Mutable().price_output_per_mtok = v.GetValue<double>();
-	                          });
-	config.AddExtensionOption(
-	    "ai_price_cached", "USD per 1M cached input tokens (see ai_price_input)", LogicalType::DOUBLE,
-	    Value::DOUBLE(ai.price_cached_per_mtok),
-	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().price_cached_per_mtok = v.GetValue<double>(); });
-	config.AddExtensionOption("ai_ca_cert_file", "CA bundle for https endpoints (empty = the system certificate store)",
-	                          LogicalType::VARCHAR, Value(ai.ca_cert_file), [](ClientContext &, SetScope, Value &v) {
-		                          AIConfig::Mutable().ca_cert_file = StringValue::Get(v);
-	                          });
-	config.AddExtensionOption("ai_tls_verify", "Verify the server certificate of https endpoints", LogicalType::BOOLEAN,
-	                          Value::BOOLEAN(ai.tls_verify), [](ClientContext &, SetScope, Value &v) {
-		                          AIConfig::Mutable().tls_verify = BooleanValue::Get(v);
-	                          });
-	config.AddExtensionOption("ai_embed_endpoint", "Embeddings endpoint (text + image)", LogicalType::VARCHAR,
-	                          Value(ai.embed_url), [](ClientContext &, SetScope, Value &v) {
-		                          AIConfig::Mutable().embed_url = StringValue::Get(v);
-		                          AIEmbedEndpointReset();
-	                          });
-	config.AddExtensionOption(
-	    "ai_embed_model", "Dual-encoder embedding model (text + image)", LogicalType::VARCHAR, Value(ai.embed_model),
-	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().embed_model = StringValue::Get(v); });
-	config.AddExtensionOption(
-	    "ai_embed_images", "Embed image leaves (predicate text x image via the CLIP server) for selectivity",
-	    LogicalType::BOOLEAN, Value::BOOLEAN(ai.embed_images),
-	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().embed_images = BooleanValue::Get(v); });
-	config.AddExtensionOption("ai_embed_concurrency", "Embedding requests in flight at once", LogicalType::UBIGINT,
-	                          Value::UBIGINT(ai.embed_concurrency), [](ClientContext &, SetScope, Value &v) {
-		                          AIConfig::Mutable().embed_concurrency = MaxValue<idx_t>(v.GetValue<uint64_t>(), 1);
-	                          });
-	config.AddExtensionOption("ai_embed_batch_images", "Image items per embedding request", LogicalType::UBIGINT,
-	                          Value::UBIGINT(ai.embed_batch_images), [](ClientContext &, SetScope, Value &v) {
-		                          AIConfig::Mutable().embed_batch_images = MaxValue<idx_t>(v.GetValue<uint64_t>(), 1);
-	                          });
-	// TypeSafe System One (Jev) as an optional backend for ai_filter (Noul) / ai_classify (Choice)
-	config.AddExtensionOption("ai_typesafe",
-	                          "Route these AI functions to TypeSafe System One (csv of filter,classify,score)",
-	                          LogicalType::VARCHAR,
-	                          Value(string(ai.typesafe_filter ? "filter," : "") +
-	                                (ai.typesafe_classify ? "classify," : "") + (ai.typesafe_score ? "score" : "")),
-	                          [](ClientContext &, SetScope, Value &v) {
-		                          const string s = StringValue::Get(v);
-		                          AIConfig::Mutable().typesafe_filter = s.find("filter") != string::npos;
-		                          AIConfig::Mutable().typesafe_classify = s.find("classify") != string::npos;
-		                          AIConfig::Mutable().typesafe_score = s.find("score") != string::npos;
-	                          });
-	config.AddExtensionOption("ai_typesafe_endpoint", "TypeSafe API base URL (http; the cache proxy terminates TLS)",
-	                          LogicalType::VARCHAR, Value(ai.typesafe_url), [](ClientContext &, SetScope, Value &v) {
-		                          AIConfig::Mutable().typesafe_url = StringValue::Get(v);
-	                          });
-	config.AddExtensionOption(
-	    "ai_typesafe_model", "TypeSafe model id (jev-latest)", LogicalType::VARCHAR, Value(ai.typesafe_model),
-	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().typesafe_model = StringValue::Get(v); });
-	config.AddExtensionOption(
-	    "ai_typesafe_api_key", "TypeSafe API key", LogicalType::VARCHAR, Value(ai.typesafe_api_key),
-	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().typesafe_api_key = StringValue::Get(v); });
-	config.AddExtensionOption("ai_typesafe_threshold", "Noul probability at or above which ai_filter is true",
-	                          LogicalType::DOUBLE, Value::DOUBLE(ai.typesafe_threshold),
-	                          [](ClientContext &, SetScope, Value &v) {
-		                          const double t = v.GetValue<double>();
-		                          if (t < 0 || t > 1) {
-			                          throw InvalidInputException("ai_typesafe_threshold must be in [0, 1]");
-		                          }
-		                          AIConfig::Mutable().typesafe_threshold = t;
-	                          });
-	config.AddExtensionOption("ai_local_cache", "Local (in-process) response cache for chat + embeddings",
-	                          LogicalType::BOOLEAN, Value::BOOLEAN(true), [](ClientContext &, SetScope, Value &v) {
-		                          AIConfig::Mutable().local_cache = BooleanValue::Get(v);
-	                          });
+	RegisterAIConfigSettings(config, std::make_index_sequence<kAIConfigSettingCount> {});
 	// Optimizer surface (defaults = the soaked SWAN composition)
 	config.AddExtensionOption(
 	    "ai_factorize", "AI region placement: off/filters/all", LogicalType::VARCHAR,
@@ -163,6 +255,10 @@ static void RegisterAISettings(DatabaseInstance &db) {
 		config.AddExtensionOption("ai_join_factorize", "AI join strategy: off/pushdown/factor", LogicalType::VARCHAR,
 		                          Value(mode));
 	}
+	config.AddExtensionOption("ai_factor_pair_limit",
+	                          "Largest estimated pair domain (left rows x right rows of one AI join edge) the factor "
+	                          "graph takes; above it the join is evaluated as a region over the cross product",
+	                          LogicalType::UBIGINT, Value::UBIGINT(100000000ULL));
 	config.AddExtensionOption("ai_reorder", "AI predicate reordering + speculative evaluation", LogicalType::BOOLEAN,
 	                          EnvOnUnlessOff("DUCKDB_AI_REORDER", true));
 	config.AddExtensionOption("ai_pullup", "Semantic filter pull-up above joins", LogicalType::BOOLEAN,
@@ -175,11 +271,6 @@ static void RegisterAISettings(DatabaseInstance &db) {
 	                          EnvOnUnlessOff("DUCKDB_AI_LIMIT", true));
 	config.AddExtensionOption("ai_semi_reduce", "Yannakakis semi-join reduction before AI evaluation",
 	                          LogicalType::BOOLEAN, EnvOnUnlessOff("DUCKDB_YANNAKAKIS", true));
-	config.AddExtensionOption(
-	    "ai_prefix_cache", "Explicit provider prompt caching for factor-graph pair prompts (GPT-5.6+)",
-	    LogicalType::BOOLEAN,
-	    Value::BOOLEAN(!(std::getenv("AI_PREFIX_CACHE") != nullptr && string(std::getenv("AI_PREFIX_CACHE")) == "off")),
-	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().prefix_cache = BooleanValue::Get(v); });
 	// ON by default: a materialised CTE is an optimisation barrier, and a semantic filter sealed
 	// inside one runs on its FULL base table however selective the outer query is (agent_bench
 	// Q22: 89 calls where 10 rows survive; Q26: 1,425 where 5 do). Inlining AI-bearing CTEs is
@@ -190,27 +281,6 @@ static void RegisterAISettings(DatabaseInstance &db) {
 	                          "Inline CTEs containing AI functions so relational pruning and the "
 	                          "semantic pull-up can reach the predicate",
 	                          LogicalType::BOOLEAN, EnvOnUnlessOff("AI_INLINE_AI_CTES", true));
-	config.AddExtensionOption("ai_hedge", "Hedge straggler calls past the observed p99 latency", LogicalType::BOOLEAN,
-	                          EnvOnUnlessOff("AI_HEDGE", true), [](ClientContext &, SetScope, Value &v) {
-		                          AIConfig::Mutable().hedge = BooleanValue::Get(v);
-	                          });
-	config.AddExtensionOption("ai_local_cache_scope",
-	                          "Local response cache scope: query (Q1 never serves Q2) or cross_query "
-	                          "(process-lifetime, lotus-style)",
-	                          LogicalType::VARCHAR, EnvOr("AI_LOCAL_CACHE_SCOPE", Value("query")),
-	                          [](ClientContext &, SetScope, Value &v) {
-		                          AIConfig::Mutable().local_cache_cross_query = StringValue::Get(v) == "cross_query";
-	                          });
-	config.AddExtensionOption(
-	    "ai_debug_log", "Debug logging channels (csv: region,spec,yann)", LogicalType::VARCHAR, Value(""),
-	    [](ClientContext &, SetScope, Value &v) { AIConfig::Mutable().debug_log = StringValue::Get(v); });
-	config.AddExtensionOption("ai_debug_prompt_variant", "ai_filter prompt variant: strict/soft/plain",
-	                          LogicalType::VARCHAR, EnvOr("AI_PROMPT_VARIANT", Value("strict")),
-	                          [](ClientContext &, SetScope, Value &v) {
-		                          const string pv = StringValue::Get(v);
-		                          AIConfig::Mutable().prompt_variant_soft = pv == "soft";
-		                          AIConfig::Mutable().prompt_variant_plain = pv == "plain";
-	                          });
 	if (const char *pv = std::getenv("AI_PROMPT_VARIANT")) {
 		AIConfig::Mutable().prompt_variant_soft = string(pv) == "soft";
 		AIConfig::Mutable().prompt_variant_plain = string(pv) == "plain";

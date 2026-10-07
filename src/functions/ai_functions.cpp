@@ -468,7 +468,7 @@ static void AIFilterFunction(DataChunk &args, ExpressionState &state, Vector &re
 		}
 	}
 
-	auto responses = AIBatchComplete(requests, state.GetContext().GetCurrentQuery());
+	auto responses = AIBatchCompleteFor(state.GetContext(), requests);
 	result.SetVectorType(VectorType::FLAT_VECTOR);
 	auto out = FlatVector::GetDataMutable<bool>(result);
 	auto &out_validity = FlatVector::ValidityMutable(result);
@@ -572,7 +572,7 @@ static void AIClassifyFunction(DataChunk &args, ExpressionState &state, Vector &
 		}
 	}
 
-	auto responses = AIBatchComplete(requests, state.GetContext().GetCurrentQuery());
+	auto responses = AIBatchCompleteFor(state.GetContext(), requests);
 	result.SetVectorType(VectorType::FLAT_VECTOR);
 	auto out = FlatVector::GetDataMutable<string_t>(result);
 	auto &out_validity = FlatVector::ValidityMutable(result);
@@ -668,7 +668,7 @@ static void AIClassifyStructFunction(DataChunk &args, ExpressionState &state, Ve
 		}
 	}
 
-	auto responses = AIBatchComplete(requests, state.GetContext().GetCurrentQuery());
+	auto responses = AIBatchCompleteFor(state.GetContext(), requests);
 	result.SetVectorType(VectorType::FLAT_VECTOR);
 	auto out = FlatVector::GetDataMutable<string_t>(result);
 	auto &out_validity = FlatVector::ValidityMutable(result);
@@ -827,7 +827,7 @@ static void AIScoreFunction(DataChunk &args, ExpressionState &state, Vector &res
 		}
 	}
 
-	auto responses = AIBatchComplete(requests, state.GetContext().GetCurrentQuery());
+	auto responses = AIBatchCompleteFor(state.GetContext(), requests);
 	result.SetVectorType(VectorType::FLAT_VECTOR);
 	const bool int_out = has_range && bind_data.is_int; // integer bounds -> BIGINT result vector
 	auto out_dbl = int_out ? nullptr : FlatVector::GetDataMutable<double>(result);
@@ -972,7 +972,7 @@ static void AIAggFunction(DataChunk &args, ExpressionState &state, Vector &resul
 		if (!any_active) {
 			break;
 		}
-		auto responses = AIBatchComplete(requests, state.GetContext().GetCurrentQuery());
+		auto responses = AIBatchCompleteFor(state.GetContext(), requests);
 		for (idx_t i = 0; i < count; i++) {
 			if (!states[i].valid || states[i].done || row_req_count[i] == 0) {
 				continue;
@@ -1063,7 +1063,7 @@ static void AIPromptFunction(DataChunk &args, ExpressionState &state, Vector &re
 		}
 	}
 
-	auto responses = AIBatchComplete(requests, state.GetContext().GetCurrentQuery());
+	auto responses = AIBatchCompleteFor(state.GetContext(), requests);
 	result.SetVectorType(VectorType::FLAT_VECTOR);
 	auto out = FlatVector::GetDataMutable<string_t>(result);
 	auto &out_validity = FlatVector::ValidityMutable(result);
@@ -1806,7 +1806,9 @@ static bool AILeafOutcome(ClientContext &context, const AILeafMeta &m, const str
 		bool v = false;
 		ok = AIReadFilterVerdict(content, v);
 		if (m.wrapper) {
-			return AIApplyWrapper(context, m, ok ? Value::BOOLEAN(v) : Value(LogicalType::BOOLEAN));
+			const bool wrapped = AIApplyWrapper(context, m, ok ? Value::BOOLEAN(v) : Value(LogicalType::BOOLEAN));
+			ok = true; // the wrapper decided: a valid verdict even over a missing or unparseable answer
+			return wrapped;
 		}
 		return ok && v;
 	}
@@ -1820,7 +1822,9 @@ static bool AILeafOutcome(ClientContext &context, const AILeafMeta &m, const str
 			}
 		}
 		if (m.wrapper) {
-			return AIApplyWrapper(context, m, ok ? Value::DOUBLE(d) : Value(LogicalType::DOUBLE));
+			const bool wrapped = AIApplyWrapper(context, m, ok ? Value::DOUBLE(d) : Value(LogicalType::DOUBLE));
+			ok = true; // the wrapper decided: a valid verdict even over a missing or unparseable answer
+			return wrapped;
 		}
 		if (!ok) {
 			return false;
@@ -1850,7 +1854,9 @@ static bool AILeafOutcome(ClientContext &context, const AILeafMeta &m, const str
 		ok = true;
 	}
 	if (m.wrapper) {
-		return AIApplyWrapper(context, m, ok ? Value(s) : Value(LogicalType::VARCHAR));
+		const bool wrapped = AIApplyWrapper(context, m, ok ? Value(s) : Value(LogicalType::VARCHAR));
+		ok = true; // the wrapper decided: a valid verdict even over a missing or unparseable answer
+		return wrapped;
 	}
 	if (!ok) {
 		return false;
@@ -1880,7 +1886,7 @@ static bool AILeafOutcome(ClientContext &context, const AILeafMeta &m, const str
 
 static bool AIEvalLeaf(ClientContext &context, const AILeafMeta &m, const string &prompt, const string &query_text,
                        bool &ok, const string *prefix = nullptr, idx_t expected_reuse = 0,
-                       const string *pred_text = nullptr) {
+                       const string *pred_text = nullptr, const AIConfig *config = nullptr) {
 	vector<AIRequest> one;
 	if (prefix && !prefix->empty()) {
 		// Build from the full text (a Choice leaf recovers its options from the baked frame), then
@@ -1892,10 +1898,16 @@ static bool AIEvalLeaf(ClientContext &context, const AILeafMeta &m, const string
 	} else {
 		one.push_back(AILeafRequest(m, prompt, pred_text));
 	}
-	auto r = AIBatchComplete(one, query_text, /*force_fixed=*/true);
+	auto r = AIBatchComplete(one, query_text, /*force_fixed=*/true, config);
 	ok = !r.empty() && r[0].success;
 	if (!ok) {
-		return m.wrapper ? AIApplyWrapper(context, m, Value(m.wrapper_type)) : false; // a NULL answer
+		if (m.wrapper) {
+			// A failed call is a NULL answer to the wrapper, whose result is the leaf's (valid) verdict: IS NULL
+			// is true for it, `= 'yes'` is false. Without a wrapper the verdict stays unknown (ok false).
+			ok = true;
+			return AIApplyWrapper(context, m, Value(m.wrapper_type));
+		}
+		return false;
 	}
 	return AILeafOutcome(context, m, r[0].content, ok);
 }
@@ -1905,9 +1917,10 @@ static bool AIEvalLeaf(ClientContext &context, const AILeafMeta &m, const string
 //! pruning: a stood-down speculative node may drop rows whose answer is already known, but must
 //! never spend a call the k-bounded evaluation above may not need.
 static bool AIEvalLeafCached(ClientContext &context, const AILeafMeta &m, const string &prompt,
-                             const string &query_text, bool &value, const string *pred_text = nullptr) {
+                             const string &query_text, bool &value, const string *pred_text = nullptr,
+                             const AIConfig *config = nullptr) {
 	AIResult cached;
-	if (!AICacheProbe(AILeafRequest(m, prompt, pred_text), query_text, cached) || !cached.success) {
+	if (!AICacheProbe(AILeafRequest(m, prompt, pred_text), query_text, cached, config) || !cached.success) {
 		return false;
 	}
 	bool ok = false;
@@ -1956,6 +1969,7 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
                                   const vector<vector<string>> &input_text, const vector<vector<double>> &cost,
                                   const vector<char> &row_valid, const string &query_text, vector<char> &out_result,
                                   int64_t limit_override = -2, const vector<idx_t> *out_weights = nullptr) {
+	const AIConfig batch_config = AIConfigForContext(context); // this connection's endpoint/model/key for the batch
 	const auto &tree = *bind_data.tree;
 	const idx_t n = bind_data.leaf_count;
 	// LIMIT push-down: stop once this many rows PASS (-1 = no limit). limit_override != -2 substitutes an
@@ -2212,7 +2226,8 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 						continue;
 					}
 					bool v = false;
-					if (AIEvalLeafCached(context, leaf_meta[l], prompt[row][l], query_text, v, &pred_text[row][l])) {
+					if (AIEvalLeafCached(context, leaf_meta[l], prompt[row][l], query_text, v, &pred_text[row][l],
+					                     &batch_config)) {
 						leaf_values[row][l] = v ? AITriState::TRI_TRUE : AITriState::TRI_FALSE;
 					}
 				}
@@ -2489,7 +2504,7 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 			bool value_ok = false;
 			const auto llm_t0 = std::chrono::steady_clock::now();
 			const bool value = AIEvalLeaf(context, leaf_meta[leaf], prompt[row][leaf], query_text, value_ok, nullptr, 0,
-			                              &pred_text[row][leaf]);
+			                              &pred_text[row][leaf], &batch_config);
 			ema_update(llm_lat_us,
 			           std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - llm_t0)
 			               .count());
@@ -2962,6 +2977,13 @@ struct AILeafUnitEvaluator::Impl {
 	bool train = true;
 	idx_t train_every = 20;
 	mutable std::atomic<uint64_t> calls {0};
+	//! The owning connection's configuration, taken once (every unit of a region runs for one connection).
+	mutable std::once_flag config_once;
+	mutable AIConfig config;
+	const AIConfig &Config(ClientContext &context) const {
+		std::call_once(config_once, [&] { config = AIConfigForContext(context); });
+		return config;
+	}
 };
 
 AILeafUnitEvaluator::AILeafUnitEvaluator(const BoundFunctionExpression &eval_call) : impl(make_uniq<Impl>()) {
@@ -2981,16 +3003,18 @@ AILeafUnitEvaluator::AILeafUnitEvaluator(const BoundFunctionExpression &eval_cal
 
 AILeafUnitEvaluator::~AILeafUnitEvaluator() = default;
 
-bool AILeafUnitEvaluator::Evaluate(ClientContext &context, idx_t leaf, const string &prompt, const string &pred_text,
-                                   const vector<float> &feature, const string &query_text) const {
+Value AILeafUnitEvaluator::Evaluate(ClientContext &context, idx_t leaf, const string &prompt, const string &pred_text,
+                                    const vector<float> &feature, const string &query_text) const {
 	const auto &meta = impl->metas[leaf];
 	if (impl->speculative) {
 		// A speculative leaf only prunes what is already known false; an unknown input passes through.
 		bool v = false;
-		return !AIEvalLeafCached(context, meta, prompt, query_text, v, &pred_text) || v;
+		return Value::BOOLEAN(
+		    !AIEvalLeafCached(context, meta, prompt, query_text, v, &pred_text, &impl->Config(context)) || v);
 	}
 	bool ok = false;
-	const bool value = AIEvalLeaf(context, meta, prompt, query_text, ok, nullptr, 0, &pred_text);
+	const bool value =
+	    AIEvalLeaf(context, meta, prompt, query_text, ok, nullptr, 0, &pred_text, &impl->Config(context));
 	if (ok && !feature.empty()) {
 		AIRecordTrainingExample(prompt, feature, value);
 		AISelectivityModel::Global().AddExample(feature, value);
@@ -2998,7 +3022,10 @@ bool AILeafUnitEvaluator::Evaluate(ClientContext &context, idx_t leaf, const str
 	if (impl->train && (impl->calls.fetch_add(1) + 1) % impl->train_every == 0) {
 		AISelectivityModel::Global().TrainInlineIfReady();
 	}
-	return ok && value;
+	if (!ok) {
+		return Value(LogicalType::BOOLEAN); // no answer: NULL, so NOT / IS NULL / OR see an unknown, not a false
+	}
+	return Value::BOOLEAN(value);
 }
 
 // A reorder node (evaluated via the worker pool + count-weighted LIMIT early-stop) vs a plain scalar AI call.
@@ -3396,6 +3423,7 @@ static bool AIConstantConcatText(const Expression &expr, string &out) {
 bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub_node,
                       const vector<string> &leaf_prompts, const string &query_text, bool &valid,
                       const vector<string> *leaf_prefixes, idx_t expected_reuse) {
+	const AIConfig unit_config = AIConfigForContext(context);
 	auto &bind_data = sub_node.BindInfo()->Cast<AIFilterWithEmbedBindData>();
 	const auto metas = AIParseLeafMeta(bind_data.meta, bind_data.leaf_count, bind_data.wrappers);
 	const auto &children = sub_node.GetChildren();
@@ -3411,7 +3439,7 @@ bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub
 		}
 		// A wrapper that raises on the answer propagates: the graph's pool hands the error to its driver.
 		const bool value =
-		    AIEvalLeaf(context, metas[l], leaf_prompts[l], query_text, ok, prefix, expected_reuse, &pred);
+		    AIEvalLeaf(context, metas[l], leaf_prompts[l], query_text, ok, prefix, expected_reuse, &pred, &unit_config);
 		if (!ok) {
 			valid = false;
 			return false;

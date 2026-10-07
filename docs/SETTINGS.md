@@ -1,8 +1,12 @@
 # SWAN AI-SQL settings
 
-All settings are `SET`-able per connection; the `AI_*` environment variable in the last column seeds the
-default when set (the bench harnesses use them). `SELECT name, value FROM duckdb_settings() WHERE name LIKE 'ai_%'`
-shows the live values.
+All settings are `SET`-able; the `AI_*` environment variable in the last column seeds the default when set (the
+bench harnesses use them). `SELECT name, value FROM duckdb_settings() WHERE name LIKE 'ai_%'` shows the live values.
+Scope: the settings that say where a connection's requests go and how they are priced (`ai_endpoint`, `ai_model`,
+`ai_api_key`, `ai_reasoning_effort`, `ai_max_retries`, `ai_price_*`, `ai_ca_cert_file`, `ai_tls_verify`) and every
+optimizer flag are per connection: a `SET` changes that connection only, `SET GLOBAL` the process default. The
+settings that tune process-wide machinery (the request pool and its concurrency, the embeddings server, the
+local cache, TypeSafe routing, logging) apply to the whole process however they are set.
 
 **Connection and model**
 
@@ -48,6 +52,7 @@ shows the live values.
 | `ai_speculative` | `true` / `false` | `true` | speculative pre-filter at a pulled-up predicate's leaf: rows the selectivity model expects to fail are evaluated and pruned before the join, the rest pass through to the lifted predicate (`AI_SPECULATIVE`) |
 | `ai_reorder` | `true` / `false` | `true` | ordering of AI predicates with learned selectivity + speculative evaluation (`DUCKDB_AI_REORDER`) |
 | `ai_factorize` | `off` / `filters` / `all` | `all` | AI region placement: none / above AI filters only / every AI call (`DUCKDB_AI_DEDUP`, `DUCKDB_AI_SCAN_REGION`) |
+| `ai_factor_pair_limit` | integer | `100000000` | largest estimated pair domain (left rows x right rows of one AI join edge) the factor graph takes; above it the join runs as a region over the cross product, which streams the pairs |
 | `ai_join_factorize` | `off` / `pushdown` / `factor` | `factor` | AI-condition joins: expand / push the region below the join / factor graph over the pair domain (`DUCKDB_AI_GROUP_JOIN`) |
 | `ai_limit` | `true` / `false` | `true` | LIMIT push-down into AI evaluation (early stop) (`DUCKDB_AI_LIMIT`) |
 

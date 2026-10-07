@@ -17,7 +17,7 @@ set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DEST="$HERE/.llm_cache.duckdb"
 LATEST_API="https://zenodo.org/api/records/23112765/versions/latest"   # any version's id resolves to the latest
-FILE="swan_replay_cache.duckdb.gz"
+FILE="swan_replay_cache.duckdb.gz"   # the name in the latest version is read from the record below
 
 if [ -s "$DEST" ]; then
 	echo "$DEST exists ($(du -h "$DEST" | cut -f1)); move it away first if you want the published cache instead."
@@ -33,6 +33,8 @@ MD5=""
 if [ -z "$URL" ]; then
 	record=$(curl -sfL -m 30 "$LATEST_API") || { echo "could not reach Zenodo ($LATEST_API)"; exit 1; }
 	id=$(printf '%s' "$record" | grep -o 'https://zenodo.org/records/[0-9]*' | head -1 | grep -o '[0-9]*$')
+	key=$(printf '%s' "$record" | grep -oE '"key": ?"swan_replay_cache\.duckdb(\.gz)?"' | head -1 | grep -oE 'swan_replay_cache\.duckdb(\.gz)?')
+	[ -n "$key" ] && FILE="$key"
 	MD5=$(printf '%s' "$record" | grep -o "\"$FILE\"[^}]*\"md5:[0-9a-f]*\"" | grep -o '"md5:[0-9a-f]*"' | head -1 | tr -d '"' | cut -d: -f2)
 	[ -n "$MD5" ] || MD5=$(printf '%s' "$record" | grep -o '"md5:[0-9a-f]*"' | head -1 | tr -d '"' | cut -d: -f2)
 	[ -n "$id" ] || { echo "could not find the latest record id in Zenodo's answer"; exit 1; }

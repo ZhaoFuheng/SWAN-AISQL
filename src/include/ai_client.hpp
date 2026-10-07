@@ -17,6 +17,7 @@
 #include <utility>
 
 namespace duckdb {
+class ClientContext;
 
 //! Sentinels that ai_image() wraps around an image reference embedded in a prompt. BuildRequestBody parses
 //! `\x01 <ref> \x02` segments into image_url content parts (local file -> base64 data URI; http(s) -> URL);
@@ -264,6 +265,9 @@ void AIInstallCrashReporter();
 bool AIEmbedImagesSupported();
 //! Clear the embeddings-endpoint-down latch (a SET ai_embed_endpoint names a new server).
 void AIEmbedEndpointReset();
+//! This connection's client configuration: the process-wide AIConfig with the connection's session-scoped
+//! `SET ai_*` values applied (defined in aisql_extension.cpp next to the settings table).
+AIConfig AIConfigForContext(ClientContext &context);
 
 //! Execute a batch of requests concurrently, with query-scoped de-duplication + response caching
 //! (identical prompts are cached within a query, across its chunks, but never shared between queries).
@@ -275,9 +279,13 @@ void AIEmbedEndpointReset();
 double AICalibratedBytesPerToken();
 
 //! Probe the query-local response cache for `request`; true + `out` on a hit, never issues a call.
-bool AICacheProbe(const AIRequest &request, const string &query_text, AIResult &out);
+bool AICacheProbe(const AIRequest &request, const string &query_text, AIResult &out,
+                  const AIConfig *config_override = nullptr);
 vector<AIResult> AIBatchComplete(const vector<AIRequest> &requests, const string &query_text = "",
-                                 bool force_fixed = false);
+                                 bool force_fixed = false, const AIConfig *config_override = nullptr);
+//! AIBatchComplete under this connection's configuration (AIConfigForContext) and current query text.
+vector<AIResult> AIBatchCompleteFor(ClientContext &context, const vector<AIRequest> &requests,
+                                    bool force_fixed = false);
 
 //===----------------------------------------------------------------------===//
 // Training data: (prompt, embedding, actual ai_filter result) for the selectivity MLP

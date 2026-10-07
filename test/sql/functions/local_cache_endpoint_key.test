@@ -1,0 +1,43 @@
+# name: test/sql/functions/local_cache_endpoint_key.test
+# description: The in-process response cache keys on the endpoint too. Two endpoints can serve different
+# group: [functions]
+
+#              models under one name, so after `SET ai_endpoint` a prompt answered by the previous endpoint
+#              must be asked again, not served from its cached reply. Before, the key held model + prompt
+#              only: with the cross-query scope the second query below was a cache hit and never failed.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_local_cache_scope = 'cross_query';
+
+statement ok
+SET ai_max_retries = 0;
+
+query I
+SELECT ai_filter('[p=100] cached?');
+----
+true
+
+# same prompt, same model name, another endpoint (nothing listens): a fresh request, which fails
+statement ok
+SET ai_endpoint = 'http://127.0.0.1:1';
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT ai_filter('[p=100] cached?') IS NULL;
+----
+true
+
+query I
+SELECT sum(failed_calls) FROM ai_usage();
+----
+1
+
+statement ok
+CALL ai_mock_stop();

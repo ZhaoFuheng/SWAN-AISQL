@@ -1,0 +1,62 @@
+# name: test/sql/functions/connection_scoped_settings.test
+# description: A session `SET ai_endpoint` (model, key, retries, prices, TLS) changes THAT connection's
+# group: [functions]
+
+#              requests only. Before, every SET callback wrote the process-global client configuration, so
+#              connection B's `SET ai_endpoint` redirected connection A's next query while A's
+#              current_setting still showed its own endpoint. `SET GLOBAL` still changes the process default.
+
+require aisql
+
+# con1 answers from the in-process mock (which sets the process default endpoint)
+statement ok con1
+CALL ai_mock_start();
+
+query I con1
+SELECT ai_filter('[p=100] is one odd?');
+----
+true
+
+# con2 points ITSELF at a port nothing listens on
+statement ok con2
+SET ai_endpoint = 'http://127.0.0.1:1';
+
+statement ok con2
+SET ai_max_retries = 0;
+
+query I con2
+SELECT current_setting('ai_endpoint');
+----
+http://127.0.0.1:1
+
+# con1 is unaffected: still the mock
+query I con1
+SELECT ai_filter('[p=100] is three odd?');
+----
+true
+
+query I con1
+SELECT current_setting('ai_endpoint') = 'http://127.0.0.1:1';
+----
+false
+
+# con2's own request goes to its endpoint and fails
+query I con2
+SELECT ai_filter('[p=100] is five odd?') IS NULL;
+----
+true
+
+# a GLOBAL set reaches every connection: con2 sends con1 to the dead port too
+statement ok con2
+SET GLOBAL ai_endpoint = 'http://127.0.0.1:1';
+
+statement ok con1
+SET ai_max_retries = 0;
+
+query I con1
+SELECT ai_filter('[p=100] is seven odd?') IS NULL;
+----
+true
+
+statement ok con1
+CALL ai_mock_stop();
