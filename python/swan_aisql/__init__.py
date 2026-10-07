@@ -33,7 +33,7 @@ try:  # written by build_wheel.sh: the DuckDB build the bundled binary loads int
 except ImportError:  # source tree without a built wheel
     DUCKDB_ENGINE = DUCKDB_PLATFORM = DUCKDB_SOURCE_ID = DUCKDB_VERSION = None
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __all__ = [
     "connect",
     "load",
