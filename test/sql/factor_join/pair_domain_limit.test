@@ -2,14 +2,19 @@
 # description: The factor graph holds one byte per (left, right) pair of an edge before pruning, so a join
 # group: [factor_join]
 
-#              of two large sides would allocate their whole pair domain (100k x 100k = 10 GB). Above
-#              ai_factor_pair_limit estimated pairs the rewrite steps aside and the region over the cross
-#              product evaluates the join, streaming the pairs. The result is the same either way.
+#              of two large sides would allocate their whole pair domain (100k x 100k = 10 GB) under the DENSE
+#              scheduler (and the staged schedule of a cyclic graph lists each edge's live pairs). For those,
+#              above ai_factor_pair_limit estimated pairs the rewrite steps aside and the region over the cross
+#              product evaluates the join, streaming the pairs. The sparse scheduler (the default) keeps state
+#              per member and per call, so it takes the graph at any limit. The result is the same either way.
 
 require aisql
 
 statement ok
 CALL ai_mock_start();
+
+statement ok
+SET ai_factor_state = 'dense';
 
 statement ok
 CREATE TABLE ta AS SELECT 'a' || i::VARCHAR AS x FROM range(40) r(i);
@@ -63,6 +68,52 @@ query II
 EXPLAIN SELECT * FROM ta, tb WHERE ai_filter('[p=30] edge ok? ' || x || ' ' || y);
 ----
 physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+# the sparse scheduler takes the graph whatever the limit: its state follows the calls, not the domain
+statement ok
+SET ai_factor_state = 'sparse';
+
+statement ok
+SET ai_factor_pair_limit = 1;
+
+query II
+EXPLAIN SELECT * FROM ta, tb WHERE ai_filter('[p=30] edge ok? ' || x || ' ' || y);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+statement ok
+CREATE TABLE sparse_any AS SELECT * FROM ta, tb WHERE ai_filter('[p=30] edge ok? ' || x || ' ' || y);
+
+# two leaves over the same two sides are one edge, not a cycle: the sparse scheduler still takes the graph
+query II
+EXPLAIN SELECT * FROM ta, tb WHERE ai_filter('[p=30] edge ok? ' || x || ' ' || y) AND ai_filter('[p=50] also? ' || y || ' ' || x);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+# a cyclic edge graph (a triangle) takes the staged schedule, which lists each edge's live pairs, so the
+# limit applies to it under either scheduler
+statement ok
+CREATE TABLE tc AS SELECT 'c' || i::VARCHAR AS z FROM range(20) r(i);
+
+query II
+EXPLAIN SELECT * FROM ta, tb, tc WHERE ai_filter('[p=30] ab? ' || x || ' ' || y) AND ai_filter('[p=30] bc? ' || y || ' ' || z) AND ai_filter('[p=30] ac? ' || x || ' ' || z);
+----
+physical_plan	<!REGEX>:(?s).*Ai Factor Graph.*
+
+statement ok
+SET ai_factor_pair_limit = 100000000;
+
+query II
+EXPLAIN SELECT * FROM ta, tb, tc WHERE ai_filter('[p=30] ab? ' || x || ' ' || y) AND ai_filter('[p=30] bc? ' || y || ' ' || z) AND ai_filter('[p=30] ac? ' || x || ' ' || z);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+query I
+SELECT count(*) FROM (SELECT * FROM with_graph EXCEPT SELECT * FROM sparse_any) UNION ALL
+SELECT count(*) FROM (SELECT * FROM sparse_any EXCEPT SELECT * FROM with_graph);
+----
+0
+0
 
 statement ok
 CALL ai_mock_stop();

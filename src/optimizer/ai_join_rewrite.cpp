@@ -13,6 +13,7 @@
 #include "ai_settings.hpp"
 
 #include <functional>
+#include <set>
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 
 #include "duckdb/common/enums/join_type.hpp"
@@ -444,14 +445,8 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 	if (!tree) {
 		return false;
 	}
-	if (tree->type == AIFilterTreeType::AND_OP) {
-		for (auto &child : tree->children) {
-			if (child->type != AIFilterTreeType::LEAF) {
-				return false;
-			}
-		}
-	} else if (tree->type != AIFilterTreeType::LEAF) {
-		return false;
+	if (!AIFilterTreeIsConjunction(*tree)) {
+		return false; // an OR or NOT anywhere: a leaf's falsity no longer kills its tuples
 	}
 	const idx_t n = tree->LeafCount();
 	if (fn.GetChildren().size() < 1 + 3 * n) {
@@ -499,15 +494,27 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 		}
 		ExpressionIterator::EnumerateChildren(e, [&](const Expression &child) { collect_sides(child, leaf_sides); });
 	};
-	// The graph keeps one byte per (left, right) pair of each edge's two sides (its pair domain) before any
-	// pruning: two sides of 100,000 distinct inputs are 10 GB for one edge. Above ai_factor_pair_limit pairs
-	// (estimated from the sides' cardinalities, an upper bound on their distinct inputs) the plan is left to
-	// the region over the cross product, which streams the pairs and never holds the domain.
+	// Pair-domain guard. The sparse scheduler's state follows the calls made, not the domain, so it takes any
+	// forest of edges whatever the sides' sizes. The dense scheduler keeps one byte per (left, right) pair of
+	// each edge, and a cyclic edge graph takes the staged schedule, which materialises each edge's live pair
+	// list: for those, above ai_factor_pair_limit estimated pairs (the sides' cardinalities, an upper bound on
+	// their distinct inputs) the plan is left to the region over the cross product, which streams the pairs.
 	const uint64_t pair_limit = AIUBigintSetting(optimizer.context, "ai_factor_pair_limit", 100000000ULL);
+	const bool sparse_state = AIVarcharSetting(optimizer.context, "ai_factor_state", "sparse") == "sparse";
 	vector<idx_t> side_card(sides.size(), 0);
 	for (idx_t s = 0; s < sides.size(); s++) {
 		side_card[s] = (*sides[s])->EstimateCardinality(optimizer.context);
 	}
+	double largest_domain = 0;
+	vector<idx_t> uf(sides.size()); // union-find over sides: a cycle = an edge inside one component
+	for (idx_t s = 0; s < sides.size(); s++) {
+		uf[s] = s;
+	}
+	std::function<idx_t(idx_t)> find = [&](idx_t s) {
+		return uf[s] == s ? s : (uf[s] = find(uf[s]));
+	};
+	bool cyclic = false;
+	std::set<std::pair<idx_t, idx_t>> seen_edges; // leaves on the same two sides share one edge
 	for (idx_t l = 0; l < n && ok; l++) {
 		vector<idx_t> leaf_sides;
 		for (idx_t part = 0; part < 3; part++) {
@@ -519,11 +526,22 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 		if (leaf_sides.size() == 2) {
 			const double pairs =
 			    static_cast<double>(side_card[leaf_sides[0]]) * static_cast<double>(side_card[leaf_sides[1]]);
-			if (pairs > static_cast<double>(pair_limit)) {
-				ok = false; // too large a pair domain for the graph's per-pair state
+			largest_domain = MaxValue<double>(largest_domain, pairs);
+			const auto key = std::make_pair(MinValue<idx_t>(leaf_sides[0], leaf_sides[1]),
+			                                MaxValue<idx_t>(leaf_sides[0], leaf_sides[1]));
+			if (seen_edges.insert(key).second) {
+				const idx_t a = find(leaf_sides[0]), b = find(leaf_sides[1]);
+				if (a == b) {
+					cyclic = true; // an edge between two already-connected sides closes a cycle
+				} else {
+					uf[a] = b;
+				}
 			}
 		}
 		any_edge = any_edge || leaf_sides.size() == 2;
+	}
+	if ((!sparse_state || cyclic) && largest_domain > static_cast<double>(pair_limit)) {
+		ok = false; // too large a pair domain for per-pair state
 	}
 	if (!ok || !any_edge) {
 		return false;

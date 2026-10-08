@@ -1964,6 +1964,16 @@ static idx_t AIWarmupPickLeaf(idx_t row, const vector<AITriState> &leaf_values, 
 // Writes out_result[row] (fanned out to duplicates; 0/1) for every valid row. Callers pass the already
 // split per-(row, leaf) prompt/predicate/input text + cost + validity, so this serves both the scalar
 // function (one DataChunk) and the streaming dedup operator (a whole buffered join output at once).
+//! A batch row whose tree folded to a failed call's NULL (result 2) is a NULL output: invalid, not false.
+static void AINullResultsInvalid(vector<char> &out_result, vector<char> &out_valid) {
+	for (idx_t i = 0; i < out_result.size() && i < out_valid.size(); i++) {
+		if (out_result[i] == 2) {
+			out_valid[i] = 0;
+			out_result[i] = 0;
+		}
+	}
+}
+
 static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbedBindData &bind_data, idx_t count,
                                   const vector<vector<string>> &prompt, const vector<vector<string>> &pred_text,
                                   const vector<vector<string>> &input_text, const vector<vector<double>> &cost,
@@ -2017,7 +2027,10 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 	// so the model keeps improving the predictions of rows scheduled later. Order-independent -> the
 	// boolean result is unchanged; only which calls happen (cost) and their scheduling (latency) differ.
 	vector<vector<AITriState>> leaf_values(count, vector<AITriState>(n, AITriState::TRI_UNKNOWN));
-	vector<char> row_result(count, 0);
+	vector<char> row_result(count, 0); // 0 false, 1 true, 2 NULL (the tree folded to a failed call's NULL)
+	auto tri_result = [](AITriState t) -> char {
+		return static_cast<char>(t == AITriState::TRI_TRUE ? 1 : (t == AITriState::TRI_NULL ? 2 : 0));
+	};
 
 	// De-duplicate rows by their full prompt tuple: rows with identical leaf prompts are
 	// evaluation-equivalent (the boolean result depends only on the LLM answers to those prompts), so
@@ -2120,18 +2133,19 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 	// Idempotent resolution: with the pull-ahead below, one row can receive results from BOTH a
 	// parked leaf and a pulled-ahead leaf; only the first tree resolution may count it.
 	std::unique_ptr<std::atomic<char>[]> row_done(new std::atomic<char>[count]());
-	auto route_row = [&](idx_t r, idx_t lf, bool val) {
+	auto route_row = [&](idx_t r, idx_t lf, bool val, bool ok) {
 		if (row_done[r].load()) {
 			return; // already resolved (a later-arriving parked result changes nothing)
 		}
-		leaf_values[r][lf] = val ? AITriState::TRI_TRUE : AITriState::TRI_FALSE;
+		// A call that got no answer is a NULL leaf, never a false one: NOT must not pass the row.
+		leaf_values[r][lf] = !ok ? AITriState::TRI_NULL : val ? AITriState::TRI_TRUE : AITriState::TRI_FALSE;
 		const auto tv = AIFilterTreeEval(tree, leaf_values[r]);
 		if (tv != AITriState::TRI_UNKNOWN) {
 			if (row_done[r].exchange(1)) {
 				return; // another thread resolved concurrently
 			}
-			row_result[r] = (tv == AITriState::TRI_TRUE) ? 1 : 0;
-			if (row_result[r]) {
+			row_result[r] = tri_result(tv);
+			if (row_result[r] == 1) {
 				note_pass(r);
 			}
 			if (resolved.fetch_add(1) + 1 >= rep_count) {
@@ -2155,6 +2169,7 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 	struct PromptEval {
 		bool ready = false;
 		bool value = false;
+		bool ok = true; // false: the call got no answer (the leaf is NULL for every row sharing the prompt)
 		vector<std::pair<idx_t, idx_t>> waiters; // (row, leaf) parked on this in-flight prompt
 	};
 	std::mutex pc_mutex;
@@ -2188,15 +2203,17 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 					}
 					auto it = prompt_cache.find(prompt[row][l] + leaf_key[l]);
 					if (it != prompt_cache.end() && it->second.ready) {
-						leaf_values[row][l] = it->second.value ? AITriState::TRI_TRUE : AITriState::TRI_FALSE;
+						leaf_values[row][l] = !it->second.ok     ? AITriState::TRI_NULL
+						                      : it->second.value ? AITriState::TRI_TRUE
+						                                         : AITriState::TRI_FALSE;
 					}
 				}
 			}
 			{
 				const auto folded = AIFilterTreeEval(tree, leaf_values[row]);
 				if (folded != AITriState::TRI_UNKNOWN) {
-					row_result[row] = (folded == AITriState::TRI_TRUE) ? 1 : 0;
-					if (row_result[row]) {
+					row_result[row] = tri_result(folded);
+					if (row_result[row] == 1) {
 						note_pass(row);
 					}
 					if (resolved.fetch_add(1) + 1 >= rep_count) {
@@ -2426,8 +2443,8 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 				// leaf if the pick failed for any other reason.
 				const auto refolded = AIFilterTreeEval(tree, leaf_values[row]);
 				if (refolded != AITriState::TRI_UNKNOWN) {
-					row_result[row] = (refolded == AITriState::TRI_TRUE) ? 1 : 0;
-					if (row_result[row]) {
+					row_result[row] = tri_result(refolded);
+					if (row_result[row] == 1) {
 						note_pass(row);
 					}
 					if (resolved.fetch_add(1) + 1 >= rep_count) {
@@ -2459,9 +2476,9 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 				}
 				PromptEval &pe = ins.first->second;
 				if (pe.ready) {
-					const bool val = pe.value;
+					const bool val = pe.value, val_ok = pe.ok;
 					lk.unlock();
-					route_row(row, leaf, val); // result already known: apply now
+					route_row(row, leaf, val, val_ok); // result already known: apply now
 					break;
 				}
 				pe.waiters.emplace_back(row, leaf); // in-flight: park; the fetcher routes us
@@ -2519,13 +2536,14 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 			{
 				std::lock_guard<std::mutex> lk(pc_mutex);
 				self->value = value;
+				self->ok = value_ok;
 				self->ready = true;
 				waiters.swap(self->waiters);
 			}
-			completions.fetch_add(1);    // only real calls advance the async trainer's cadence
-			route_row(row, leaf, value); // the fetcher's own row
+			completions.fetch_add(1);              // only real calls advance the async trainer's cadence
+			route_row(row, leaf, value, value_ok); // the fetcher's own row
 			for (auto &w : waiters) {
-				route_row(w.first, w.second, value); // rows that parked on this in-flight prompt
+				route_row(w.first, w.second, value, value_ok); // rows that parked on this in-flight prompt
 			}
 		}
 	};
@@ -2720,10 +2738,10 @@ static void AIFilterWithEmbedFunction(DataChunk &args, ExpressionState &state, V
 	auto out = FlatVector::GetDataMutable<bool>(result);
 	auto &validity = FlatVector::ValidityMutable(result);
 	for (idx_t row = 0; row < count; row++) {
-		if (!row_valid[row]) {
-			validity.SetInvalid(row);
+		if (!row_valid[row] || out_result[row] == 2) {
+			validity.SetInvalid(row); // a NULL input, or a tree that folded to a failed call's NULL
 		} else {
-			out[row] = out_result[row] != 0;
+			out[row] = out_result[row] == 1;
 		}
 	}
 }
@@ -2969,6 +2987,7 @@ void AILeafEvaluate(ClientContext &context, const BoundFunctionExpression &eval_
 	}
 	AIFilterEvaluateBatch(context, one, count, prompt, pred, input, cost, valid, query_text, out_result, -1, nullptr);
 	out_valid = valid;
+	AINullResultsInvalid(out_result, out_valid);
 }
 
 struct AILeafUnitEvaluator::Impl {
@@ -3064,6 +3083,7 @@ void AIDedupFireWave(ClientContext &context, const BoundFunctionExpression &eval
 	}
 	AIFilterEvaluateBatch(context, bind_data, prompt.size(), prompt, pred_text, input_text, cost, out_valid, query_text,
 	                      out_result, remaining_limit, &wave_weights);
+	AINullResultsInvalid(out_result, out_valid);
 }
 
 // Evaluate any other scalar AI function (ai_classify / ai_score / ai_complete / plain ai_filter) over the
@@ -3117,6 +3137,7 @@ void AIDedupFireWaveFactorized(ClientContext &context, const BoundFunctionExpres
 	AIFilterAppendArgs(arg_chunk, n, prompt, pred_text, input_text, cost, out_valid);
 	AIFilterEvaluateBatch(context, bind_data, prompt.size(), prompt, pred_text, input_text, cost, out_valid, query_text,
 	                      out_result, remaining_limit, &weights);
+	AINullResultsInvalid(out_result, out_valid);
 }
 
 // Factorized scalar eval: run the scalar AI function over the factorized chunk's rep rows (`__count` ignored).
@@ -3465,15 +3486,8 @@ bool AIFactorDecompose(const BoundFunctionExpression &node, const vector<idx_t> 
 		return false;
 	}
 	auto &bind_data = node.BindInfo()->Cast<AIFilterWithEmbedBindData>();
-	auto &tree = *bind_data.tree;
-	// pure conjunction only: a single leaf, or AND over leaves (per-leaf falsity must kill the row)
-	if (tree.type == AIFilterTreeType::AND_OP) {
-		for (auto &child : tree.children) {
-			if (child->type != AIFilterTreeType::LEAF) {
-				return false;
-			}
-		}
-	} else if (tree.type != AIFilterTreeType::LEAF) {
+	// pure conjunction only, at any nesting (per-leaf falsity must kill the row)
+	if (!AIFilterTreeIsConjunction(*bind_data.tree)) {
 		return false;
 	}
 	const idx_t n = bind_data.leaf_count;

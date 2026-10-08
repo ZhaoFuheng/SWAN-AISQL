@@ -37,6 +37,67 @@ SELECT count(*) FROM t WHERE ai_filter('p? ' || a) IS NULL AND ai_filter('q? ' |
 ----
 50
 
+# the LIMIT wave path (inline waves inside the region): the same, with an early stop
+query I
+SELECT count(*) FROM (SELECT * FROM t WHERE NOT ai_filter('x? ' || a) OR ai_filter('y? ' || b) LIMIT 7);
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM t WHERE ai_filter('p? ' || a) IS NULL AND ai_filter('q? ' || b) IS NULL LIMIT 7);
+----
+7
+
+# the inline batch evaluator (no region): a failed leaf is NULL in the tree fold, not false
+statement ok
+SET ai_factorize = 'off';
+
+query I
+SELECT count(*) FROM t WHERE NOT ai_filter('x? ' || a) OR ai_filter('y? ' || b);
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM t WHERE NOT ai_filter('x? ' || a) OR ai_filter('y? ' || b) LIMIT 7);
+----
+0
+
+query II
+SELECT count(*) FILTER (WHERE v IS NULL), count(*) FILTER (WHERE v = false)
+FROM (SELECT (NOT ai_filter('x? ' || a) OR ai_filter('y? ' || b)) AS v FROM t);
+----
+50	0
+
+query I
+SELECT count(*) FROM t WHERE coalesce(ai_filter('x? ' || a), true) AND ai_filter('y? ' || b) IS NULL;
+----
+50
+
+statement ok
+SET ai_factorize = 'all';
+
+# the factor graph (a join over an AI predicate): no answer, no pair; IS NULL keeps every pair
+statement ok
+CREATE TABLE ja AS SELECT 'a' || i::VARCHAR AS x FROM range(20) r(i);
+
+statement ok
+CREATE TABLE jb AS SELECT 'b' || i::VARCHAR AS y FROM range(15) r(i);
+
+query I
+SELECT count(*) FROM ja, jb WHERE ai_filter('edge? ' || x || ' ' || y);
+----
+0
+
+query I
+SELECT count(*) FROM ja, jb WHERE NOT ai_filter('edge? ' || x || ' ' || y);
+----
+0
+
+query I
+SELECT count(*) FROM ja, jb WHERE ai_filter('edge? ' || x || ' ' || y) IS NULL;
+----
+300
+
 # the single-leaf path, for reference
 query I
 SELECT count(*) FILTER (WHERE v IS NULL) FROM (SELECT ai_filter('x? ' || a) AS v FROM t);

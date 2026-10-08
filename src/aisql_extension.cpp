@@ -255,9 +255,14 @@ static void RegisterAISettings(DatabaseInstance &db) {
 		config.AddExtensionOption("ai_join_factorize", "AI join strategy: off/pushdown/factor", LogicalType::VARCHAR,
 		                          Value(mode));
 	}
+	config.AddExtensionOption("ai_factor_state",
+	                          "Factor graph scheduler state: dense (one byte per pair of each edge) or sparse "
+	                          "(counters per member and the pairs asked; no pair-domain allocation)",
+	                          LogicalType::VARCHAR, EnvOr("AI_FACTOR_STATE", Value("sparse")));
 	config.AddExtensionOption("ai_factor_pair_limit",
 	                          "Largest estimated pair domain (left rows x right rows of one AI join edge) the factor "
-	                          "graph takes; above it the join is evaluated as a region over the cross product",
+	                          "graph takes under the dense scheduler or for a cyclic edge graph; above it the join is "
+	                          "evaluated as a region over the cross product",
 	                          LogicalType::UBIGINT, Value::UBIGINT(100000000ULL));
 	config.AddExtensionOption("ai_reorder", "AI predicate reordering + speculative evaluation", LogicalType::BOOLEAN,
 	                          EnvOnUnlessOff("DUCKDB_AI_REORDER", true));

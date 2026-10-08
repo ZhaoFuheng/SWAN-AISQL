@@ -54,9 +54,11 @@ Three consequences follow.
   it, in the order decided per row at run time (§4).
 * **A semantic join never materialises its cross product.** The factor graph keeps one dictionary
   per side and enumerates only surviving pairs, so intermediate size is bounded by the pair domain
-  that is still live, not by `|A| × |B|`. The graph holds one byte per pair of an edge before pruning, so a
-  pair domain it could not hold (`ai_factor_pair_limit`, 10^8 estimated pairs) is left to the region over
-  the cross product, which streams the pairs.
+  that is still live, not by `|A| × |B|`. The scheduler's own state follows the calls made, not the domain:
+  per member it keeps counters and the partners it was asked with, and the pairs still to ask are enumerated
+  from a cursor, never stored, so a join of two 100k-row sides is scheduled from a few megabytes. Only a
+  cyclic edge graph, which takes the staged schedule and lists each edge's live pairs, is capped
+  (`ai_factor_pair_limit`) and left to the region over the cross product beyond it.
 
 ---
 
@@ -142,10 +144,13 @@ the data allows.
   A leaf is asked only for the distinct inputs that some still-undecided row needs; each input is
   sent on its own, and the verdict re-decides every row that shares it the moment it lands. Where
   every row of a join fan-out fails the first leaf, the second leaf is never asked.
-* **In a factor graph**, the scheduler picks the next member or pair to check from the pass rates it
-  has observed so far in the query, preferring checks whose failure cancels the most pairs. A
-  per-side check tends to go first: one failed member removes every pair it would have formed.
-  Within a pair, the leaves run in the node's order and stop at the first false answer.
+* **In a factor graph**, the scheduler picks the next member to check from the pass rates it has
+  observed so far in the query, preferring checks whose failure cancels the most pairs. A per-side
+  check tends to go first: one failed member removes every pair it would have formed. Pairs are asked
+  from the chosen parent member's cursor over its live, confirmed partners (each member's cursor starts
+  at a different partner, so a batch spreads over the child side), and a member's child edges open one
+  at a time, most lethal first. Within a pair, the leaves run in the node's order and stop at the first
+  false answer. Selection costs O(members) per batch, so the domain's size never shows in the scheduler.
 * **A LIMIT stops the operator, not the scan.** Once the region or graph has confirmed enough
   passing rows for the pushed `LIMIT k` (counted by fan-out, so k *output* rows), it stops asking.
   Under a LIMIT the region asks in waves of max(k, `ai_concurrency`) inputs and re-checks after each,

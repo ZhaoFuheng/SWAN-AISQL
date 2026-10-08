@@ -1,0 +1,217 @@
+# name: test/sql/factor_join/sparse_state.test
+# description: ai_factor_state = 'sparse' (counters per member, pairs enumerated from cursors) returns the same
+# group: [factor_join]
+
+#              rows as the dense scheduler (one byte per pair) at the same number of prompts asked: unary-pruned two-way join,
+#              three-way chain, duplicates (count products), LIMIT early stop and a NOT-wrapped edge.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE a AS SELECT 'a' || i::VARCHAR AS x, i % 7 AS ga FROM range(60) r(i);
+
+statement ok
+CREATE TABLE b AS SELECT 'b' || i::VARCHAR AS y FROM range(45) r(i);
+
+statement ok
+CREATE TABLE c AS SELECT 'c' || i::VARCHAR AS z FROM range(30) r(i);
+
+statement ok
+CREATE TABLE ad AS SELECT x FROM a UNION ALL SELECT x FROM a WHERE ga < 3;
+
+# --- unary + edge: both schedulers evaluate the same pairs
+statement ok
+SET ai_factor_state = 'dense';
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE d1 AS SELECT x, y FROM a, b WHERE ai_filter('[p=60] ua ' || x) AND ai_filter('[p=50] ub ' || y) AND ai_filter('[p=30] e2 ' || x || ' ' || y);
+
+statement ok
+CREATE TABLE d1c AS SELECT sum(llm_calls + cache_hits)::BIGINT AS calls FROM ai_usage();
+
+statement ok
+SET ai_factor_state = 'sparse';
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE s1 AS SELECT x, y FROM a, b WHERE ai_filter('[p=60] ua ' || x) AND ai_filter('[p=50] ub ' || y) AND ai_filter('[p=30] e2 ' || x || ' ' || y);
+
+query I
+SELECT (SELECT calls FROM d1c) = (SELECT sum(llm_calls + cache_hits)::BIGINT FROM ai_usage());
+----
+true
+
+query I
+SELECT count(*) FROM ((SELECT * FROM d1 EXCEPT SELECT * FROM s1) UNION ALL (SELECT * FROM s1 EXCEPT SELECT * FROM d1));
+----
+0
+
+query I
+SELECT count(*) > 0 FROM s1;
+----
+true
+
+# --- three-way chain with duplicates on one side
+statement ok
+SET ai_factor_state = 'dense';
+
+statement ok
+CREATE TABLE d2 AS SELECT x, y, z FROM ad, b, c WHERE ai_filter('[p=25] e3 ' || x || ' ' || y) AND ai_filter('[p=25] e4 ' || y || ' ' || z);
+
+statement ok
+SET ai_factor_state = 'sparse';
+
+statement ok
+CREATE TABLE s2 AS SELECT x, y, z FROM ad, b, c WHERE ai_filter('[p=25] e3 ' || x || ' ' || y) AND ai_filter('[p=25] e4 ' || y || ' ' || z);
+
+query II
+SELECT (SELECT count(*) FROM d2) = (SELECT count(*) FROM s2),
+       (SELECT count(*) FROM ((SELECT * FROM d2 EXCEPT SELECT * FROM s2) UNION ALL (SELECT * FROM s2 EXCEPT SELECT * FROM d2))) = 0;
+----
+true	true
+
+# --- LIMIT early stop: k rows, fewer calls than the pair domain (2,700)
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM (SELECT * FROM a, b WHERE ai_filter('[p=20] e8 ' || x || ' ' || y) LIMIT 15);
+----
+15
+
+query I
+SELECT sum(llm_calls + cache_hits) < 2700 FROM ai_usage();
+----
+true
+
+# --- NOT-wrapped edge
+statement ok
+SET ai_factor_state = 'dense';
+
+statement ok
+CREATE TABLE d3 AS SELECT x, y FROM a, b WHERE NOT ai_filter('[p=85] e10 ' || x || ' ' || y);
+
+statement ok
+SET ai_factor_state = 'sparse';
+
+statement ok
+CREATE TABLE s3 AS SELECT x, y FROM a, b WHERE NOT ai_filter('[p=85] e10 ' || x || ' ' || y);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM d3 EXCEPT SELECT * FROM s3) UNION ALL (SELECT * FROM s3 EXCEPT SELECT * FROM d3));
+----
+0
+
+# --- distinct reps with one prompt text share a flight (the parked path): a2 repeats x under different k
+statement ok
+CREATE TABLE a2 AS SELECT 'a' || (i % 12)::VARCHAR AS x, i AS k FROM range(36) r(i);
+
+statement ok
+SET ai_factor_state = 'dense';
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE d4 AS SELECT x, k, y FROM a2, b WHERE ai_filter('[p=30] e11 ' || x || ' ' || y);
+
+statement ok
+SET ai_factor_state = 'sparse';
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE s4 AS SELECT x, k, y FROM a2, b WHERE ai_filter('[p=30] e11 ' || x || ' ' || y);
+
+query II
+SELECT (SELECT count(*) FROM s4) = (SELECT count(*) FROM d4),
+       (SELECT count(*) FROM ((SELECT * FROM d4 EXCEPT SELECT * FROM s4) UNION ALL (SELECT * FROM s4 EXCEPT SELECT * FROM d4))) = 0;
+----
+true	true
+
+# --- the root is the side with the most unary leaves (sa, two of them, cheap); its children are a 2-member
+#     side with a unary leaf (sb) and a wide side without one (sc). Once sa's members are confirmed, their
+#     pair score on sa-sb (the many unknown pairs on sa-sc that sb's failure would cancel) beats sb's unary
+#     score, yet no sa-sb pair is dispatchable until sb's verdicts land. The scheduler must ask those
+#     verdicts rather than stop; without the fallback it returned zero rows here.
+statement ok
+CREATE TABLE sa AS SELECT 'sa' || i::VARCHAR AS x FROM range(50) r(i);
+
+statement ok
+CREATE TABLE sb AS SELECT 'sb' || i::VARCHAR AS y FROM range(2) r(i);
+
+statement ok
+CREATE TABLE sc AS SELECT 'sc' || i::VARCHAR AS z FROM range(600) r(i);
+
+statement ok
+CREATE TABLE star_sparse AS SELECT x, y, z FROM sa, sb, sc
+WHERE ai_filter('[p=100] ua1 ' || x) AND ai_filter('[p=100] ua2 ' || x) AND ai_filter('[p=100] ub ' || y)
+  AND ai_filter('[p=10] eab ' || x || ' ' || y) AND ai_filter('[p=20] eac ' || x || ' ' || z);
+
+statement ok
+SET ai_join_factorize = 'off';
+
+statement ok
+CREATE TABLE star_off AS SELECT x, y, z FROM sa, sb, sc
+WHERE ai_filter('[p=100] ua1 ' || x) AND ai_filter('[p=100] ua2 ' || x) AND ai_filter('[p=100] ub ' || y)
+  AND ai_filter('[p=10] eab ' || x || ' ' || y) AND ai_filter('[p=20] eac ' || x || ' ' || z);
+
+statement ok
+SET ai_join_factorize = 'factor';
+
+query I
+SELECT count(*) > 0 FROM star_sparse;
+----
+true
+
+query I
+SELECT count(*) FROM ((SELECT * FROM star_sparse EXCEPT SELECT * FROM star_off) UNION ALL (SELECT * FROM star_off EXCEPT SELECT * FROM star_sparse));
+----
+0
+
+# --- a death must settle before its partners are judged. a1 fails both b's at once (its answers land
+#     first), a2's answers come 300 ms later. Judging b2 right after a1's death, with a1's false pair still
+#     in b2's count, killed b2: (a2, b2) was then never emitted. The cascade now judges only once every
+#     queued death has taken its pairs out of its partners' counters.
+statement ok
+CREATE TABLE pa AS SELECT * FROM (VALUES ('a1'), ('a2')) t(x);
+
+statement ok
+CREATE TABLE pb AS SELECT * FROM (VALUES ('b1'), ('b2')) t(y);
+
+query II
+SELECT x, y FROM pa, pb
+WHERE ai_filter(CASE WHEN x = 'a1' THEN '[p=0] ' ELSE '[p=100][sleep=300] ' END || 'pair ' || x || ' ' || y)
+ORDER BY x, y;
+----
+a2	b1
+a2	b2
+
+statement ok
+SET ai_factor_state = 'dense';
+
+query II
+SELECT x, y FROM pa, pb
+WHERE ai_filter(CASE WHEN x = 'a1' THEN '[p=0] ' ELSE '[p=100][sleep=300] ' END || 'pair ' || x || ' ' || y)
+ORDER BY x, y;
+----
+a2	b1
+a2	b2
+
+statement ok
+SET ai_factor_state = 'sparse';
+
+statement ok
+CALL ai_mock_stop();

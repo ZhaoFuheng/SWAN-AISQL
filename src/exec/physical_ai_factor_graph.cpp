@@ -3,6 +3,7 @@
 #include "ai_client.hpp"
 #include "optimizer/ai_filter_tree_build.hpp"
 #include "ai_prompt_cost.hpp"
+#include "ai_settings.hpp"
 
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/common/error_data.hpp"
@@ -405,6 +406,252 @@ struct GraphStreamPool {
 	}
 };
 
+//===--------------------------------------------------------------------===//
+// Unit prompts: per-domain sub-nodes and executors that bake one member's or one pair's leaf
+// prompts (vectorized expression evaluation over a one-row chunk), plus the prefix-cache split
+// for pair prompts. Shared by the dense and the sparse scheduler below.
+//===--------------------------------------------------------------------===//
+struct GraphUnitBaker {
+	ClientContext &context;
+	const PhysicalAIFactorGraph &op;
+	FactorGraphSinkState &sink;
+	vector<unique_ptr<Expression>> side_sub, edge_sub;
+	vector<vector<LogicalType>> side_types, edge_types;
+	vector<unique_ptr<ExpressionExecutor>> side_exec, edge_exec, edge_ops_exec;
+	vector<unique_ptr<DataChunk>> side_row, edge_row;
+	// Explicit provider prompt caching for pair prompts (ai_prefix_cache): split each single-leaf
+	// edge's call prompt at the first operand that reads the other side. The graph only DECLARES
+	// structure: every eligible pair call carries (prefix, suffix) plus an expected_reuse hint
+	// (the member's remaining live pairs). Size gate, write policy, and prime/park sequencing all
+	// live in the client's prefix lifecycle (ai_client.cpp), shared by every operator.
+	vector<char> cache_enabled;
+	vector<vector<const Expression *>> cache_ops;
+	vector<idx_t> cache_split;
+	vector<char> cache_group_s; // group axis: 1 = edge.s owns the prefix, 0 = edge.t
+
+	GraphUnitBaker(ClientContext &context_p, const PhysicalAIFactorGraph &op_p, FactorGraphSinkState &sink_p)
+	    : context(context_p), op(op_p), sink(sink_p) {
+		const idx_t k1 = op.side_widths.size();
+		const idx_t ne = op.edges.size();
+		const idx_t total_width = op.side_offsets.back() + op.side_widths.back();
+		auto &fn = op.node->Cast<BoundFunctionExpression>();
+		side_sub.resize(k1);
+		side_types.resize(k1);
+		side_exec.resize(k1);
+		side_row.resize(k1);
+		for (idx_t s = 0; s < k1; s++) {
+			if (op.unary_leaves[s].empty()) {
+				continue;
+			}
+			vector<idx_t> index_map(total_width, DConstants::INVALID_INDEX);
+			for (idx_t c = 0; c < op.side_widths[s]; c++) {
+				index_map[op.side_offsets[s] + c] = c;
+			}
+			side_sub[s] = AIFactorSubNode(fn, op.unary_leaves[s], index_map);
+			side_types[s].assign(op.types.begin() + NumericCast<int64_t>(op.side_offsets[s]),
+			                     op.types.begin() + NumericCast<int64_t>(op.side_offsets[s] + op.side_widths[s]));
+			side_types[s].push_back(LogicalType::BIGINT);
+		}
+		edge_sub.resize(ne);
+		edge_types.resize(ne);
+		edge_exec.resize(ne);
+		edge_ops_exec.resize(ne);
+		edge_row.resize(ne);
+		for (idx_t e = 0; e < ne; e++) {
+			auto &edge = op.edges[e];
+			vector<idx_t> index_map(total_width, DConstants::INVALID_INDEX);
+			for (idx_t c = 0; c < op.side_widths[edge.s]; c++) {
+				index_map[op.side_offsets[edge.s] + c] = c;
+			}
+			for (idx_t c = 0; c < op.side_widths[edge.t]; c++) {
+				index_map[op.side_offsets[edge.t] + c] = op.side_widths[edge.s] + c;
+			}
+			edge_sub[e] = AIFactorSubNode(fn, edge.leaf_ids, index_map);
+			edge_types[e].assign(op.types.begin() + NumericCast<int64_t>(op.side_offsets[edge.s]),
+			                     op.types.begin() +
+			                         NumericCast<int64_t>(op.side_offsets[edge.s] + op.side_widths[edge.s]));
+			for (idx_t c = 0; c < op.side_widths[edge.t]; c++) {
+				edge_types[e].push_back(op.types[op.side_offsets[edge.t] + c]);
+			}
+			edge_types[e].push_back(LogicalType::BIGINT);
+		}
+		cache_enabled.assign(ne, 0);
+		cache_ops.resize(ne);
+		cache_split.assign(ne, 0);
+		cache_group_s.assign(ne, 1);
+		if (!AIConfig::Get().prefix_cache) {
+			return;
+		}
+		for (idx_t e = 0; e < ne; e++) {
+			auto &fn_sub = edge_sub[e]->Cast<BoundFunctionExpression>();
+			if ((fn_sub.GetChildren().size() - 1) / 3 != 1) {
+				continue; // v1: single-leaf edges only
+			}
+			vector<const Expression *> ops;
+			// look past the all-columns-NULL guard: the prefix lives in the concatenation under it
+			AIFactorPromptOperands(AIUnwrapNullGuard(*fn_sub.GetChildren()[1]), ops);
+			auto op_side = [&](const Expression &expr) {
+				vector<idx_t> refs;
+				std::function<void(const Expression &)> walk = [&](const Expression &node) {
+					if (node.GetExpressionClass() == ExpressionClass::BOUND_REF) {
+						refs.push_back(node.Cast<BoundReferenceExpression>().Index());
+						return;
+					}
+					ExpressionIterator::EnumerateChildren(node, [&](const Expression &child) { walk(child); });
+				};
+				walk(expr);
+				bool s_axis = false, t_axis = false;
+				for (const auto col : refs) {
+					(col < op.side_widths[op.edges[e].s] ? s_axis : t_axis) = true;
+				}
+				return s_axis && t_axis ? 3 : (t_axis ? 2 : (s_axis ? 1 : 0));
+			};
+			idx_t first_ref = ops.size();
+			for (idx_t o = 0; o < ops.size(); o++) {
+				const auto side = op_side(*ops[o]);
+				if (side == 1 || side == 2) {
+					first_ref = o;
+					break;
+				}
+				if (side == 3) {
+					break; // an operand reads both sides before any single-side operand: no clean split
+				}
+			}
+			if (first_ref == ops.size()) {
+				continue;
+			}
+			const auto group_side = op_side(*ops[first_ref]);
+			idx_t split = ops.size();
+			for (idx_t o = first_ref + 1; o < ops.size(); o++) {
+				const auto side = op_side(*ops[o]);
+				if (side == 3 || (side != 0 && side != group_side)) {
+					split = o;
+					break;
+				}
+			}
+			if (split == ops.size()) {
+				continue; // never touches the other side: not a pair prompt
+			}
+			cache_enabled[e] = 1;
+			cache_ops[e] = std::move(ops);
+			cache_split[e] = split;
+			cache_group_s[e] = static_cast<char>(group_side == 1);
+		}
+	}
+
+	//! The member that owns a pair's cached prefix, and its side.
+	idx_t CacheGroupMember(idx_t e, idx_t a, idx_t b) const {
+		return cache_group_s[e] ? a : b;
+	}
+	idx_t CacheGroupSide(idx_t e) const {
+		return cache_group_s[e] ? op.edges[e].s : op.edges[e].t;
+	}
+	const Expression *SubNode(bool is_unary, idx_t domain) const {
+		return is_unary ? side_sub[domain].get() : edge_sub[domain].get();
+	}
+
+	void FillPairRow(DataChunk &row, idx_t e, idx_t a, idx_t b) {
+		auto &edge = op.edges[e];
+		row.Reset();
+		row.SetChildCardinality(1);
+		for (idx_t c = 0; c < op.side_widths[edge.s]; c++) {
+			row.data[c].SetValue(0, sink.sides[edge.s].reps[a][c]);
+		}
+		for (idx_t c = 0; c < op.side_widths[edge.t]; c++) {
+			row.data[op.side_widths[edge.s] + c].SetValue(0, sink.sides[edge.t].reps[b][c]);
+		}
+		row.data[op.side_widths[edge.s] + op.side_widths[edge.t]].SetValue(0, Value::BIGINT(1));
+	}
+
+	void BakeSplit(idx_t e, idx_t a, idx_t b, string &prefix, string &suffix) {
+		auto &exec = edge_ops_exec[e];
+		auto &row = edge_row[e];
+		if (!exec) {
+			exec = make_uniq<ExpressionExecutor>(context);
+			for (const auto *operand : cache_ops[e]) {
+				exec->AddExpression(*operand);
+			}
+			if (!row) {
+				row = make_uniq<DataChunk>();
+				row->Initialize(BufferAllocator::Get(context), edge_types[e]);
+			}
+		}
+		FillPairRow(*row, e, a, b);
+		DataChunk out;
+		vector<LogicalType> out_types(cache_ops[e].size(), LogicalType::VARCHAR);
+		out.Initialize(BufferAllocator::Get(context), out_types);
+		exec->Execute(*row, out);
+		prefix.clear();
+		suffix.clear();
+		for (idx_t o = 0; o < cache_ops[e].size(); o++) {
+			const Value v = out.data[o].GetValue(0);
+			(o < cache_split[e] ? prefix : suffix) += v.IsNull() ? string() : StringValue::Get(v);
+		}
+	}
+
+	vector<string> Bake(bool is_unary, idx_t domain, idx_t a, idx_t b) {
+		auto &sub = is_unary ? side_sub[domain] : edge_sub[domain];
+		auto &fn_sub = sub->Cast<BoundFunctionExpression>();
+		const idx_t nleaf = (fn_sub.GetChildren().size() - 1) / 3; // tree + 3n (+meta)
+		auto &exec = is_unary ? side_exec[domain] : edge_exec[domain];
+		auto &row = is_unary ? side_row[domain] : edge_row[domain];
+		if (!exec) {
+			exec = make_uniq<ExpressionExecutor>(context); // call prompts are children [1 .. n]
+			for (idx_t l = 0; l < nleaf; l++) {
+				exec->AddExpression(*fn_sub.GetChildren()[1 + l]);
+			}
+			row = make_uniq<DataChunk>();
+			row->Initialize(BufferAllocator::Get(context), is_unary ? side_types[domain] : edge_types[domain]);
+		}
+		if (is_unary) {
+			row->Reset();
+			row->SetChildCardinality(1);
+			auto &side = sink.sides[domain];
+			for (idx_t c = 0; c < op.side_widths[domain]; c++) {
+				row->data[c].SetValue(0, side.reps[a][c]);
+			}
+			row->data[op.side_widths[domain]].SetValue(0, Value::BIGINT(1));
+		} else {
+			FillPairRow(*row, domain, a, b);
+		}
+		DataChunk out;
+		vector<LogicalType> out_types(nleaf, LogicalType::VARCHAR);
+		out.Initialize(BufferAllocator::Get(context), out_types);
+		exec->Execute(*row, out);
+		vector<string> prompts(nleaf);
+		for (idx_t l = 0; l < nleaf; l++) {
+			const Value v = out.data[l].GetValue(0);
+			prompts[l] = v.IsNull() ? string() : StringValue::Get(v);
+		}
+		return prompts;
+	}
+
+	//! One unit's prompts (+ prefixes when the pair prompt is cache-split) and its single-flight key:
+	//! prefix+prompt concatenated, so cached and plain forms of the same pair share one flight.
+	void Unit(bool is_unary, idx_t domain, idx_t a, idx_t b, vector<string> &prompts, vector<string> &prefixes,
+	          string &key) {
+		prompts.clear();
+		prefixes.clear();
+		if (!is_unary && cache_enabled[domain]) {
+			string prefix, suffix;
+			BakeSplit(domain, a, b, prefix, suffix);
+			prompts.push_back(std::move(suffix));
+			prefixes.push_back(std::move(prefix));
+		} else {
+			prompts = Bake(is_unary, domain, a, b);
+		}
+		key.clear();
+		for (idx_t l = 0; l < prompts.size(); l++) {
+			if (l < prefixes.size()) {
+				key += prefixes[l];
+			}
+			key += prompts[l];
+			key += '\x1f';
+		}
+		key += is_unary ? "u" : "e"; // unary and edge sub-nodes may share prompt text but not meta
+	}
+};
+
 static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGraph &op,
                                       FactorGraphSinkState &sink, const string &query_text,
                                       const vector<idx_t> &parent_edge_of_side, const vector<idx_t> &side_level,
@@ -639,41 +886,10 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 	};
 	refresh_existential();
 
-	// Sub-nodes and chunk layouts, built once per domain.
-	vector<unique_ptr<Expression>> side_sub(k1);
-	vector<vector<LogicalType>> side_types(k1);
-	for (idx_t s = 0; s < k1; s++) {
-		if (op.unary_leaves[s].empty()) {
-			continue;
-		}
-		vector<idx_t> index_map(total_width, DConstants::INVALID_INDEX);
-		for (idx_t c = 0; c < op.side_widths[s]; c++) {
-			index_map[op.side_offsets[s] + c] = c;
-		}
-		side_sub[s] = AIFactorSubNode(fn, op.unary_leaves[s], index_map);
-		side_types[s].assign(op.types.begin() + NumericCast<int64_t>(op.side_offsets[s]),
-		                     op.types.begin() + NumericCast<int64_t>(op.side_offsets[s] + op.side_widths[s]));
-		side_types[s].push_back(LogicalType::BIGINT);
-	}
-	vector<unique_ptr<Expression>> edge_sub(ne);
-	vector<vector<LogicalType>> edge_types(ne);
-	for (idx_t e = 0; e < ne; e++) {
-		auto &edge = op.edges[e];
-		vector<idx_t> index_map(total_width, DConstants::INVALID_INDEX);
-		for (idx_t c = 0; c < op.side_widths[edge.s]; c++) {
-			index_map[op.side_offsets[edge.s] + c] = c;
-		}
-		for (idx_t c = 0; c < op.side_widths[edge.t]; c++) {
-			index_map[op.side_offsets[edge.t] + c] = op.side_widths[edge.s] + c;
-		}
-		edge_sub[e] = AIFactorSubNode(fn, edge.leaf_ids, index_map);
-		edge_types[e].assign(op.types.begin() + NumericCast<int64_t>(op.side_offsets[edge.s]),
-		                     op.types.begin() + NumericCast<int64_t>(op.side_offsets[edge.s] + op.side_widths[edge.s]));
-		for (idx_t c = 0; c < op.side_widths[edge.t]; c++) {
-			edge_types[e].push_back(op.types[op.side_offsets[edge.t] + c]);
-		}
-		edge_types[e].push_back(LogicalType::BIGINT);
-	}
+	// Sub-nodes, chunk layouts and the prefix-cache split, built once per domain.
+	GraphUnitBaker baker(context, op, sink);
+	auto &side_sub = baker.side_sub;
+	auto &edge_sub = baker.edge_sub;
 
 	if (AIConfig::Get().debug_log.find("graph") != string::npos) {
 		for (idx_t e = 0; e < ne; e++) {
@@ -862,189 +1078,18 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 	// one-row chunk); identical prompt vectors share one call via the single-flight table.
 	GraphStreamPool pool;
 	pool.Start(context, batch_cap, query_text);
-	vector<unique_ptr<ExpressionExecutor>> side_exec(k1), edge_exec(ne);
-	vector<unique_ptr<DataChunk>> side_row(k1), edge_row(ne);
 	std::unordered_map<string, vector<GraphStreamPool::Done>> parked; // key -> units awaiting the winner
-	// Explicit provider prompt caching for pair prompts (ai_prefix_cache): split each single-leaf
-	// edge's call prompt at the first operand that reads the other side. The graph only DECLARES
-	// structure: every eligible pair call carries (prefix, suffix) plus an expected_reuse hint
-	// (the member's remaining live pairs). Size gate, write policy, and prime/park sequencing all
-	// live in the client's prefix lifecycle (ai_client.cpp), shared by every operator.
-	const bool prefix_caching = AIConfig::Get().prefix_cache;
-	vector<char> cache_enabled(ne, 0);
-	vector<vector<const Expression *>> cache_ops(ne);
-	vector<idx_t> cache_split(ne, 0);
-	vector<char> cache_group_s(ne, 1); // group axis: 1 = edge.s owns the prefix, 0 = edge.t
-	if (prefix_caching) {
-		for (idx_t e = 0; e < ne; e++) {
-			auto &fn_sub = edge_sub[e]->Cast<BoundFunctionExpression>();
-			if ((fn_sub.GetChildren().size() - 1) / 3 != 1) {
-				continue; // v1: single-leaf edges only
-			}
-			vector<const Expression *> ops;
-			// look past the all-columns-NULL guard: the prefix lives in the concatenation under it
-			AIFactorPromptOperands(AIUnwrapNullGuard(*fn_sub.GetChildren()[1]), ops);
-			auto op_side = [&](const Expression &expr) {
-				vector<idx_t> refs;
-				std::function<void(const Expression &)> walk = [&](const Expression &node) {
-					if (node.GetExpressionClass() == ExpressionClass::BOUND_REF) {
-						refs.push_back(node.Cast<BoundReferenceExpression>().Index());
-						return;
-					}
-					ExpressionIterator::EnumerateChildren(node, [&](const Expression &child) { walk(child); });
-				};
-				walk(expr);
-				bool s_axis = false, t_axis = false;
-				for (const auto col : refs) {
-					(col < op.side_widths[op.edges[e].s] ? s_axis : t_axis) = true;
-				}
-				return s_axis && t_axis ? 3 : (t_axis ? 2 : (s_axis ? 1 : 0));
-			};
-			idx_t first_ref = ops.size();
-			for (idx_t o = 0; o < ops.size(); o++) {
-				const auto side = op_side(*ops[o]);
-				if (side == 1 || side == 2) {
-					first_ref = o;
-					break;
-				}
-				if (side == 3) {
-					break; // an operand reads both sides before any single-side operand: no clean split
-				}
-			}
-			if (first_ref == ops.size()) {
-				continue;
-			}
-			const auto group_side = op_side(*ops[first_ref]);
-			idx_t split = ops.size();
-			for (idx_t o = first_ref + 1; o < ops.size(); o++) {
-				const auto side = op_side(*ops[o]);
-				if (side == 3 || (side != 0 && side != group_side)) {
-					split = o;
-					break;
-				}
-			}
-			if (split == ops.size()) {
-				continue; // never touches the other side: not a pair prompt
-			}
-			cache_enabled[e] = 1;
-			cache_ops[e] = std::move(ops);
-			cache_split[e] = split;
-			cache_group_s[e] = static_cast<char>(group_side == 1);
-		}
-	}
-	auto cache_group_member = [&](idx_t e, idx_t a, idx_t b) {
-		return cache_group_s[e] ? a : b;
-	};
-	vector<unique_ptr<ExpressionExecutor>> edge_ops_exec(ne);
-	auto bake_split = [&](idx_t e, idx_t a, idx_t b, string &prefix, string &suffix) {
-		auto &exec = edge_ops_exec[e];
-		auto &row = edge_row[e];
-		if (!exec) {
-			exec = make_uniq<ExpressionExecutor>(context);
-			for (const auto *operand : cache_ops[e]) {
-				exec->AddExpression(*operand);
-			}
-			if (!row) {
-				row = make_uniq<DataChunk>();
-				row->Initialize(BufferAllocator::Get(context), edge_types[e]);
-			}
-		}
-		auto &edge = op.edges[e];
-		row->Reset();
-		row->SetChildCardinality(1);
-		for (idx_t c = 0; c < op.side_widths[edge.s]; c++) {
-			row->data[c].SetValue(0, sink.sides[edge.s].reps[a][c]);
-		}
-		for (idx_t c = 0; c < op.side_widths[edge.t]; c++) {
-			row->data[op.side_widths[edge.s] + c].SetValue(0, sink.sides[edge.t].reps[b][c]);
-		}
-		row->data[op.side_widths[edge.s] + op.side_widths[edge.t]].SetValue(0, Value::BIGINT(1));
-		DataChunk out;
-		vector<LogicalType> out_types(cache_ops[e].size(), LogicalType::VARCHAR);
-		out.Initialize(BufferAllocator::Get(context), out_types);
-		exec->Execute(*row, out);
-		prefix.clear();
-		suffix.clear();
-		for (idx_t o = 0; o < cache_ops[e].size(); o++) {
-			const Value v = out.data[o].GetValue(0);
-			(o < cache_split[e] ? prefix : suffix) += v.IsNull() ? string() : StringValue::Get(v);
-		}
-	};
-	auto bake = [&](bool is_unary, idx_t domain, idx_t a, idx_t b) {
-		auto &sub = is_unary ? side_sub[domain] : edge_sub[domain];
-		auto &fn_sub = sub->Cast<BoundFunctionExpression>();
-		const idx_t nleaf = (fn_sub.GetChildren().size() - 1) / 3; // tree + 3n (+meta)
-		auto &exec = is_unary ? side_exec[domain] : edge_exec[domain];
-		auto &row = is_unary ? side_row[domain] : edge_row[domain];
-		if (!exec) {
-			vector<unique_ptr<Expression>> copies; // call prompts are children [1 .. n]
-			exec = make_uniq<ExpressionExecutor>(context);
-			for (idx_t l = 0; l < nleaf; l++) {
-				exec->AddExpression(*fn_sub.GetChildren()[1 + l]);
-			}
-			row = make_uniq<DataChunk>();
-			row->Initialize(BufferAllocator::Get(context), is_unary ? side_types[domain] : edge_types[domain]);
-		}
-		row->Reset();
-		row->SetChildCardinality(1);
-		if (is_unary) {
-			auto &side = sink.sides[domain];
-			for (idx_t c = 0; c < op.side_widths[domain]; c++) {
-				row->data[c].SetValue(0, side.reps[a][c]);
-			}
-			row->data[op.side_widths[domain]].SetValue(0, Value::BIGINT(1));
-		} else {
-			auto &edge = op.edges[domain];
-			for (idx_t c = 0; c < op.side_widths[edge.s]; c++) {
-				row->data[c].SetValue(0, sink.sides[edge.s].reps[a][c]);
-			}
-			for (idx_t c = 0; c < op.side_widths[edge.t]; c++) {
-				row->data[op.side_widths[edge.s] + c].SetValue(0, sink.sides[edge.t].reps[b][c]);
-			}
-			row->data[op.side_widths[edge.s] + op.side_widths[edge.t]].SetValue(0, Value::BIGINT(1));
-		}
-		DataChunk out;
-		vector<LogicalType> out_types(nleaf, LogicalType::VARCHAR);
-		out.Initialize(BufferAllocator::Get(context), out_types);
-		exec->Execute(*row, out);
-		vector<string> prompts(nleaf);
-		for (idx_t l = 0; l < nleaf; l++) {
-			const Value v = out.data[l].GetValue(0);
-			prompts[l] = v.IsNull() ? string() : StringValue::Get(v);
-		}
-		return prompts;
-	};
 	auto submit_unit = [&](bool is_unary, idx_t domain, idx_t a, idx_t b) {
-		vector<string> prompts;
-		vector<string> prefixes;
 		idx_t expected_reuse = 0;
-		if (!is_unary && cache_enabled[domain]) {
-			// Declaration only: split at the structural boundary and hand the client the known
-			// fan-out (this member's remaining live pairs, this call included). Whether a
-			// breakpoint is emitted -- and the write-before-reads sequencing -- is the client
-			// prefix lifecycle's decision.
-			const idx_t g = cache_group_member(domain, a, b);
-			string prefix, suffix;
-			bake_split(domain, a, b, prefix, suffix);
-			expected_reuse = unknown_pairs(cache_group_s[domain] ? op.edges[domain].s : op.edges[domain].t, g,
+		if (!is_unary && baker.cache_enabled[domain]) {
+			// Declaration only: the client's prefix lifecycle decides whether a breakpoint is emitted;
+			// the hint is this member's remaining live pairs, this call included.
+			expected_reuse = unknown_pairs(baker.CacheGroupSide(domain), baker.CacheGroupMember(domain, a, b),
 			                               DConstants::INVALID_INDEX, domain);
-			prompts.push_back(std::move(suffix));
-			prefixes.push_back(std::move(prefix));
 		}
-		if (prompts.empty()) {
-			prompts = bake(is_unary, domain, a, b);
-		}
+		vector<string> prompts, prefixes;
 		string key;
-		for (idx_t l = 0; l < prompts.size(); l++) {
-			// local identity is prefix+prompt concatenated: split-invariant, so cached and plain
-			// forms of the same pair share one flight and one cache entry
-			if (l < prefixes.size()) {
-				key += prefixes[l];
-			}
-			key += prompts[l];
-			key += '\x1f';
-		}
-		key += is_unary ? "u" : "e"; // unary and edge sub-nodes may share prompt text but not meta
+		baker.Unit(is_unary, domain, a, b, prompts, prefixes, key);
 		if (is_unary) {
 			uval[domain][a] = 3; // dispatched
 		} else {
@@ -1323,6 +1368,744 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 	}
 }
 
+//===--------------------------------------------------------------------===//
+// Sparse lazy evaluation: the dense scheduler's need gate, cascade, existential mode, LIMIT stop
+// and output, with state proportional to the MEMBERS and the CALLS MADE instead of the pair
+// domain. Per member and incident edge it keeps counters (true and false pairs with a live
+// partner, true pairs with any partner, in flight) and the partners it was evaluated with; the
+// pairs still to ask are enumerated from a cursor over the partner side (rotated per member, so
+// parents start on different children) and never stored. Selection scores MEMBERS, not pairs:
+// O(members) per batch where the dense scheduler scans the pair domain.
+//===--------------------------------------------------------------------===//
+static void SparseLazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGraph &op,
+                                            FactorGraphSinkState &sink, const string &query_text,
+                                            const vector<idx_t> &parent_edge_of_side, const vector<idx_t> &side_level,
+                                            vector<vector<char>> &live,
+                                            vector<vector<std::pair<idx_t, idx_t>>> &edge_pass) {
+	const idx_t k1 = op.side_widths.size();
+	const idx_t ne = op.edges.size();
+	const idx_t batch_cap = MaxValue<idx_t>(AIConfig::Get().max_concurrency, 1);
+
+	vector<idx_t> child_of(ne), parent_of(ne);
+	for (idx_t e = 0; e < ne; e++) {
+		const bool s_is_child = parent_edge_of_side[op.edges[e].s] == e;
+		child_of[e] = s_is_child ? op.edges[e].s : op.edges[e].t;
+		parent_of[e] = s_is_child ? op.edges[e].t : op.edges[e].s;
+	}
+	vector<vector<idx_t>> incident(k1);
+	for (idx_t e = 0; e < ne; e++) {
+		incident[op.edges[e].s].push_back(e);
+		incident[op.edges[e].t].push_back(e);
+	}
+	auto axis_of = [&](idx_t e, idx_t s) {
+		return op.edges[e].s == s ? 0 : 1;
+	};
+	auto side_of_axis = [&](idx_t e, int x) {
+		return x ? op.edges[e].t : op.edges[e].s;
+	};
+
+	// Member unary state: 0 pending, 1 confirmed-true, 2 false, 3 dispatched.
+	vector<vector<char>> uval(k1);
+	vector<idx_t> live_count(k1, 0);
+	for (idx_t s = 0; s < k1; s++) {
+		uval[s].assign(sink.sides[s].reps.size(), op.unary_leaves[s].empty() ? 1 : 0);
+		for (const auto f : live[s]) {
+			live_count[s] += f;
+		}
+	}
+	// Per edge and axis (0 = members of edge.s, 1 = members of edge.t), per member: what the dense
+	// pair array answered by scanning a row. tl/fl count true/false pairs whose partner is still
+	// live; pass_any counts true pairs with any partner (what supports a child edge); ptrue/pfalse
+	// list the partners (both endpoints live when the pair landed).
+	struct AxisState {
+		vector<uint32_t> tl, fl, pass_any, evals, inflight;
+		vector<vector<uint32_t>> ptrue, pfalse;
+	};
+	vector<AxisState> axis_state[2];
+	for (int x = 0; x < 2; x++) {
+		axis_state[x].resize(ne);
+		for (idx_t e = 0; e < ne; e++) {
+			const idx_t n = sink.sides[side_of_axis(e, x)].reps.size();
+			auto &a = axis_state[x][e];
+			a.tl.assign(n, 0);
+			a.fl.assign(n, 0);
+			a.pass_any.assign(n, 0);
+			a.evals.assign(n, 0);
+			a.inflight.assign(n, 0);
+			a.ptrue.resize(n);
+			a.pfalse.resize(n);
+		}
+	}
+	auto A = [&](idx_t e, int x) -> AxisState & {
+		return axis_state[x][e];
+	};
+	vector<idx_t> un_evals(k1, 0), un_passes(k1, 0), ed_evals(ne, 0), ed_passes(ne, 0);
+	// Pair enumeration: per edge and parent-side member, a cursor over the child side (rotated per
+	// member) plus the partners skipped because their unary verdict was still pending.
+	vector<vector<uint32_t>> cursor(ne);
+	vector<vector<vector<uint32_t>>> deferred(ne);
+	for (idx_t e = 0; e < ne; e++) {
+		const idx_t np = sink.sides[parent_of[e]].reps.size();
+		cursor[e].assign(np, 0);
+		deferred[e].resize(np);
+	}
+
+	auto unknown = [&](idx_t e, int x, idx_t m) -> idx_t {
+		auto &a = A(e, x);
+		const idx_t lp = live_count[side_of_axis(e, 1 - x)];
+		const idx_t known = a.tl[m] + a.fl[m] + a.inflight[m];
+		return lp > known ? lp - known : 0;
+	};
+	// A member stays alive on an edge while some live partner is not a confirmed false.
+	auto alive_on = [&](idx_t e, int x, idx_t m) {
+		return live_count[side_of_axis(e, 1 - x)] > A(e, x).fl[m];
+	};
+	auto unknown_pairs = [&](idx_t s, idx_t m, idx_t skip_edge, idx_t only_edge) {
+		idx_t n = 0;
+		for (const auto e : incident[s]) {
+			if (e == skip_edge || (only_edge != DConstants::INVALID_INDEX && e != only_edge)) {
+				continue;
+			}
+			n += unknown(e, axis_of(e, s), m);
+		}
+		return n;
+	};
+	// A parent-side member supports its child edge once it has a confirmed-true pair on ITS
+	// parent edge (any partner, as the dense scheduler counts it); roots support unconditionally.
+	auto supported = [&](idx_t s, idx_t m) {
+		const idx_t pe = parent_edge_of_side[s];
+		return pe == DConstants::INVALID_INDEX || A(pe, axis_of(pe, s)).pass_any[m] > 0;
+	};
+
+	// Deletion cascade. A death is only QUEUED (kill); the cascade drains the queue, taking each dead
+	// member's pairs out of its partners' live counters, and only then judges liveness: the members a
+	// false pair touched since the last cascade, and every member facing a side that shrank. The
+	// counters are consistent only between a drained queue and the next kill, so each sweep collects
+	// the dead first and kills them afterwards (a death can only make others dead, never alive).
+	// Deciding inside apply_value, with a death queued but its partners' counters not yet adjusted,
+	// killed a member that had exactly one live non-false partner left.
+	std::deque<std::pair<idx_t, idx_t>> dying;
+	vector<std::pair<idx_t, idx_t>> touched; // (side, member) whose false-pair count rose
+	vector<char> side_shrunk(k1, 0);
+	auto kill = [&](idx_t s, idx_t m) {
+		if (!live[s][m]) {
+			return;
+		}
+		live[s][m] = 0;
+		live_count[s]--;
+		dying.emplace_back(s, m);
+	};
+	auto cascade = [&]() {
+		for (;;) {
+			while (!dying.empty()) {
+				const auto sm = dying.front();
+				dying.pop_front();
+				const idx_t s = sm.first, m = sm.second;
+				for (const auto e : incident[s]) {
+					const int x = axis_of(e, s);
+					const idx_t o = side_of_axis(e, 1 - x);
+					auto &mine = A(e, x);
+					auto &theirs = A(e, 1 - x);
+					for (const auto q : mine.ptrue[m]) {
+						if (live[o][q] && theirs.tl[q] > 0) {
+							theirs.tl[q]--;
+						}
+					}
+					for (const auto q : mine.pfalse[m]) {
+						if (live[o][q] && theirs.fl[q] > 0) {
+							theirs.fl[q]--;
+						}
+					}
+					side_shrunk[s] = 1;
+				}
+			}
+			// consistent state: collect the dead, then kill
+			vector<std::pair<idx_t, idx_t>> dead;
+			auto dead_on_any_edge = [&](idx_t s, idx_t m) {
+				for (const auto e : incident[s]) {
+					if (!alive_on(e, axis_of(e, s), m)) {
+						return true;
+					}
+				}
+				return false;
+			};
+			for (const auto &sm : touched) {
+				if (live[sm.first][sm.second] && dead_on_any_edge(sm.first, sm.second)) {
+					dead.push_back(sm);
+				}
+			}
+			touched.clear();
+			for (idx_t s = 0; s < k1; s++) {
+				if (!side_shrunk[s]) {
+					continue;
+				}
+				side_shrunk[s] = 0;
+				for (const auto e : incident[s]) {
+					const int xo = 1 - axis_of(e, s);
+					const idx_t o = side_of_axis(e, xo);
+					for (idx_t q = 0; q < live[o].size(); q++) {
+						if (live[o][q] && !alive_on(e, xo, q)) {
+							dead.emplace_back(o, q);
+						}
+					}
+				}
+			}
+			if (dead.empty()) {
+				break;
+			}
+			for (const auto &sm : dead) {
+				kill(sm.first, sm.second);
+			}
+		}
+	};
+
+	// EXISTENTIAL mode (see the dense scheduler): satisfied members stop generating work; downstream
+	// units stay dispatchable while an unsatisfied member still routes through them.
+	const bool existential = op.existential_side != DConstants::INVALID_INDEX;
+	vector<char> satisfied;
+	if (existential) {
+		satisfied.assign(sink.sides[op.existential_side].reps.size(), 0);
+	}
+	vector<vector<char>> useful(k1);
+	auto true_adjacency = [&]() {
+		// [e][0]: live s_rep -> live t_reps with a confirmed pair, [1]: the transpose
+		vector<vector<std::unordered_map<idx_t, vector<idx_t>>>> adj(ne);
+		for (idx_t e = 0; e < ne; e++) {
+			auto &edge = op.edges[e];
+			adj[e].resize(2);
+			auto &as = A(e, 0);
+			for (idx_t i = 0; i < as.ptrue.size(); i++) {
+				if (!live[edge.s][i]) {
+					continue;
+				}
+				for (const auto j : as.ptrue[i]) {
+					if (live[edge.t][j]) {
+						adj[e][0][i].push_back(j);
+						adj[e][1][j].push_back(i);
+					}
+				}
+			}
+		}
+		return adj;
+	};
+	auto refresh_existential = [&]() {
+		if (!existential) {
+			return;
+		}
+		auto adj = true_adjacency();
+		auto has_pair = [&](idx_t e, idx_t i, idx_t j) {
+			auto it = adj[e][0].find(i);
+			return it != adj[e][0].end() && std::find(it->second.begin(), it->second.end(), j) != it->second.end();
+		};
+		const idx_t es = op.existential_side;
+		for (idx_t m = 0; m < satisfied.size(); m++) {
+			if (satisfied[m] || !live[es][m]) {
+				continue;
+			}
+			vector<idx_t> assignment(k1, DConstants::INVALID_INDEX);
+			assignment[es] = m;
+			std::function<bool(idx_t)> walk = [&](idx_t side) {
+				while (side < k1 && side == es) {
+					side++;
+				}
+				if (side >= k1) {
+					return true;
+				}
+				for (idx_t r = 0; r < sink.sides[side].reps.size(); r++) {
+					if (!live[side][r] || (!op.unary_leaves[side].empty() && uval[side][r] != 1)) {
+						continue;
+					}
+					bool ok = true;
+					for (const auto e : incident[side]) {
+						auto &ed = op.edges[e];
+						const idx_t other = ed.s == side ? ed.t : ed.s;
+						if (assignment[other] == DConstants::INVALID_INDEX) {
+							continue;
+						}
+						ok = ed.s == side ? has_pair(e, r, assignment[other]) : has_pair(e, assignment[other], r);
+						if (!ok) {
+							break;
+						}
+					}
+					if (!ok) {
+						continue;
+					}
+					assignment[side] = r;
+					if (walk(side + 1)) {
+						return true;
+					}
+					assignment[side] = DConstants::INVALID_INDEX;
+				}
+				return false;
+			};
+			if (walk(0)) {
+				satisfied[m] = 1;
+			}
+		}
+		for (idx_t s = 0; s < k1; s++) {
+			useful[s].assign(sink.sides[s].reps.size(), 0);
+		}
+		for (idx_t m = 0; m < satisfied.size(); m++) {
+			useful[es][m] =
+			    static_cast<char>(live[es][m] && !satisfied[m] && (op.unary_leaves[es].empty() || uval[es][m] == 1));
+		}
+		vector<idx_t> order(k1);
+		for (idx_t s = 0; s < k1; s++) {
+			order[s] = s;
+		}
+		std::sort(order.begin(), order.end(), [&](idx_t x, idx_t y) { return side_level[x] < side_level[y]; });
+		for (const auto s : order) {
+			const idx_t pe = parent_edge_of_side[s];
+			if (pe == DConstants::INVALID_INDEX) {
+				continue;
+			}
+			const int x = axis_of(pe, s);
+			const idx_t ps = side_of_axis(pe, 1 - x);
+			auto &a = A(pe, x);
+			for (idx_t m = 0; m < sink.sides[s].reps.size(); m++) {
+				if (!live[s][m] || (!op.unary_leaves[s].empty() && uval[s][m] != 1)) {
+					continue;
+				}
+				for (const auto q : a.ptrue[m]) {
+					if (useful[ps][q]) {
+						useful[s][m] = 1;
+						break;
+					}
+				}
+			}
+		}
+	};
+	auto parent_ok = [&](idx_t e, idx_t pm) {
+		if (existential) {
+			return useful[parent_of[e]][pm] != 0;
+		}
+		return supported(parent_of[e], pm);
+	};
+	refresh_existential();
+
+	// Observed pass rates, Laplace-smoothed, per edge and per member (dense scheduler's estimates).
+	auto est = [](idx_t passes, idx_t evals) {
+		return (1.0 + static_cast<double>(passes)) / (2.0 + static_cast<double>(evals));
+	};
+	auto member_est = [&](idx_t e, int x, idx_t m) {
+		auto &a = A(e, x);
+		return a.evals[m] > 0 ? est(a.pass_any[m], a.evals[m]) : est(ed_passes[e], ed_evals[e]);
+	};
+	auto edge_incomplete_for = [&](idx_t e, idx_t s, idx_t m) {
+		return unknown(e, axis_of(e, s), m) > 0;
+	};
+	auto open_child_edge = [&](idx_t s, idx_t m) {
+		idx_t open = DConstants::INVALID_INDEX;
+		double open_est = 2.0;
+		for (const auto e : incident[s]) {
+			if (parent_of[e] != s || !edge_incomplete_for(e, s, m)) {
+				continue;
+			}
+			const double p_pass = member_est(e, axis_of(e, s), m);
+			if (p_pass < open_est) {
+				open_est = p_pass;
+				open = e;
+			}
+		}
+		return open;
+	};
+	auto kill_credit = [&](idx_t e, idx_t s, int x, idx_t m) {
+		if (A(e, x).pass_any[m] > 0) {
+			return 0.0;
+		}
+		const idx_t rem = unknown(e, x, m);
+		const double fail = 1.0 - member_est(e, x, m);
+		double all_fail = 1.0;
+		for (idx_t r = 1; r < MinValue<idx_t>(rem, 12); r++) {
+			all_fail *= fail;
+		}
+		return static_cast<double>(unknown_pairs(s, m, e, DConstants::INVALID_INDEX)) * all_fail;
+	};
+
+	// LIMIT early-stop: confirmed output rows (count products included) with an early bail at k1.
+	auto confirmed_at_least = [&](int64_t want) {
+		auto adj = true_adjacency();
+		int64_t confirmed = 0;
+		vector<idx_t> assignment(k1);
+		std::function<bool(idx_t)> walk = [&](idx_t side) {
+			if (side == k1) {
+				int64_t product = 1;
+				for (idx_t s = 0; s < k1; s++) {
+					product *= NumericCast<int64_t>(sink.sides[s].counts[assignment[s]]);
+				}
+				confirmed += product;
+				return confirmed >= want;
+			}
+			for (idx_t r = 0; r < sink.sides[side].reps.size(); r++) {
+				if (!live[side][r] || (!op.unary_leaves[side].empty() && uval[side][r] != 1)) {
+					continue;
+				}
+				bool ok = true;
+				for (idx_t e = 0; e < ne && ok; e++) {
+					auto &ed = op.edges[e];
+					if (ed.s == side && ed.t < side) {
+						auto it = adj[e][0].find(r);
+						ok = it != adj[e][0].end() &&
+						     std::find(it->second.begin(), it->second.end(), assignment[ed.t]) != it->second.end();
+					} else if (ed.t == side && ed.s < side) {
+						auto it = adj[e][1].find(r);
+						ok = it != adj[e][1].end() &&
+						     std::find(it->second.begin(), it->second.end(), assignment[ed.s]) != it->second.end();
+					} else if ((ed.s == side && ed.t > side) || (ed.t == side && ed.s > side)) {
+						auto &m = ed.s == side ? adj[e][0] : adj[e][1];
+						ok = m.find(r) != m.end();
+					}
+				}
+				if (!ok) {
+					continue;
+				}
+				assignment[side] = r;
+				if (walk(side + 1)) {
+					return true;
+				}
+			}
+			return false;
+		};
+		return walk(0);
+	};
+
+	// Streaming driver (see the dense scheduler): persistent pool, single-flight, dispatch marking.
+	GraphUnitBaker baker(context, op, sink);
+	GraphStreamPool pool;
+	pool.Start(context, batch_cap, query_text);
+	std::unordered_map<string, vector<GraphStreamPool::Done>> parked;
+	auto submit_unit = [&](bool is_unary, idx_t domain, idx_t a, idx_t b) {
+		idx_t expected_reuse = 0;
+		if (!is_unary && baker.cache_enabled[domain]) {
+			const idx_t gs = baker.CacheGroupSide(domain);
+			expected_reuse = unknown(domain, axis_of(domain, gs), baker.CacheGroupMember(domain, a, b));
+		}
+		vector<string> prompts, prefixes;
+		string key;
+		baker.Unit(is_unary, domain, a, b, prompts, prefixes, key);
+		if (is_unary) {
+			uval[domain][a] = 3;
+		} else {
+			A(domain, 0).inflight[a]++;
+			A(domain, 1).inflight[b]++;
+		}
+		auto it = parked.find(key);
+		if (it != parked.end()) {
+			it->second.push_back(GraphStreamPool::Done {key, is_unary, domain, a, b, false});
+			return;
+		}
+		parked.emplace(key, vector<GraphStreamPool::Done> {});
+		pool.Submit(GraphStreamPool::Task {baker.SubNode(is_unary, domain), std::move(prompts), std::move(prefixes),
+		                                   std::move(key), is_unary, domain, a, b, expected_reuse});
+	};
+	auto apply_value = [&](bool is_unary, idx_t domain, idx_t a, idx_t b, bool value) {
+		if (is_unary) {
+			uval[domain][a] = static_cast<char>(value ? 1 : 2);
+			un_evals[domain]++;
+			un_passes[domain] += value ? 1 : 0;
+			if (!value) {
+				kill(domain, a);
+			}
+			return;
+		}
+		auto &as = A(domain, 0);
+		auto &at = A(domain, 1);
+		if (as.inflight[a] > 0) {
+			as.inflight[a]--;
+		}
+		if (at.inflight[b] > 0) {
+			at.inflight[b]--;
+		}
+		ed_evals[domain]++;
+		ed_passes[domain] += value ? 1 : 0;
+		as.evals[a]++;
+		at.evals[b]++;
+		if (value) {
+			as.pass_any[a]++;
+			at.pass_any[b]++;
+		}
+		const idx_t s = op.edges[domain].s, t = op.edges[domain].t;
+		if (!live[s][a] || !live[t][b]) {
+			return; // a dead endpoint: the pair can neither keep anyone alive nor be emitted
+		}
+		if (value) {
+			as.tl[a]++;
+			at.tl[b]++;
+			as.ptrue[a].push_back(NumericCast<uint32_t>(b));
+			at.ptrue[b].push_back(NumericCast<uint32_t>(a));
+		} else {
+			as.fl[a]++;
+			at.fl[b]++;
+			as.pfalse[a].push_back(NumericCast<uint32_t>(b));
+			at.pfalse[b].push_back(NumericCast<uint32_t>(a));
+			touched.emplace_back(s, a); // judged by the cascade, once every queued death has settled
+			touched.emplace_back(t, b);
+		}
+	};
+	auto harvest = [&](bool blocking) {
+		vector<GraphStreamPool::Done> dones;
+		pool.Drain(dones, blocking);
+		for (auto &done : dones) {
+			apply_value(done.is_unary, done.domain, done.a, done.b, done.value);
+			auto it = parked.find(done.key);
+			if (it != parked.end()) {
+				for (auto &waiter : it->second) {
+					apply_value(waiter.is_unary, waiter.domain, waiter.a, waiter.b, done.value);
+				}
+				parked.erase(it);
+			}
+		}
+		if (!dones.empty()) {
+			pool.MarkApplied(dones.size());
+			cascade();
+			refresh_existential();
+		}
+		return !dones.empty();
+	};
+
+	// The next child partner of parent member pm on edge e that is live and unary-confirmed, or
+	// false when none is ready now. Deferred partners (unary still pending when passed) go first.
+	auto next_partner = [&](idx_t e, idx_t pm, idx_t &j_out) {
+		const idx_t cs = child_of[e];
+		auto &def = deferred[e][pm];
+		for (idx_t d = 0; d < def.size();) {
+			const idx_t j = def[d];
+			if (!live[cs][j]) {
+				def[d] = def.back();
+				def.pop_back();
+				continue;
+			}
+			if (uval[cs][j] == 1) {
+				def[d] = def.back();
+				def.pop_back();
+				j_out = j;
+				return true;
+			}
+			d++;
+		}
+		const idx_t nt = sink.sides[cs].reps.size();
+		auto &cur = cursor[e][pm];
+		const idx_t start = nt == 0 ? 0 : (pm * 7919) % nt;
+		while (cur < nt) {
+			const idx_t j = (start + cur) % nt;
+			cur++;
+			if (!live[cs][j]) {
+				continue;
+			}
+			if (uval[cs][j] != 1) {
+				def.push_back(NumericCast<uint32_t>(j));
+				continue;
+			}
+			j_out = j;
+			return true;
+		}
+		return false;
+	};
+
+	// Frontier loop: score members, submit up to the free slots from the best domain, harvest.
+	for (;;) {
+		if (op.limit >= 0 && confirmed_at_least(op.limit)) {
+			break;
+		}
+		harvest(false);
+		const idx_t pending_now = pool.Pending();
+		if (pending_now >= batch_cap) {
+			harvest(true);
+			continue;
+		}
+		const idx_t slots = batch_cap - pending_now;
+		// unary candidates: expected pruning payoff of the side's pending members
+		double best_unary_score = -1;
+		idx_t best_unary_side = k1;
+		for (idx_t s = 0; s < k1; s++) {
+			if (op.unary_leaves[s].empty()) {
+				continue;
+			}
+			for (idx_t m = 0; m < uval[s].size(); m++) {
+				if (!live[s][m] || uval[s][m] != 0) {
+					continue;
+				}
+				const double score =
+				    (1.0 - est(un_passes[s], un_evals[s])) *
+				        static_cast<double>(unknown_pairs(s, m, DConstants::INVALID_INDEX, DConstants::INVALID_INDEX)) +
+				    1.0;
+				if (score > best_unary_score) {
+					best_unary_score = score;
+					best_unary_side = s;
+				}
+			}
+		}
+		// pair candidates: per edge, the ready parent members (supported, this edge open for them,
+		// unknown pairs left); the child's share of the score is the edge's mean child credit
+		vector<double> edge_best(ne, -1.0);
+		vector<double> child_credit(ne, 0.0);
+		vector<vector<std::pair<double, idx_t>>> ready(ne);
+		for (idx_t e = 0; e < ne; e++) {
+			const idx_t ps = parent_of[e], cs = child_of[e];
+			const int px = axis_of(e, ps), cx = 1 - px;
+			double credit = 0;
+			idx_t nc = 0;
+			for (idx_t j = 0; j < live[cs].size(); j++) {
+				if (live[cs][j] && uval[cs][j] == 1 && unknown(e, cx, j) > 0) {
+					credit += kill_credit(e, cs, cx, j);
+					nc++;
+				}
+			}
+			child_credit[e] = nc ? credit / static_cast<double>(nc) : 0.0;
+			const double child_est = est(ed_passes[e], ed_evals[e]);
+			for (idx_t pm = 0; pm < live[ps].size(); pm++) {
+				if (!live[ps][pm] || uval[ps][pm] != 1 || unknown(e, px, pm) == 0) {
+					continue;
+				}
+				if (!parent_ok(e, pm) || open_child_edge(ps, pm) != e) {
+					continue;
+				}
+				const double p_fail = 1.0 - 0.5 * (member_est(e, px, pm) + child_est);
+				const double score = p_fail * (0.1 + kill_credit(e, ps, px, pm) + child_credit[e]);
+				ready[e].emplace_back(-score, pm);
+				edge_best[e] = MaxValue<double>(edge_best[e], score);
+			}
+		}
+		idx_t best_pair_edge = ne;
+		for (idx_t e = 0; e < ne; e++) {
+			if (edge_best[e] >= 0 && (best_pair_edge == ne || edge_best[e] > edge_best[best_pair_edge])) {
+				best_pair_edge = e;
+			}
+		}
+		auto dispatch_unary = [&](idx_t side) {
+			// batch = highest-impact pending members of the side
+			vector<std::pair<double, idx_t>> scored;
+			for (idx_t m = 0; m < uval[side].size(); m++) {
+				if (live[side][m] && uval[side][m] == 0) {
+					scored.emplace_back(-static_cast<double>(unknown_pairs(side, m, DConstants::INVALID_INDEX,
+					                                                       DConstants::INVALID_INDEX)),
+					                    m);
+				}
+			}
+			std::sort(scored.begin(), scored.end());
+			idx_t submitted = 0;
+			for (idx_t u = 0; u < scored.size() && submitted < slots; u++) {
+				submit_unit(true, side, scored[u].second, 0);
+				submitted++;
+			}
+			return submitted;
+		};
+		if (best_unary_side < k1 && (best_pair_edge == ne || best_unary_score >= edge_best[best_pair_edge])) {
+			dispatch_unary(best_unary_side);
+			harvest(false);
+			continue;
+		}
+		// pairs: edges by best score; within an edge, members by score, at most 2 pairs each in the
+		// first pass (keeps future frontiers and the pool full), then fill
+		vector<idx_t> edges_by_score;
+		for (idx_t e = 0; e < ne; e++) {
+			if (edge_best[e] >= 0) {
+				edges_by_score.push_back(e);
+			}
+		}
+		std::sort(edges_by_score.begin(), edges_by_score.end(),
+		          [&](idx_t a, idx_t b) { return edge_best[a] > edge_best[b]; });
+		idx_t submitted = 0;
+		for (const auto e : edges_by_score) {
+			if (submitted >= slots) {
+				break;
+			}
+			auto &members = ready[e];
+			std::sort(members.begin(), members.end());
+			for (idx_t pass = 0; pass < 2 && submitted < slots; pass++) {
+				const idx_t per_member = pass == 0 ? 2 : slots;
+				for (auto &cand : members) {
+					if (submitted >= slots) {
+						break;
+					}
+					const idx_t pm = cand.second;
+					for (idx_t n = 0; n < per_member && submitted < slots; n++) {
+						idx_t j;
+						if (!next_partner(e, pm, j)) {
+							break;
+						}
+						const bool s_is_parent = parent_of[e] == op.edges[e].s;
+						submit_unit(false, e, s_is_parent ? pm : j, s_is_parent ? j : pm);
+						submitted++;
+					}
+				}
+			}
+		}
+		if (submitted == 0 && best_unary_side < k1) {
+			// A ready parent counts its unconfirmed partners as unknown, so an edge can win the score
+			// contest with nothing dispatchable yet: ask the pending unary members instead of stalling.
+			submitted = dispatch_unary(best_unary_side);
+		}
+		if (submitted == 0) {
+			if (pool.Pending() > 0) {
+				harvest(true); // nothing selectable until in-flight results land
+				continue;
+			}
+			break; // no dispatchable work left: every needed prompt is resolved
+		}
+		harvest(false);
+	}
+	if (AIConfig::Get().debug_log.find("graph") != string::npos) {
+		for (idx_t s = 0; s < k1; s++) {
+			idx_t u0 = 0, u1 = 0, u2 = 0, u3 = 0;
+			for (idx_t m = 0; m < uval[s].size(); m++) {
+				(uval[s][m] == 0 ? u0 : uval[s][m] == 1 ? u1 : uval[s][m] == 2 ? u2 : u3)++;
+			}
+			fprintf(stderr,
+			        "[graph] exit side%llu live=%llu/%llu uval pending=%llu true=%llu false=%llu inflight=%llu\n",
+			        (unsigned long long)s, (unsigned long long)live_count[s], (unsigned long long)live[s].size(),
+			        (unsigned long long)u0, (unsigned long long)u1, (unsigned long long)u2, (unsigned long long)u3);
+		}
+		for (idx_t e = 0; e < ne; e++) {
+			idx_t tl = 0, fl = 0, inf = 0, unk = 0, pany = 0, ready_n = 0;
+			const idx_t ps = parent_of[e];
+			const int px = axis_of(e, ps);
+			for (idx_t m = 0; m < live[ps].size(); m++) {
+				tl += A(e, px).tl[m];
+				fl += A(e, px).fl[m];
+				inf += A(e, px).inflight[m];
+				pany += A(e, px).pass_any[m];
+				if (live[ps][m] && uval[ps][m] == 1) {
+					unk += unknown(e, px, m);
+					ready_n += parent_ok(e, m) && open_child_edge(ps, m) == e && unknown(e, px, m) > 0;
+				}
+			}
+			fprintf(stderr,
+			        "[graph] exit edge%llu parent=side%llu tl=%llu fl=%llu inflight=%llu pass_any=%llu unknown=%llu "
+			        "ready=%llu pending_pool=%llu\n",
+			        (unsigned long long)e, (unsigned long long)ps, (unsigned long long)tl, (unsigned long long)fl,
+			        (unsigned long long)inf, (unsigned long long)pany, (unsigned long long)unk,
+			        (unsigned long long)ready_n, (unsigned long long)pool.Pending());
+		}
+	}
+	pool.Shutdown();
+
+	for (idx_t s = 0; s < k1; s++) {
+		if (op.unary_leaves[s].empty()) {
+			continue;
+		}
+		for (idx_t m = 0; m < uval[s].size(); m++) {
+			if (uval[s][m] != 1) {
+				live[s][m] = 0; // unevaluated or false unary: never emit (matters under LIMIT early-stop)
+			}
+		}
+	}
+	for (idx_t e = 0; e < ne; e++) {
+		auto &edge = op.edges[e];
+		auto &as = A(e, 0);
+		for (idx_t i = 0; i < as.ptrue.size(); i++) {
+			if (!live[edge.s][i]) {
+				continue;
+			}
+			for (const auto j : as.ptrue[i]) {
+				if (live[edge.t][j]) {
+					edge_pass[e].emplace_back(i, j);
+				}
+			}
+		}
+	}
+}
+
 void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGraph &op, FactorGraphSinkState &sink,
                               FactorGraphSourceState &state) {
 	const string query_text = context.GetCurrentQuery();
@@ -1348,7 +2131,13 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 	{
 		vector<idx_t> parent_edge_of_side, side_level;
 		if (OrientForest(op, sink, parent_edge_of_side, side_level)) {
-			LazyFactorGraphEvaluation(context, op, sink, query_text, parent_edge_of_side, side_level, live, edge_pass);
+			if (AIVarcharSetting(context, "ai_factor_state", "dense") == "sparse") {
+				SparseLazyFactorGraphEvaluation(context, op, sink, query_text, parent_edge_of_side, side_level, live,
+				                                edge_pass);
+			} else {
+				LazyFactorGraphEvaluation(context, op, sink, query_text, parent_edge_of_side, side_level, live,
+				                          edge_pass);
+			}
 			lazy_done = true;
 		}
 	}

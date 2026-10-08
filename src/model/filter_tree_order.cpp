@@ -306,6 +306,21 @@ unique_ptr<AIFilterTreeNode> AIFilterTreeParse(const string &text) {
 	return node;
 }
 
+bool AIFilterTreeIsConjunction(const AIFilterTreeNode &node) {
+	if (node.type == AIFilterTreeType::LEAF) {
+		return true;
+	}
+	if (node.type != AIFilterTreeType::AND_OP) {
+		return false;
+	}
+	for (auto &child : node.children) {
+		if (!AIFilterTreeIsConjunction(*child)) {
+			return false;
+		}
+	}
+	return true;
+}
+
 //===--------------------------------------------------------------------===//
 // Evaluation (2-valued with UNKNOWN)
 //===--------------------------------------------------------------------===//
@@ -315,36 +330,36 @@ AITriState AIFilterTreeEval(const AIFilterTreeNode &node, const vector<AITriStat
 		return leaf_values[node.leaf_index];
 	case AIFilterTreeType::NOT_OP: {
 		auto v = AIFilterTreeEval(*node.children[0], leaf_values);
-		if (v == AITriState::TRI_UNKNOWN) {
-			return AITriState::TRI_UNKNOWN;
+		if (v == AITriState::TRI_UNKNOWN || v == AITriState::TRI_NULL) {
+			return v; // not yet known stays open; no answer stays NULL
 		}
 		return v == AITriState::TRI_TRUE ? AITriState::TRI_FALSE : AITriState::TRI_TRUE;
 	}
 	case AIFilterTreeType::AND_OP: {
-		bool any_unknown = false;
+		// A false decides; an unevaluated child keeps the fold open (it may still turn false); otherwise a
+		// NULL child makes the conjunction NULL (SQL three-valued logic).
+		bool any_unknown = false, any_null = false;
 		for (auto &child : node.children) {
 			auto v = AIFilterTreeEval(*child, leaf_values);
 			if (v == AITriState::TRI_FALSE) {
 				return AITriState::TRI_FALSE; // short-circuit
 			}
-			if (v == AITriState::TRI_UNKNOWN) {
-				any_unknown = true;
-			}
+			any_unknown = any_unknown || v == AITriState::TRI_UNKNOWN;
+			any_null = any_null || v == AITriState::TRI_NULL;
 		}
-		return any_unknown ? AITriState::TRI_UNKNOWN : AITriState::TRI_TRUE;
+		return any_unknown ? AITriState::TRI_UNKNOWN : any_null ? AITriState::TRI_NULL : AITriState::TRI_TRUE;
 	}
 	case AIFilterTreeType::OR_OP: {
-		bool any_unknown = false;
+		bool any_unknown = false, any_null = false;
 		for (auto &child : node.children) {
 			auto v = AIFilterTreeEval(*child, leaf_values);
 			if (v == AITriState::TRI_TRUE) {
 				return AITriState::TRI_TRUE; // short-circuit
 			}
-			if (v == AITriState::TRI_UNKNOWN) {
-				any_unknown = true;
-			}
+			any_unknown = any_unknown || v == AITriState::TRI_UNKNOWN;
+			any_null = any_null || v == AITriState::TRI_NULL;
 		}
-		return any_unknown ? AITriState::TRI_UNKNOWN : AITriState::TRI_FALSE;
+		return any_unknown ? AITriState::TRI_UNKNOWN : any_null ? AITriState::TRI_NULL : AITriState::TRI_FALSE;
 	}
 	}
 	return AITriState::TRI_UNKNOWN;
@@ -463,11 +478,11 @@ static void CollectLeaves(const AIFilterTreeNode &node, vector<idx_t> &out) {
 	}
 }
 
-//! Base-3 encoding of the partial assignment (TRI_FALSE=0, TRI_TRUE=1, TRI_UNKNOWN=2) -> memo key.
+//! Base-4 encoding of the partial assignment (TRI_FALSE=0, TRI_TRUE=1, TRI_UNKNOWN=2, TRI_NULL=3) -> memo key.
 static uint64_t AssignKey(const vector<AITriState> &assign) {
 	uint64_t key = 0;
 	for (auto v : assign) {
-		key = key * 3 + static_cast<uint64_t>(v);
+		key = key * 4 + static_cast<uint64_t>(v);
 	}
 	return key;
 }

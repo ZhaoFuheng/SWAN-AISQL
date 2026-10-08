@@ -18,7 +18,10 @@
 namespace duckdb {
 
 enum class AIFilterTreeType : uint8_t { LEAF, NOT_OP, AND_OP, OR_OP };
-enum class AITriState : uint8_t { TRI_FALSE = 0, TRI_TRUE = 1, TRI_UNKNOWN = 2 };
+//! TRI_UNKNOWN = not evaluated yet (the fold keeps going); TRI_NULL = evaluated, no answer (a failed call): it
+//! folds as SQL NULL, so NOT NULL is NULL, NULL AND false is false, NULL OR true is true, and a row whose
+//! tree folds to NULL is a NULL verdict -- dropped by a filter, NULL in a projection, never false.
+enum class AITriState : uint8_t { TRI_FALSE = 0, TRI_TRUE = 1, TRI_UNKNOWN = 2, TRI_NULL = 3 };
 
 struct AIFilterTreeNode {
 	AIFilterTreeType type;
@@ -43,7 +46,13 @@ unique_ptr<AIFilterTreeNode> AINormalizeFilterTree(unique_ptr<AIFilterTreeNode> 
 //! Parse the serialization; returns nullptr on malformed input.
 unique_ptr<AIFilterTreeNode> AIFilterTreeParse(const string &text);
 
-//! Evaluate the tree from per-leaf tri-state values (2-valued short-circuit; UNKNOWN propagates).
+//! True when the tree is a conjunction of leaves at any nesting (ANDs and leaves only): every leaf's
+//! falsity kills the row, which is what a factor graph needs. A lifted predicate joins an existing
+//! conjunction as a nested AND (`A(A(L0,L1),L2)`), so the shape is tested structurally, not by depth.
+bool AIFilterTreeIsConjunction(const AIFilterTreeNode &node);
+
+//! Evaluate the tree from per-leaf tri-state values (2-valued short-circuit; UNKNOWN propagates, and once
+//! nothing is UNKNOWN a NULL leaf that still matters makes the result NULL).
 AITriState AIFilterTreeEval(const AIFilterTreeNode &node, const vector<AITriState> &leaf_values);
 
 //! Pick the next unevaluated leaf to evaluate so the boolean tree resolves at minimum expected LLM

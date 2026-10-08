@@ -395,6 +395,16 @@ void HandlePost(const aisql_http::Request &req, aisql_http::Response &res) {
 				std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 			}
 		}
+		// test knob: a '[fail]' marker anywhere in the seed makes this prompt FAIL with a permanent 4xx (no
+		// retry, never cached), so tests can mix NULL verdicts with answered ones deterministically.
+		if (seed.find("[fail]") != string::npos) {
+			res.status = 422;
+			res.set_content("{\"error\":{\"message\":\"mock: [fail] knob\"}}", "application/json");
+			if (doc) {
+				yyjson_doc_free(doc);
+			}
+			return;
+		}
 		yyjson_val *rf = root ? yyjson_obj_get(root, "response_format") : nullptr;
 		string content;
 		if (rf) {

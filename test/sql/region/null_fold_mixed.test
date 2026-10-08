@@ -1,0 +1,119 @@
+# name: test/sql/region/null_fold_mixed.test
+# description: A failed leaf next to answered ones folds as SQL NULL on every path: NULL OR true is true,
+# group: [region]
+
+#              NULL OR false is NULL, NULL AND false is false, NULL AND true is NULL. The mock's '[fail]'
+#              knob fails one prompt deterministically (a permanent 4xx: no retry, never cached), so the
+#              region's asynchronous path, its LIMIT waves, the inline evaluator (ai_factorize='off'), a
+#              projection and the factor graph are all checked with mixed verdicts.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_max_retries = 0;
+
+statement ok
+CREATE TABLE t AS SELECT 'd' || i AS a, 'e' || i AS b FROM range(40) r(i);
+
+# --- region (asynchronous dispatcher)
+query I
+SELECT count(*) FROM t WHERE NOT ai_filter('[fail] x? ' || a) OR ai_filter('[p=100] y? ' || b);
+----
+40
+
+query I
+SELECT count(*) FROM t WHERE NOT ai_filter('[fail] x? ' || a) OR ai_filter('[p=0] y? ' || b);
+----
+0
+
+query I
+SELECT count(*) FROM t WHERE ai_filter('[fail] x? ' || a) AND ai_filter('[p=100] y? ' || b);
+----
+0
+
+query I
+SELECT count(*) FROM t WHERE coalesce(ai_filter('[fail] x? ' || a), true) AND ai_filter('[p=100] y? ' || b);
+----
+40
+
+# --- projection: NULL AND false is false, NULL AND true is NULL, NULL OR true is true
+query III
+SELECT count(*) FILTER (WHERE v1 = false), count(*) FILTER (WHERE v2 IS NULL), count(*) FILTER (WHERE v3)
+FROM (SELECT (ai_filter('[fail] x? ' || a) AND ai_filter('[p=0] y? ' || b)) AS v1,
+             (ai_filter('[fail] x? ' || a) AND ai_filter('[p=100] y? ' || b)) AS v2,
+             (ai_filter('[fail] x? ' || a) OR ai_filter('[p=100] y? ' || b)) AS v3 FROM t);
+----
+40	40	40
+
+# --- LIMIT waves
+query I
+SELECT count(*) FROM (SELECT * FROM t WHERE NOT ai_filter('[fail] x? ' || a) OR ai_filter('[p=100] y? ' || b) LIMIT 7);
+----
+7
+
+query I
+SELECT count(*) FROM (SELECT * FROM t WHERE ai_filter('[fail] x? ' || a) AND ai_filter('[p=100] y? ' || b) LIMIT 7);
+----
+0
+
+# --- inline evaluator
+statement ok
+SET ai_factorize = 'off';
+
+query I
+SELECT count(*) FROM t WHERE NOT ai_filter('[fail] x? ' || a) OR ai_filter('[p=100] y? ' || b);
+----
+40
+
+query I
+SELECT count(*) FROM t WHERE NOT ai_filter('[fail] x? ' || a) OR ai_filter('[p=0] y? ' || b);
+----
+0
+
+query II
+SELECT count(*) FILTER (WHERE v1 = false), count(*) FILTER (WHERE v2 IS NULL)
+FROM (SELECT (ai_filter('[fail] x? ' || a) AND ai_filter('[p=0] y? ' || b)) AS v1,
+             (ai_filter('[fail] x? ' || a) AND ai_filter('[p=100] y? ' || b)) AS v2 FROM t);
+----
+40	40
+
+query I
+SELECT count(*) FROM (SELECT * FROM t WHERE NOT ai_filter('[fail] x? ' || a) OR ai_filter('[p=100] y? ' || b) LIMIT 7);
+----
+7
+
+statement ok
+SET ai_factorize = 'all';
+
+# --- factor graph: a failed unary leaf drops every pair of its side; a failed edge drops the pair
+statement ok
+CREATE TABLE ja AS SELECT 'a' || i::VARCHAR AS x FROM range(12) r(i);
+
+statement ok
+CREATE TABLE jb AS SELECT 'b' || i::VARCHAR AS y FROM range(10) r(i);
+
+query I
+SELECT count(*) FROM ja, jb WHERE ai_filter('[fail] ua? ' || x) AND ai_filter('[p=100] e? ' || x || ' ' || y);
+----
+0
+
+query I
+SELECT count(*) FROM ja, jb WHERE ai_filter('[p=100] ua? ' || x) AND ai_filter('[fail] e? ' || x || ' ' || y);
+----
+0
+
+query I
+SELECT count(*) FROM ja, jb WHERE ai_filter('[p=100] ua? ' || x) AND ai_filter('[fail] e? ' || x || ' ' || y) IS NULL;
+----
+120
+
+query I
+SELECT sum(failed_calls) > 0 FROM ai_usage();
+----
+true
+
+statement ok
+CALL ai_mock_stop();
