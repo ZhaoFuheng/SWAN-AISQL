@@ -1,6 +1,7 @@
 #include "exec/physical_ai_factor_graph.hpp"
 
 #include "ai_client.hpp"
+#include "filter_tree_order.hpp"
 #include "optimizer/ai_filter_tree_build.hpp"
 #include "ai_prompt_cost.hpp"
 #include "ai_settings.hpp"
@@ -35,23 +36,58 @@ PhysicalAIFactorGraph::PhysicalAIFactorGraph(PhysicalPlan &physical_plan, vector
 		offset += side_widths[s];
 	}
 	auto &fn = node->Cast<BoundFunctionExpression>();
-	if (!AIFactorDecompose(fn, side_of, leaves)) {
+	if (!AIFactorDecompose(fn, side_of, factors)) {
 		throw InternalException("AIFactorGraph: node is not factor-decomposable (rewrite gate should have caught it)");
 	}
+	// Merge the factors of one side (or one pair of sides) into that side's (edge's) leaf list and tree: the
+	// AND of the factors' trees, each renumbered to its leaves' positions in the merged list.
 	unary_leaves.resize(side_widths.size());
-	for (idx_t l = 0; l < leaves.size(); l++) {
-		auto &sides = leaves[l].sides;
-		if (sides.size() == 1) {
-			unary_leaves[sides[0]].push_back(l);
+	unary_trees.resize(side_widths.size());
+	vector<vector<string>> unary_parts(side_widths.size());
+	vector<vector<string>> edge_parts;
+	auto merge = [&](vector<idx_t> &leaf_ids, vector<string> &parts, const AIFactor &factor) {
+		vector<idx_t> leaf_map(factor.leaf_ids.size());
+		for (idx_t i = 0; i < factor.leaf_ids.size(); i++) {
+			leaf_map[i] = leaf_ids.size();
+			leaf_ids.push_back(factor.leaf_ids[i]);
+		}
+		auto tree = AIFilterTreeParse(factor.tree);
+		if (!tree) {
+			throw InternalException("AIFactorGraph: unparseable factor tree '%s'", factor.tree);
+		}
+		parts.push_back(AIFilterTreeSerialize(*AIFilterTreeRenumber(*tree, leaf_map)));
+	};
+	for (auto &factor : factors) {
+		if (factor.sides.size() == 1) {
+			merge(unary_leaves[factor.sides[0]], unary_parts[factor.sides[0]], factor);
 			continue;
 		}
-		auto it =
-		    std::find_if(edges.begin(), edges.end(), [&](const Edge &e) { return e.s == sides[0] && e.t == sides[1]; });
+		auto it = std::find_if(edges.begin(), edges.end(),
+		                       [&](const Edge &e) { return e.s == factor.sides[0] && e.t == factor.sides[1]; });
 		if (it == edges.end()) {
-			edges.push_back(Edge {sides[0], sides[1], {l}});
-		} else {
-			it->leaf_ids.push_back(l);
+			edges.push_back(Edge {factor.sides[0], factor.sides[1], {}, ""});
+			edge_parts.emplace_back();
+			it = edges.end() - 1;
 		}
+		merge(it->leaf_ids, edge_parts[NumericCast<idx_t>(it - edges.begin())], factor);
+	}
+	auto conjoin = [](const vector<string> &parts) {
+		if (parts.size() == 1) {
+			return parts[0];
+		}
+		string tree = "A(";
+		for (idx_t i = 0; i < parts.size(); i++) {
+			tree += (i ? "," : "") + parts[i];
+		}
+		return tree + ")";
+	};
+	for (idx_t s = 0; s < side_widths.size(); s++) {
+		if (!unary_parts[s].empty()) {
+			unary_trees[s] = conjoin(unary_parts[s]);
+		}
+	}
+	for (idx_t e = 0; e < edges.size(); e++) {
+		edges[e].tree = conjoin(edge_parts[e]);
 	}
 }
 
@@ -66,6 +102,16 @@ InsertionOrderPreservingMap<string> PhysicalAIFactorGraph::ParamsToString() cons
 		edge_str += "S" + std::to_string(e.s) + "-S" + std::to_string(e.t);
 	}
 	result["Edges"] = edge_str;
+	// each factor's tree in the node's leaf numbering (its own numbering is positional)
+	string factor_str;
+	for (auto &f : factors) {
+		if (!factor_str.empty()) {
+			factor_str += ", ";
+		}
+		auto tree = AIFilterTreeParse(f.tree);
+		factor_str += tree ? AIFilterTreeSerialize(*AIFilterTreeRenumber(*tree, f.leaf_ids)) : f.tree;
+	}
+	result["Factors"] = factor_str;
 	result["Mode"] = "factor graph (member/pair domains, exact backward pruning)";
 	return result;
 }
@@ -447,7 +493,7 @@ struct GraphUnitBaker {
 			for (idx_t c = 0; c < op.side_widths[s]; c++) {
 				index_map[op.side_offsets[s] + c] = c;
 			}
-			side_sub[s] = AIFactorSubNode(fn, op.unary_leaves[s], index_map);
+			side_sub[s] = AIFactorSubNode(fn, op.unary_leaves[s], index_map, op.unary_trees[s]);
 			side_types[s].assign(op.types.begin() + NumericCast<int64_t>(op.side_offsets[s]),
 			                     op.types.begin() + NumericCast<int64_t>(op.side_offsets[s] + op.side_widths[s]));
 			side_types[s].push_back(LogicalType::BIGINT);
@@ -466,7 +512,7 @@ struct GraphUnitBaker {
 			for (idx_t c = 0; c < op.side_widths[edge.t]; c++) {
 				index_map[op.side_offsets[edge.t] + c] = op.side_widths[edge.s] + c;
 			}
-			edge_sub[e] = AIFactorSubNode(fn, edge.leaf_ids, index_map);
+			edge_sub[e] = AIFactorSubNode(fn, edge.leaf_ids, index_map, edge.tree);
 			edge_types[e].assign(op.types.begin() + NumericCast<int64_t>(op.side_offsets[edge.s]),
 			                     op.types.begin() +
 			                         NumericCast<int64_t>(op.side_offsets[edge.s] + op.side_widths[edge.s]));
@@ -2172,7 +2218,7 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 			for (idx_t c = 0; c < op.side_widths[s]; c++) {
 				index_map[op.side_offsets[s] + c] = c;
 			}
-			auto sub_node = AIFactorSubNode(fn, op.unary_leaves[s], index_map);
+			auto sub_node = AIFactorSubNode(fn, op.unary_leaves[s], index_map, op.unary_trees[s]);
 			vector<LogicalType> chunk_types(op.types.begin() + NumericCast<int64_t>(op.side_offsets[s]),
 			                                op.types.begin() +
 			                                    NumericCast<int64_t>(op.side_offsets[s] + op.side_widths[s]));
@@ -2229,7 +2275,7 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 			for (idx_t c = 0; c < op.side_widths[edge.t]; c++) {
 				index_map[op.side_offsets[edge.t] + c] = op.side_widths[edge.s] + c;
 			}
-			auto sub_node = AIFactorSubNode(fn, edge.leaf_ids, index_map);
+			auto sub_node = AIFactorSubNode(fn, edge.leaf_ids, index_map, edge.tree);
 			vector<LogicalType> chunk_types(op.types.begin() + NumericCast<int64_t>(op.side_offsets[edge.s]),
 			                                op.types.begin() +
 			                                    NumericCast<int64_t>(op.side_offsets[edge.s] + op.side_widths[edge.s]));

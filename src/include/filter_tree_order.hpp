@@ -46,6 +46,17 @@ unique_ptr<AIFilterTreeNode> AINormalizeFilterTree(unique_ptr<AIFilterTreeNode> 
 //! Parse the serialization; returns nullptr on malformed input.
 unique_ptr<AIFilterTreeNode> AIFilterTreeParse(const string &text);
 
+//! A copy of the tree with every leaf index mapped through `leaf_map` (index -> new index).
+unique_ptr<AIFilterTreeNode> AIFilterTreeRenumber(const AIFilterTreeNode &node, const vector<idx_t> &leaf_map);
+//! The leaf indices of the tree in tree order (a leaf referenced twice is listed twice).
+void AIFilterTreeCollectLeaves(const AIFilterTreeNode &node, vector<idx_t> &out);
+
+//! Whether some assignment of the still-UNKNOWN leaves makes the tree TRUE (resp. FALSE), given the leaves
+//! already decided. A NULL leaf is neither: it can make neither an AND true nor an OR false. Polarity is
+//! respected: under a NOT a leaf helps by being false.
+bool AIFilterTreeCanBeTrue(const AIFilterTreeNode &node, const vector<AITriState> &leaf_values);
+bool AIFilterTreeCanBeFalse(const AIFilterTreeNode &node, const vector<AITriState> &leaf_values);
+
 //! True when the tree is a conjunction of leaves at any nesting (ANDs and leaves only): every leaf's
 //! falsity kills the row, which is what a factor graph needs. A lifted predicate joins an existing
 //! conjunction as a nested AND (`A(A(L0,L1),L2)`), so the shape is tested structurally, not by depth.

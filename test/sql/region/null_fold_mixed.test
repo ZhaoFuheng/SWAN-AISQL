@@ -160,12 +160,12 @@ SELECT count(*) FROM t WHERE NOT (lower(ai_complete('[fail] c? ' || a)) = 'yes' 
 statement ok
 SET ai_factorize = 'all';
 
-# NOT over the whole conjunction is not a conjunction any more (O(N(L0),N(L1))): this join stays a region
-# over the cross product, so it checks the region's fold, not the graph's
+# NOT over the whole conjunction folds to O(N(L0),N(L1)); both leaves read the same two sides, so it is ONE
+# edge factor with an OR inside, and the graph takes it: the unit folds NOT NULL = NULL, OR false = NULL
 query II
 EXPLAIN SELECT count(*) FROM ja, jb WHERE NOT (lower(ai_complete('[fail] c? ' || x || y)) = 'yes' AND ai_filter('[p=100] e? ' || x || ' ' || y));
 ----
-physical_plan	<!REGEX>:(?s).*Ai Factor Graph.*
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
 
 query I
 SELECT count(*) FROM ja, jb WHERE NOT (lower(ai_complete('[fail] c? ' || x || y)) = 'yes' AND ai_filter('[p=100] e? ' || x || ' ' || y));

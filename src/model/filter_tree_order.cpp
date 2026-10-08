@@ -306,6 +306,80 @@ unique_ptr<AIFilterTreeNode> AIFilterTreeParse(const string &text) {
 	return node;
 }
 
+unique_ptr<AIFilterTreeNode> AIFilterTreeRenumber(const AIFilterTreeNode &node, const vector<idx_t> &leaf_map) {
+	if (node.type == AIFilterTreeType::LEAF) {
+		return AIFilterTreeNode::Leaf(node.leaf_index < leaf_map.size() ? leaf_map[node.leaf_index] : node.leaf_index);
+	}
+	vector<unique_ptr<AIFilterTreeNode>> children;
+	children.reserve(node.children.size());
+	for (auto &child : node.children) {
+		children.push_back(AIFilterTreeRenumber(*child, leaf_map));
+	}
+	return AIFilterTreeNode::Op(node.type, std::move(children));
+}
+
+void AIFilterTreeCollectLeaves(const AIFilterTreeNode &node, vector<idx_t> &out) {
+	if (node.type == AIFilterTreeType::LEAF) {
+		out.push_back(node.leaf_index);
+		return;
+	}
+	for (auto &child : node.children) {
+		AIFilterTreeCollectLeaves(*child, out);
+	}
+}
+
+bool AIFilterTreeCanBeTrue(const AIFilterTreeNode &node, const vector<AITriState> &leaf_values) {
+	switch (node.type) {
+	case AIFilterTreeType::LEAF: {
+		const auto v = leaf_values[node.leaf_index];
+		return v == AITriState::TRI_TRUE || v == AITriState::TRI_UNKNOWN;
+	}
+	case AIFilterTreeType::NOT_OP:
+		return AIFilterTreeCanBeFalse(*node.children[0], leaf_values);
+	case AIFilterTreeType::AND_OP:
+		for (auto &child : node.children) {
+			if (!AIFilterTreeCanBeTrue(*child, leaf_values)) {
+				return false;
+			}
+		}
+		return true;
+	case AIFilterTreeType::OR_OP:
+		for (auto &child : node.children) {
+			if (AIFilterTreeCanBeTrue(*child, leaf_values)) {
+				return true;
+			}
+		}
+		return false;
+	}
+	return false;
+}
+
+bool AIFilterTreeCanBeFalse(const AIFilterTreeNode &node, const vector<AITriState> &leaf_values) {
+	switch (node.type) {
+	case AIFilterTreeType::LEAF: {
+		const auto v = leaf_values[node.leaf_index];
+		return v == AITriState::TRI_FALSE || v == AITriState::TRI_UNKNOWN;
+	}
+	case AIFilterTreeType::NOT_OP:
+		return AIFilterTreeCanBeTrue(*node.children[0], leaf_values);
+	case AIFilterTreeType::AND_OP:
+		for (auto &child : node.children) {
+			if (AIFilterTreeCanBeFalse(*child, leaf_values)) {
+				return true;
+			}
+		}
+		return false;
+	case AIFilterTreeType::OR_OP:
+		for (auto &child : node.children) {
+			if (!AIFilterTreeCanBeFalse(*child, leaf_values)) {
+				return false;
+			}
+		}
+		return true;
+	}
+	return false;
+}
+
 bool AIFilterTreeIsConjunction(const AIFilterTreeNode &node) {
 	if (node.type == AIFilterTreeType::LEAF) {
 		return true;

@@ -31,20 +31,25 @@ public:
 	                      vector<idx_t> side_widths, int64_t limit, idx_t existential_side,
 	                      idx_t estimated_cardinality);
 
-	//! The conjunctive folded AI node over the concatenated-sides layout.
+	//! The folded AI node over the concatenated-sides layout: a conjunction of factors, each a one- or
+	//! two-side Boolean tree over its leaves.
 	unique_ptr<Expression> node;
 	//! Column count per side; prefix sums give each side's offset in the concatenated layout.
 	vector<idx_t> side_widths;
 	vector<idx_t> side_offsets;
-	//! Per-leaf side classification (from AIFactorDecompose in the constructor).
-	vector<AIFactorLeaf> leaves;
-	//! Unary leaf ids per side.
+	//! The factors (from AIFactorDecompose in the constructor).
+	vector<AIFactor> factors;
+	//! Unary leaf ids per side, and the side's Boolean tree over them (the AND of its unary factors,
+	//! serialized over positions in `unary_leaves[s]`).
 	vector<vector<idx_t>> unary_leaves;
-	//! Edges: (side s, side t, the binary leaf ids connecting them), s < t.
+	vector<string> unary_trees;
+	//! Edges: (side s, side t, the leaf ids of the factors connecting them, their AND as a tree over
+	//! positions in `leaf_ids`), s < t.
 	struct Edge {
 		idx_t s;
 		idx_t t;
 		vector<idx_t> leaf_ids;
+		string tree;
 	};
 	vector<Edge> edges;
 	//! LIMIT k pushed into the evaluation (-1 = none): the lazy/adaptive scheduler stops

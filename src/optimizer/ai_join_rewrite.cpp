@@ -5,6 +5,7 @@
 #include "duckdb/catalog/catalog_entry/scalar_function_catalog_entry.hpp"
 #include "duckdb/function/function_binder.hpp"
 #include "filter_tree_order.hpp"
+#include "ai_dedup.hpp"
 #include "optimizer/ai_filter_tree_build.hpp"
 #include "plan/logical_ai_factor_graph.hpp"
 #include "duckdb/planner/operator/logical_filter.hpp"
@@ -445,9 +446,6 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 	if (!tree) {
 		return false;
 	}
-	if (!AIFilterTreeIsConjunction(*tree)) {
-		return false; // an OR or NOT anywhere: a leaf's falsity no longer kills its tuples
-	}
 	const idx_t n = tree->LeafCount();
 	if (fn.GetChildren().size() < 1 + 3 * n) {
 		return false;
@@ -515,30 +513,37 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 	};
 	bool cyclic = false;
 	std::set<std::pair<idx_t, idx_t>> seen_edges; // leaves on the same two sides share one edge
+	// Each leaf's sides, then the tree's factors: the top-level conjuncts (ANDs flattened), each a leaf or an
+	// OR/NOT subtree whose leaves read one side or one pair of sides. A factor spanning three sides, or an
+	// OR/NOT at the top that spans three sides, is not a factor and the join stays a region.
+	vector<vector<idx_t>> all_leaf_sides(n);
 	for (idx_t l = 0; l < n && ok; l++) {
-		vector<idx_t> leaf_sides;
 		for (idx_t part = 0; part < 3; part++) {
-			collect_sides(*fn.GetChildren()[1 + part * n + l], leaf_sides);
+			collect_sides(*fn.GetChildren()[1 + part * n + l], all_leaf_sides[l]);
 		}
-		if (leaf_sides.empty() || leaf_sides.size() > 2) {
-			ok = false;
+		std::sort(all_leaf_sides[l].begin(), all_leaf_sides[l].end());
+	}
+	vector<AIFactor> factors;
+	if (!ok || !AIFactorPartition(*tree, all_leaf_sides, factors)) {
+		return false;
+	}
+	for (auto &factor : factors) {
+		if (factor.sides.size() != 2) {
+			continue;
 		}
-		if (leaf_sides.size() == 2) {
-			const double pairs =
-			    static_cast<double>(side_card[leaf_sides[0]]) * static_cast<double>(side_card[leaf_sides[1]]);
-			largest_domain = MaxValue<double>(largest_domain, pairs);
-			const auto key = std::make_pair(MinValue<idx_t>(leaf_sides[0], leaf_sides[1]),
-			                                MaxValue<idx_t>(leaf_sides[0], leaf_sides[1]));
-			if (seen_edges.insert(key).second) {
-				const idx_t a = find(leaf_sides[0]), b = find(leaf_sides[1]);
-				if (a == b) {
-					cyclic = true; // an edge between two already-connected sides closes a cycle
-				} else {
-					uf[a] = b;
-				}
+		const double pairs =
+		    static_cast<double>(side_card[factor.sides[0]]) * static_cast<double>(side_card[factor.sides[1]]);
+		largest_domain = MaxValue<double>(largest_domain, pairs);
+		const auto key = std::make_pair(factor.sides[0], factor.sides[1]);
+		if (seen_edges.insert(key).second) {
+			const idx_t a = find(factor.sides[0]), b = find(factor.sides[1]);
+			if (a == b) {
+				cyclic = true; // an edge between two already-connected sides closes a cycle
+			} else {
+				uf[a] = b;
 			}
 		}
-		any_edge = any_edge || leaf_sides.size() == 2;
+		any_edge = true;
 	}
 	if ((!sparse_state || cyclic) && largest_domain > static_cast<double>(pair_limit)) {
 		ok = false; // too large a pair domain for per-pair state

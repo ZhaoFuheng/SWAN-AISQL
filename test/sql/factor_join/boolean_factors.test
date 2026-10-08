@@ -1,0 +1,285 @@
+# name: test/sql/factor_join/boolean_factors.test
+# description: Every factor of a join must hold, but inside a factor the Boolean structure is free: OR, NOT and
+# group: [factor_join]
+
+#              nested AND over leaves that read one side (a side factor) or the same two sides (an edge
+#              factor). The graph evaluates a factor per member or per pair as one unit that folds its tree
+#              three-valued and stops as soon as it can no longer be true. Rows equal the un-factorized plan's;
+#              an OR factor asks its second leaf only where the first was false; a factor that spans three
+#              sides is not a factor, and the join stays a region.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE ta AS SELECT 'a' || i::VARCHAR AS x, i % 3 AS ga FROM range(30) r(i);
+
+statement ok
+CREATE TABLE tb AS SELECT 'b' || i::VARCHAR AS y FROM range(20) r(i);
+
+statement ok
+CREATE TABLE tc AS SELECT 'c' || i::VARCHAR AS z FROM range(12) r(i);
+
+# --- helper: run one join shape through the graph and through the region, compare
+# 1. OR inside an edge factor, with a side factor
+query II
+EXPLAIN SELECT * FROM ta, tb WHERE (ai_filter('[p=20] e1 ' || x || ' ' || y) OR ai_filter('[p=20] e2 ' || x || ' ' || y)) AND ai_filter('[p=60] ua ' || x);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+statement ok
+CREATE TABLE g1 AS SELECT x, y FROM ta, tb WHERE (ai_filter('[p=20] e1 ' || x || ' ' || y) OR ai_filter('[p=20] e2 ' || x || ' ' || y)) AND ai_filter('[p=60] ua ' || x);
+
+# 2. a tree-level NOT inside an OR edge factor (a lone `NOT ai_filter` above a join is not folded into the
+#    node and keeps a Filter over a region, so the NOT needs a sibling); the side OR is a region of its own below
+query II
+EXPLAIN SELECT * FROM ta, tb WHERE (ai_filter('[p=30] u1 ' || x) OR ai_filter('[p=30] u2 ' || x)) AND (NOT ai_filter('[p=70] e3 ' || x || ' ' || y) OR ai_filter('[p=20] e9 ' || x || ' ' || y));
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+statement ok
+CREATE TABLE g2 AS SELECT x, y FROM ta, tb WHERE (ai_filter('[p=30] u1 ' || x) OR ai_filter('[p=30] u2 ' || x)) AND (NOT ai_filter('[p=70] e3 ' || x || ' ' || y) OR ai_filter('[p=20] e9 ' || x || ' ' || y));
+
+# 3. a side leaf inside an edge factor (evaluated per pair), nested AND/OR/NOT, three sides in a chain
+query II
+EXPLAIN SELECT * FROM ta, tb, tc WHERE (ai_filter('[p=50] u3 ' || x) OR ai_filter('[p=30] e4 ' || x || ' ' || y)) AND (ai_filter('[p=40] e5 ' || y || ' ' || z) AND NOT (ai_filter('[p=50] u4 ' || z) AND ai_filter('[p=50] e6 ' || y || ' ' || z)));
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+statement ok
+CREATE TABLE g3 AS SELECT x, y, z FROM ta, tb, tc WHERE (ai_filter('[p=50] u3 ' || x) OR ai_filter('[p=30] e4 ' || x || ' ' || y)) AND (ai_filter('[p=40] e5 ' || y || ' ' || z) AND NOT (ai_filter('[p=50] u4 ' || z) AND ai_filter('[p=50] e6 ' || y || ' ' || z)));
+
+# 4. an OR that spans three sides is not a factor: the join stays a region, and is still right
+query II
+EXPLAIN SELECT * FROM ta, tb, tc WHERE (ai_filter('[p=30] e7 ' || x || ' ' || y) OR ai_filter('[p=30] e8 ' || y || ' ' || z)) AND ai_filter('[p=60] u5 ' || z);
+----
+physical_plan	<!REGEX>:(?s).*Ai Factor Graph.*
+
+statement ok
+CREATE TABLE g4 AS SELECT x, y, z FROM ta, tb, tc WHERE (ai_filter('[p=30] e7 ' || x || ' ' || y) OR ai_filter('[p=30] e8 ' || y || ' ' || z)) AND ai_filter('[p=60] u5 ' || z);
+
+# --- the same four without the graph
+statement ok
+SET ai_join_factorize = 'off';
+
+statement ok
+CREATE TABLE r1 AS SELECT x, y FROM ta, tb WHERE (ai_filter('[p=20] e1 ' || x || ' ' || y) OR ai_filter('[p=20] e2 ' || x || ' ' || y)) AND ai_filter('[p=60] ua ' || x);
+
+statement ok
+CREATE TABLE r2 AS SELECT x, y FROM ta, tb WHERE (ai_filter('[p=30] u1 ' || x) OR ai_filter('[p=30] u2 ' || x)) AND (NOT ai_filter('[p=70] e3 ' || x || ' ' || y) OR ai_filter('[p=20] e9 ' || x || ' ' || y));
+
+statement ok
+CREATE TABLE r3 AS SELECT x, y, z FROM ta, tb, tc WHERE (ai_filter('[p=50] u3 ' || x) OR ai_filter('[p=30] e4 ' || x || ' ' || y)) AND (ai_filter('[p=40] e5 ' || y || ' ' || z) AND NOT (ai_filter('[p=50] u4 ' || z) AND ai_filter('[p=50] e6 ' || y || ' ' || z)));
+
+statement ok
+CREATE TABLE r4 AS SELECT x, y, z FROM ta, tb, tc WHERE (ai_filter('[p=30] e7 ' || x || ' ' || y) OR ai_filter('[p=30] e8 ' || y || ' ' || z)) AND ai_filter('[p=60] u5 ' || z);
+
+statement ok
+SET ai_join_factorize = 'factor';
+
+query IIII
+SELECT (SELECT count(*) FROM g1) > 0, (SELECT count(*) FROM g2) > 0, (SELECT count(*) FROM g3) > 0, (SELECT count(*) FROM g4) > 0;
+----
+true	true	true	true
+
+query IIII
+SELECT (SELECT count(*) FROM ((SELECT * FROM g1 EXCEPT SELECT * FROM r1) UNION ALL (SELECT * FROM r1 EXCEPT SELECT * FROM g1))),
+       (SELECT count(*) FROM ((SELECT * FROM g2 EXCEPT SELECT * FROM r2) UNION ALL (SELECT * FROM r2 EXCEPT SELECT * FROM g2))),
+       (SELECT count(*) FROM ((SELECT * FROM g3 EXCEPT SELECT * FROM r3) UNION ALL (SELECT * FROM r3 EXCEPT SELECT * FROM g3))),
+       (SELECT count(*) FROM ((SELECT * FROM g4 EXCEPT SELECT * FROM r4) UNION ALL (SELECT * FROM r4 EXCEPT SELECT * FROM g4)));
+----
+0	0	0	0
+
+# --- an OR factor short-circuits: with the first disjunct always true the second leaf is never asked
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM ta, tb WHERE ai_filter('[p=100] always ' || x || ' ' || y) OR ai_filter('[p=100] never-asked ' || x || ' ' || y);
+----
+600
+
+query I
+SELECT sum(llm_calls + cache_hits) FROM ai_usage();
+----
+600
+
+# --- NULL inside a factor: NULL OR true passes, NULL AND true fails, NOT NULL fails; IS NULL decides
+query III
+SELECT (SELECT count(*) FROM ta, tb WHERE (ai_filter('[fail] f1 ' || x || ' ' || y) OR ai_filter('[p=100] t1 ' || x || ' ' || y))),
+       (SELECT count(*) FROM ta, tb WHERE (ai_filter('[fail] f1 ' || x || ' ' || y) AND ai_filter('[p=100] t1 ' || x || ' ' || y)) OR ai_filter('[p=0] f2 ' || x || ' ' || y)),
+       (SELECT count(*) FROM ta, tb WHERE NOT ai_filter('[fail] f1 ' || x || ' ' || y) OR ai_filter('[p=0] f2 ' || x || ' ' || y));
+----
+600	0	0
+
+query II
+EXPLAIN SELECT * FROM ta, tb WHERE (ai_filter('[fail] f1 ' || x || ' ' || y) OR ai_filter('[p=100] t1 ' || x || ' ' || y));
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+# --- both schedulers agree on an OR factor
+statement ok
+SET ai_factor_state = 'dense';
+
+statement ok
+CREATE TABLE d1 AS SELECT x, y FROM ta, tb WHERE (ai_filter('[p=20] e1 ' || x || ' ' || y) OR ai_filter('[p=20] e2 ' || x || ' ' || y)) AND ai_filter('[p=60] ua ' || x);
+
+statement ok
+SET ai_factor_state = 'sparse';
+
+query I
+SELECT count(*) FROM ((SELECT * FROM g1 EXCEPT SELECT * FROM d1) UNION ALL (SELECT * FROM d1 EXCEPT SELECT * FROM g1));
+----
+0
+
+# --- LIMIT and EXISTS over an OR factor
+query I
+SELECT count(*) FROM (SELECT * FROM ta, tb WHERE (ai_filter('[p=20] e1 ' || x || ' ' || y) OR ai_filter('[p=20] e2 ' || x || ' ' || y)) AND ai_filter('[p=60] ua ' || x) LIMIT 5);
+----
+5
+
+statement ok
+CREATE TABLE ex_graph AS SELECT x FROM ta WHERE EXISTS (SELECT 1 FROM tb WHERE ai_filter('[p=10] e1 ' || ta.x || ' ' || y) OR ai_filter('[p=10] e2 ' || ta.x || ' ' || y));
+
+statement ok
+SET ai_join_factorize = 'off';
+
+statement ok
+CREATE TABLE ex_off AS SELECT x FROM ta WHERE EXISTS (SELECT 1 FROM tb WHERE ai_filter('[p=10] e1 ' || ta.x || ' ' || y) OR ai_filter('[p=10] e2 ' || ta.x || ' ' || y));
+
+statement ok
+SET ai_join_factorize = 'factor';
+
+query I
+SELECT count(*) FROM ((SELECT * FROM ex_graph EXCEPT SELECT * FROM ex_off) UNION ALL (SELECT * FROM ex_off EXCEPT SELECT * FROM ex_graph));
+----
+0
+
+# --- the decomposition is visible in EXPLAIN: OR(L0,L1) is one edge factor, the side leaf another
+query II
+EXPLAIN SELECT * FROM ta, tb WHERE (ai_filter('[p=20] e1 ' || x || ' ' || y) OR ai_filter('[p=20] e2 ' || x || ' ' || y)) AND ai_filter('[p=60] ua ' || x);
+----
+physical_plan	<REGEX>:(?s).*Factors: O\(L0,L1\), L2.*
+
+# --- a cheap side leaf inside an edge factor goes first: with it always true, the pair leaf is never asked,
+#     and the side prompt is one call per distinct member (single-flight + local cache), not one per pair
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM ta, tb WHERE ai_filter('[p=100] u ' || x) OR ai_filter('[p=100] a much longer pair prompt that should go second ' || x || ' ' || y);
+----
+600
+
+query II
+SELECT sum(llm_calls), sum(llm_calls + cache_hits) FROM ai_usage();
+----
+30	600
+
+# --- two side leaves of different sides under one OR make an edge factor (per pair, prompts deduplicated)
+query II
+EXPLAIN SELECT * FROM ta, tb WHERE ai_filter('[p=30] ux ' || x) OR ai_filter('[p=30] uy ' || y);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE g5 AS SELECT x, y FROM ta, tb WHERE ai_filter('[p=30] ux ' || x) OR ai_filter('[p=30] uy ' || y);
+
+query I
+SELECT sum(llm_calls) <= 50 FROM ai_usage();
+----
+true
+
+# --- a NOT side factor, and a factor repeated across two factors (the same leaf asked once per member)
+statement ok
+CREATE TABLE g6 AS SELECT x, y FROM ta, tb WHERE NOT ai_filter('[p=40] un ' || x) AND (ai_filter('[p=30] e1 ' || x || ' ' || y) OR ai_filter('[p=50] ub ' || y)) AND (ai_filter('[p=30] e1 ' || x || ' ' || y) OR ai_filter('[p=50] uc ' || y));
+
+# --- a wrapped leaf inside an OR factor, answered and failed (NULL OR true = true, NULL OR false = NULL)
+statement ok
+CREATE TABLE g7 AS SELECT x, y FROM ta, tb WHERE (lower(ai_complete('[p=100] w ' || x || y)) = 'ok' OR ai_filter('[p=30] e2 ' || x || ' ' || y)) AND ai_filter('[p=70] ua ' || x);
+
+query II
+SELECT (SELECT count(*) FROM ta, tb WHERE lower(ai_complete('[fail] w ' || x || y)) = 'ok' OR ai_filter('[p=100] e1 ' || x || ' ' || y)),
+       (SELECT count(*) FROM ta, tb WHERE lower(ai_complete('[fail] w ' || x || y)) = 'ok' OR ai_filter('[p=0] e0 ' || x || ' ' || y));
+----
+600	0
+
+# --- duplicates on a side (count products) with an OR factor
+statement ok
+CREATE TABLE tad AS SELECT x FROM ta UNION ALL SELECT x FROM ta WHERE ga = 0;
+
+statement ok
+CREATE TABLE g8 AS SELECT x, y FROM tad, tb WHERE ai_filter('[p=20] e1 ' || x || ' ' || y) OR ai_filter('[p=20] e2 ' || x || ' ' || y);
+
+# --- a cyclic graph (the staged schedule) with an OR factor on one edge
+query II
+EXPLAIN SELECT * FROM ta, tb, tc WHERE (ai_filter('[p=30] e1 ' || x || ' ' || y) OR ai_filter('[p=30] e2 ' || x || ' ' || y)) AND ai_filter('[p=40] e5 ' || y || ' ' || z) AND ai_filter('[p=40] e9 ' || x || ' ' || z);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+statement ok
+CREATE TABLE g9 AS SELECT x, y, z FROM ta, tb, tc WHERE (ai_filter('[p=30] e1 ' || x || ' ' || y) OR ai_filter('[p=30] e2 ' || x || ' ' || y)) AND ai_filter('[p=40] e5 ' || y || ' ' || z) AND ai_filter('[p=40] e9 ' || x || ' ' || z);
+
+# --- the dense scheduler on the nested three-side shape
+statement ok
+SET ai_factor_state = 'dense';
+
+statement ok
+CREATE TABLE d3 AS SELECT x, y, z FROM ta, tb, tc WHERE (ai_filter('[p=50] u3 ' || x) OR ai_filter('[p=30] e4 ' || x || ' ' || y)) AND (ai_filter('[p=40] e5 ' || y || ' ' || z) AND NOT (ai_filter('[p=50] u4 ' || z) AND ai_filter('[p=50] e6 ' || y || ' ' || z)));
+
+statement ok
+SET ai_factor_state = 'sparse';
+
+# --- all of the above without the graph
+statement ok
+SET ai_join_factorize = 'off';
+
+statement ok
+CREATE TABLE r5 AS SELECT x, y FROM ta, tb WHERE ai_filter('[p=30] ux ' || x) OR ai_filter('[p=30] uy ' || y);
+
+statement ok
+CREATE TABLE r6 AS SELECT x, y FROM ta, tb WHERE NOT ai_filter('[p=40] un ' || x) AND (ai_filter('[p=30] e1 ' || x || ' ' || y) OR ai_filter('[p=50] ub ' || y)) AND (ai_filter('[p=30] e1 ' || x || ' ' || y) OR ai_filter('[p=50] uc ' || y));
+
+statement ok
+CREATE TABLE r7 AS SELECT x, y FROM ta, tb WHERE (lower(ai_complete('[p=100] w ' || x || y)) = 'ok' OR ai_filter('[p=30] e2 ' || x || ' ' || y)) AND ai_filter('[p=70] ua ' || x);
+
+statement ok
+CREATE TABLE r8 AS SELECT x, y FROM tad, tb WHERE ai_filter('[p=20] e1 ' || x || ' ' || y) OR ai_filter('[p=20] e2 ' || x || ' ' || y);
+
+statement ok
+CREATE TABLE r9 AS SELECT x, y, z FROM ta, tb, tc WHERE (ai_filter('[p=30] e1 ' || x || ' ' || y) OR ai_filter('[p=30] e2 ' || x || ' ' || y)) AND ai_filter('[p=40] e5 ' || y || ' ' || z) AND ai_filter('[p=40] e9 ' || x || ' ' || z);
+
+statement ok
+SET ai_join_factorize = 'factor';
+
+query IIIII
+SELECT (SELECT count(*) FROM g5) > 0, (SELECT count(*) FROM g6) > 0, (SELECT count(*) FROM g7) > 0, (SELECT count(*) FROM g8) > (SELECT count(*) FROM (SELECT DISTINCT * FROM g8)), (SELECT count(*) FROM g9) > 0;
+----
+true	true	true	true	true
+
+query IIIIII
+SELECT (SELECT count(*) FROM ((SELECT * FROM g5 EXCEPT SELECT * FROM r5) UNION ALL (SELECT * FROM r5 EXCEPT SELECT * FROM g5))),
+       (SELECT count(*) FROM ((SELECT * FROM g6 EXCEPT SELECT * FROM r6) UNION ALL (SELECT * FROM r6 EXCEPT SELECT * FROM g6))),
+       (SELECT count(*) FROM ((SELECT * FROM g7 EXCEPT SELECT * FROM r7) UNION ALL (SELECT * FROM r7 EXCEPT SELECT * FROM g7))),
+       (SELECT count(*) FROM g8) = (SELECT count(*) FROM r8),
+       (SELECT count(*) FROM ((SELECT * FROM g8 EXCEPT SELECT * FROM r8) UNION ALL (SELECT * FROM r8 EXCEPT SELECT * FROM g8))),
+       (SELECT count(*) FROM ((SELECT * FROM g9 EXCEPT SELECT * FROM r9) UNION ALL (SELECT * FROM r9 EXCEPT SELECT * FROM g9))) + (SELECT count(*) FROM ((SELECT * FROM d3 EXCEPT SELECT * FROM r3) UNION ALL (SELECT * FROM r3 EXCEPT SELECT * FROM d3)));
+----
+0	0	0	true	0	0
+
+statement ok
+CALL ai_mock_stop();

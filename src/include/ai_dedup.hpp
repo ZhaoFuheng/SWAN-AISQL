@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "filter_tree_order.hpp"
 #include "duckdb/common/types/value.hpp"
 #include "duckdb/common/vector.hpp"
 #include "duckdb/common/shared_ptr.hpp"
@@ -75,16 +76,28 @@ void AIDedupFireWaveScalarFactorized(ClientContext &context, const BoundFunction
 // binary leaves over surviving pair domains -- the cross product is never materialized)
 //===--------------------------------------------------------------------===//
 
-//! One leaf of a factor-decomposed conjunctive node: the side ids its argument expressions read.
-struct AIFactorLeaf {
-	vector<idx_t> sides; //!< ascending; size 1 = unary (side predicate), size 2 = binary (edge)
+//! One factor of a folded node: a top-level conjunct (after flattening nested ANDs) whose leaves all read
+//! ONE side (a side predicate) or the same TWO sides (an edge). Inside the factor the Boolean structure is
+//! arbitrary -- AND, OR and NOT over its leaves -- and `tree` holds it over the factor's own leaf numbering
+//! (position in `leaf_ids`). Every factor must hold for a tuple to pass; a factor that folds to NULL fails it.
+struct AIFactor {
+	vector<idx_t> leaf_ids; //!< leaf indices in the folded node, in tree order
+	vector<idx_t> sides;    //!< ascending; size 1 = unary (side predicate), size 2 = binary (edge)
+	string tree;            //!< the factor's Boolean tree over 0..leaf_ids.size()-1, serialized
 };
 
-//! Classify each leaf of a RESOLVED conjunctive folded node by the sides its argument columns
-//! belong to (`side_of[col]` = owning side per combined-layout column index). Returns false when
-//! the node's tree is not a pure conjunction of leaves or any leaf reads zero or >2 sides.
+//! Partition a folded node's tree into factors: flatten the ANDs at any nesting, and take each remaining
+//! child (a leaf, or an OR/NOT subtree) as one factor whose sides are the union of its leaves' sides
+//! (`leaf_sides[l]`, ascending). Returns false when a factor reads zero or more than two sides, i.e. an
+//! OR or NOT spans three sides, or the tree has no AI leaf.
+bool AIFactorPartition(const AIFilterTreeNode &tree, const vector<vector<idx_t>> &leaf_sides,
+                       vector<AIFactor> &out_factors);
+
+//! Decompose a RESOLVED folded node into factors: classify each leaf by the sides its argument columns
+//! belong to (`side_of[col]` = owning side per combined-layout column index), then partition its tree.
+//! Returns false when the tree is not a conjunction of one- or two-side factors.
 bool AIFactorDecompose(const BoundFunctionExpression &node, const vector<idx_t> &side_of,
-                       vector<AIFactorLeaf> &out_leaves);
+                       vector<AIFactor> &out_factors);
 
 //! Flatten a CALL-PROMPT expression into its ordered concat operands (a non-concat expression
 //! yields itself). Used to split pair prompts into a cacheable left-member prefix and a
@@ -102,8 +115,9 @@ bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub
 //! Clone a conjunctive folded node restricted to `leaf_ids`, remapping every column reference
 //! through `index_map` (combined layout -> evaluation-chunk layout). The clone is a plain
 //! (non-speculative, unlimited) node evaluable via AIDedupFireWaveFactorized.
+//! `tree_str` is the sub-node's Boolean tree over 0..leaf_ids.size()-1; empty = the conjunction of its leaves.
 unique_ptr<Expression> AIFactorSubNode(const BoundFunctionExpression &node, const vector<idx_t> &leaf_ids,
-                                       const vector<idx_t> &index_map);
+                                       const vector<idx_t> &index_map, const string &tree_str = "");
 
 //===--------------------------------------------------------------------===//
 // Per-leaf seams -- the leaf-factorized region. A node's reps are kept PER LEAF (one dictionary on that

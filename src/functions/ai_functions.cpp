@@ -3450,28 +3450,59 @@ bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub
 	auto &bind_data = sub_node.BindInfo()->Cast<AIFilterWithEmbedBindData>();
 	const auto metas = AIParseLeafMeta(bind_data.meta, bind_data.leaf_count, bind_data.wrappers);
 	const auto &children = sub_node.GetChildren();
+	const idx_t n = bind_data.leaf_count;
+	const auto &tree = *bind_data.tree;
+	// The factor's Boolean tree over its leaves, folded three-valued as each answer lands. The unit stops as
+	// soon as no assignment of the open leaves could make the tree TRUE (a false conjunct, every disjunct
+	// false, a leaf under a NOT that came back true, ...): a factor that is FALSE or NULL fails its tuples
+	// either way, and the graph never needs to tell the two apart beyond `valid`. The next leaf to ask is the exact
+	// minimum-expected-cost choice over the tree (every leaf at the cold rate, costed by its prompt's size), so a cheap
+	// leaf that could decide an OR goes first.
+	vector<AITriState> values(n, AITriState::TRI_UNKNOWN);
+	vector<double> p(n, 0.5), cost(n, 1.0);
+	for (idx_t l = 0; l < n; l++) {
+		cost[l] = 1.0 + static_cast<double>(leaf_prompts[l].size()) / 256.0;
+	}
 	valid = true;
-	for (idx_t l = 0; l < bind_data.leaf_count; l++) {
+	for (;;) {
+		const AITriState folded = AIFilterTreeEval(tree, values);
+		if (folded != AITriState::TRI_UNKNOWN) {
+			valid = folded != AITriState::TRI_NULL;
+			return folded == AITriState::TRI_TRUE;
+		}
+		// no assignment of the open leaves can make the factor TRUE any more: it fails its tuples, as a
+		// FALSE (valid) when some assignment still makes it false, else as a NULL
+		if (!AIFilterTreeCanBeTrue(tree, values)) {
+			valid = AIFilterTreeCanBeFalse(tree, values);
+			return false;
+		}
+		idx_t l = AIFilterTreeChooseNextLeaf(tree, values, p, cost);
+		if (l >= n || values[l] != AITriState::TRI_UNKNOWN) {
+			l = n;
+			for (idx_t k = 0; k < n; k++) {
+				if (values[k] == AITriState::TRI_UNKNOWN) {
+					l = k;
+					break;
+				}
+			}
+			if (l == n) {
+				valid = false;
+				return false; // defensive: the fold said open, no leaf is
+			}
+		}
 		bool ok = false;
 		const string *prefix = leaf_prefixes && l < leaf_prefixes->size() ? &(*leaf_prefixes)[l] : nullptr;
 		// The leaf's predicate text is the node's constant feature column [1 + n + l].
 		string pred;
-		const idx_t pred_col = 1 + bind_data.leaf_count + l;
+		const idx_t pred_col = 1 + n + l;
 		if (pred_col >= children.size() || !AIConstantConcatText(*children[pred_col], pred)) {
 			pred.clear();
 		}
 		// A wrapper that raises on the answer propagates: the graph's pool hands the error to its driver.
 		const bool value =
 		    AIEvalLeaf(context, metas[l], leaf_prompts[l], query_text, ok, prefix, expected_reuse, &pred, &unit_config);
-		if (!ok) {
-			valid = false;
-			return false;
-		}
-		if (!value) {
-			return false; // conjunctive sub-node: first FALSE decides
-		}
+		values[l] = !ok ? AITriState::TRI_NULL : value ? AITriState::TRI_TRUE : AITriState::TRI_FALSE;
 	}
-	return true;
 }
 
 static void AIFactorCollectRefs(const Expression &expr, vector<idx_t> &out) {
@@ -3482,24 +3513,75 @@ static void AIFactorCollectRefs(const Expression &expr, vector<idx_t> &out) {
 	ExpressionIterator::EnumerateChildren(expr, [&](const Expression &child) { AIFactorCollectRefs(child, out); });
 }
 
+bool AIFactorPartition(const AIFilterTreeNode &tree, const vector<vector<idx_t>> &leaf_sides,
+                       vector<AIFactor> &out_factors) {
+	out_factors.clear();
+	// the top-level conjuncts: ANDs flattened at any nesting
+	vector<const AIFilterTreeNode *> conjuncts;
+	std::function<void(const AIFilterTreeNode &)> flatten = [&](const AIFilterTreeNode &n) {
+		if (n.type == AIFilterTreeType::AND_OP) {
+			for (auto &child : n.children) {
+				flatten(*child);
+			}
+			return;
+		}
+		conjuncts.push_back(&n);
+	};
+	flatten(tree);
+	for (const auto *conjunct : conjuncts) {
+		AIFactor factor;
+		vector<idx_t> leaves;
+		AIFilterTreeCollectLeaves(*conjunct, leaves);
+		if (leaves.empty()) {
+			return false;
+		}
+		// the factor's own numbering: distinct leaves in tree order
+		vector<idx_t> leaf_map;
+		for (const auto l : leaves) {
+			if (l >= leaf_sides.size()) {
+				return false;
+			}
+			if (std::find(factor.leaf_ids.begin(), factor.leaf_ids.end(), l) == factor.leaf_ids.end()) {
+				factor.leaf_ids.push_back(l);
+			}
+			for (const auto s : leaf_sides[l]) {
+				if (std::find(factor.sides.begin(), factor.sides.end(), s) == factor.sides.end()) {
+					factor.sides.push_back(s);
+				}
+			}
+		}
+		std::sort(factor.sides.begin(), factor.sides.end());
+		if (factor.sides.empty() || factor.sides.size() > 2) {
+			return false; // reads no side, or an OR/NOT spans three sides: not a factor
+		}
+		idx_t max_leaf = 0;
+		for (const auto l : factor.leaf_ids) {
+			max_leaf = MaxValue<idx_t>(max_leaf, l);
+		}
+		leaf_map.assign(max_leaf + 1, DConstants::INVALID_INDEX);
+		for (idx_t i = 0; i < factor.leaf_ids.size(); i++) {
+			leaf_map[factor.leaf_ids[i]] = i;
+		}
+		factor.tree = AIFilterTreeSerialize(*AIFilterTreeRenumber(*conjunct, leaf_map));
+		out_factors.push_back(std::move(factor));
+	}
+	return !out_factors.empty();
+}
+
 bool AIFactorDecompose(const BoundFunctionExpression &node, const vector<idx_t> &side_of,
-                       vector<AIFactorLeaf> &out_leaves) {
+                       vector<AIFactor> &out_factors) {
 	if (!node.BindInfo()) {
 		return false;
 	}
 	auto &bind_data = node.BindInfo()->Cast<AIFilterWithEmbedBindData>();
-	// pure conjunction only, at any nesting (per-leaf falsity must kill the row)
-	if (!AIFilterTreeIsConjunction(*bind_data.tree)) {
-		return false;
-	}
 	const idx_t n = bind_data.leaf_count;
-	out_leaves.assign(n, {});
+	vector<vector<idx_t>> leaf_sides(n);
 	for (idx_t l = 0; l < n; l++) {
 		vector<idx_t> refs;
 		for (idx_t part = 0; part < 3; part++) {
 			AIFactorCollectRefs(*node.GetChildren()[1 + part * n + l], refs);
 		}
-		auto &sides = out_leaves[l].sides;
+		auto &sides = leaf_sides[l];
 		for (const auto col : refs) {
 			if (col >= side_of.size()) {
 				return false;
@@ -3509,11 +3591,8 @@ bool AIFactorDecompose(const BoundFunctionExpression &node, const vector<idx_t> 
 			}
 		}
 		std::sort(sides.begin(), sides.end());
-		if (sides.empty() || sides.size() > 2) {
-			return false;
-		}
 	}
-	return true;
+	return AIFactorPartition(*bind_data.tree, leaf_sides, out_factors);
 }
 
 static void AIFactorRemapRefs(Expression &expr, const vector<idx_t> &index_map) {
@@ -3529,12 +3608,14 @@ static void AIFactorRemapRefs(Expression &expr, const vector<idx_t> &index_map) 
 }
 
 unique_ptr<Expression> AIFactorSubNode(const BoundFunctionExpression &node, const vector<idx_t> &leaf_ids,
-                                       const vector<idx_t> &index_map) {
+                                       const vector<idx_t> &index_map, const string &tree_in) {
 	auto &bind_data = node.BindInfo()->Cast<AIFilterWithEmbedBindData>();
 	const idx_t n = bind_data.leaf_count;
 	const idx_t m = leaf_ids.size();
-	string tree_str;
-	if (m == 1) {
+	string tree_str = tree_in;
+	if (!tree_str.empty()) {
+		// the caller's Boolean tree over 0..m-1
+	} else if (m == 1) {
 		tree_str = "L0";
 	} else {
 		tree_str = "A(";

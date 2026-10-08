@@ -54,7 +54,10 @@ Three consequences follow.
   it, in the order decided per row at run time (§4).
 * **A semantic join never materialises its cross product.** The factor graph keeps one dictionary
   per side and enumerates only surviving pairs, so intermediate size is bounded by the pair domain
-  that is still live, not by `|A| × |B|`. The scheduler's own state follows the calls made, not the domain:
+  that is still live, not by `|A| × |B|`. The join predicate is a conjunction of *factors*, each a
+  Boolean tree (AND, OR, NOT) over leaves that read one side or the same two sides; a factor is
+  evaluated per member or per pair as one unit that folds its tree three-valued and stops as soon
+  as no open leaf could still make it true, so `a OR b` asks `b` only where `a` was false. The scheduler's own state follows the calls made, not the domain:
   per member it keeps counters and the partners it was asked with, and the pairs still to ask are enumerated
   from a cursor, never stored, so a join of two 100k-row sides is scheduled from a few megabytes. Only a
   cyclic edge graph, which takes the staged schedule and lists each edge's live pairs, is capped
