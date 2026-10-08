@@ -1787,8 +1787,10 @@ static AIRequest AILeafRequest(const AILeafMeta &m, const string &prompt, const 
 
 //! Evaluate a wrapped leaf's wrapper over the answer: a one-row chunk holding the answer as the wrapper's
 //! column 0. A failed or unparseable call is a NULL answer, exactly the scalar's, so `IS NULL` and friends
-//! keep their meaning; a NULL result (e.g. a TRY_CAST that failed on the answer) is FALSE, as in a filter.
-static bool AIApplyWrapper(ClientContext &context, const AILeafMeta &m, const Value &answer) {
+//! keep their meaning. Returns the wrapper's own result: a BOOLEAN, or NULL when the wrapper itself is NULL
+//! over the answer (`lower(x) = 'yes'`, `x LIKE 'y%'`, a TRY_CAST that failed). The caller keeps that NULL
+//! as a NULL verdict: folded to false it would turn into true under a NOT above the leaf.
+static Value AIApplyWrapper(ClientContext &context, const AILeafMeta &m, const Value &answer) {
 	DataChunk row;
 	row.Initialize(Allocator::DefaultAllocator(), {m.wrapper_type});
 	row.SetChildCardinality(1);
@@ -1796,8 +1798,14 @@ static bool AIApplyWrapper(ClientContext &context, const AILeafMeta &m, const Va
 	ExpressionExecutor executor(context, *m.wrapper);
 	Vector out(LogicalType::BOOLEAN);
 	executor.ExecuteExpression(row, out);
-	const Value v = out.GetValue(0);
-	return !v.IsNull() && BooleanValue::Get(v);
+	return out.GetValue(0);
+}
+
+//! A wrapped leaf's verdict: the wrapper decides (ok) unless its result is NULL, which stays a NULL verdict.
+static bool AIWrappedVerdict(ClientContext &context, const AILeafMeta &m, const Value &answer, bool &ok) {
+	const Value w = AIApplyWrapper(context, m, answer);
+	ok = !w.IsNull();
+	return ok && BooleanValue::Get(w);
 }
 
 //! Fold a leaf's raw response content into the leaf's boolean outcome (comparison or wrapper applied).
@@ -1806,9 +1814,7 @@ static bool AILeafOutcome(ClientContext &context, const AILeafMeta &m, const str
 		bool v = false;
 		ok = AIReadFilterVerdict(content, v);
 		if (m.wrapper) {
-			const bool wrapped = AIApplyWrapper(context, m, ok ? Value::BOOLEAN(v) : Value(LogicalType::BOOLEAN));
-			ok = true; // the wrapper decided: a valid verdict even over a missing or unparseable answer
-			return wrapped;
+			return AIWrappedVerdict(context, m, ok ? Value::BOOLEAN(v) : Value(LogicalType::BOOLEAN), ok);
 		}
 		return ok && v;
 	}
@@ -1822,9 +1828,7 @@ static bool AILeafOutcome(ClientContext &context, const AILeafMeta &m, const str
 			}
 		}
 		if (m.wrapper) {
-			const bool wrapped = AIApplyWrapper(context, m, ok ? Value::DOUBLE(d) : Value(LogicalType::DOUBLE));
-			ok = true; // the wrapper decided: a valid verdict even over a missing or unparseable answer
-			return wrapped;
+			return AIWrappedVerdict(context, m, ok ? Value::DOUBLE(d) : Value(LogicalType::DOUBLE), ok);
 		}
 		if (!ok) {
 			return false;
@@ -1854,9 +1858,7 @@ static bool AILeafOutcome(ClientContext &context, const AILeafMeta &m, const str
 		ok = true;
 	}
 	if (m.wrapper) {
-		const bool wrapped = AIApplyWrapper(context, m, ok ? Value(s) : Value(LogicalType::VARCHAR));
-		ok = true; // the wrapper decided: a valid verdict even over a missing or unparseable answer
-		return wrapped;
+		return AIWrappedVerdict(context, m, ok ? Value(s) : Value(LogicalType::VARCHAR), ok);
 	}
 	if (!ok) {
 		return false;
@@ -1902,10 +1904,10 @@ static bool AIEvalLeaf(ClientContext &context, const AILeafMeta &m, const string
 	ok = !r.empty() && r[0].success;
 	if (!ok) {
 		if (m.wrapper) {
-			// A failed call is a NULL answer to the wrapper, whose result is the leaf's (valid) verdict: IS NULL
-			// is true for it, `= 'yes'` is false. Without a wrapper the verdict stays unknown (ok false).
-			ok = true;
-			return AIApplyWrapper(context, m, Value(m.wrapper_type));
+			// A failed call is a NULL answer to the wrapper: IS NULL is true for it, coalesce decides, and a
+			// wrapper that is itself NULL over it (LIKE, lower(x) = ...) stays a NULL verdict. Without a
+			// wrapper the verdict stays unknown (ok false).
+			return AIWrappedVerdict(context, m, Value(m.wrapper_type), ok);
 		}
 		return false;
 	}

@@ -1441,13 +1441,17 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 	};
 	vector<idx_t> un_evals(k1, 0), un_passes(k1, 0), ed_evals(ne, 0), ed_passes(ne, 0);
 	// Pair enumeration: per edge and parent-side member, a cursor over the child side (rotated per
-	// member) plus the partners skipped because their unary verdict was still pending.
+	// member). A parent whose cursor meets a child with a pending unary verdict WAITS there and asks for
+	// that verdict (`wanted`), rather than skipping ahead and remembering the child: remembering would
+	// store every (parent, pending child) pair -- the pair domain again -- before a single pair call.
 	vector<vector<uint32_t>> cursor(ne);
-	vector<vector<vector<uint32_t>>> deferred(ne);
 	for (idx_t e = 0; e < ne; e++) {
-		const idx_t np = sink.sides[parent_of[e]].reps.size();
-		cursor[e].assign(np, 0);
-		deferred[e].resize(np);
+		cursor[e].assign(sink.sides[parent_of[e]].reps.size(), 0);
+	}
+	vector<vector<idx_t>> wanted(k1); // members whose unary verdict a waiting parent asked for
+	vector<vector<char>> wanted_flag(k1);
+	for (idx_t s = 0; s < k1; s++) {
+		wanted_flag[s].assign(sink.sides[s].reps.size(), 0);
 	}
 
 	auto unknown = [&](idx_t e, int x, idx_t m) -> idx_t {
@@ -1864,38 +1868,27 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 	};
 
 	// The next child partner of parent member pm on edge e that is live and unary-confirmed, or
-	// false when none is ready now. Deferred partners (unary still pending when passed) go first.
+	// false when the cursor stands at a child whose verdict is still pending (asked for) or when
+	// the child side is exhausted. Dead children are stepped over.
 	auto next_partner = [&](idx_t e, idx_t pm, idx_t &j_out) {
 		const idx_t cs = child_of[e];
-		auto &def = deferred[e][pm];
-		for (idx_t d = 0; d < def.size();) {
-			const idx_t j = def[d];
-			if (!live[cs][j]) {
-				def[d] = def.back();
-				def.pop_back();
-				continue;
-			}
-			if (uval[cs][j] == 1) {
-				def[d] = def.back();
-				def.pop_back();
-				j_out = j;
-				return true;
-			}
-			d++;
-		}
 		const idx_t nt = sink.sides[cs].reps.size();
 		auto &cur = cursor[e][pm];
 		const idx_t start = nt == 0 ? 0 : (pm * 7919) % nt;
 		while (cur < nt) {
 			const idx_t j = (start + cur) % nt;
-			cur++;
 			if (!live[cs][j]) {
+				cur++;
 				continue;
 			}
 			if (uval[cs][j] != 1) {
-				def.push_back(NumericCast<uint32_t>(j));
-				continue;
+				if (uval[cs][j] == 0 && !wanted_flag[cs][j]) {
+					wanted_flag[cs][j] = 1;
+					wanted[cs].push_back(j);
+				}
+				return false; // wait for this child's verdict; the cursor stays on it
 			}
+			cur++;
 			j_out = j;
 			return true;
 		}
@@ -1972,8 +1965,29 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 				best_pair_edge = e;
 			}
 		}
+		// The verdicts waiting parents asked for: submitted up to `room` of them, the rest stay queued.
+		auto dispatch_wanted = [&](idx_t side, idx_t room) {
+			idx_t n = 0;
+			vector<idx_t> keep;
+			for (const auto m : wanted[side]) {
+				if (!live[side][m] || uval[side][m] != 0) {
+					wanted_flag[side][m] = 0; // dead, or asked by another path meanwhile
+					continue;
+				}
+				if (n < room) {
+					wanted_flag[side][m] = 0;
+					submit_unit(true, side, m, 0);
+					n++;
+				} else {
+					keep.push_back(m);
+				}
+			}
+			wanted[side] = std::move(keep);
+			return n;
+		};
 		auto dispatch_unary = [&](idx_t side) {
-			// batch = highest-impact pending members of the side
+			// members a waiting parent asked for go first, then the highest-impact pending members
+			idx_t submitted = dispatch_wanted(side, slots);
 			vector<std::pair<double, idx_t>> scored;
 			for (idx_t m = 0; m < uval[side].size(); m++) {
 				if (live[side][m] && uval[side][m] == 0) {
@@ -1983,7 +1997,6 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 				}
 			}
 			std::sort(scored.begin(), scored.end());
-			idx_t submitted = 0;
 			for (idx_t u = 0; u < scored.size() && submitted < slots; u++) {
 				submit_unit(true, side, scored[u].second, 0);
 				submitted++;
@@ -1995,6 +2008,14 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 			harvest(false);
 			continue;
 		}
+		// verdicts that waiting parents asked for take the first slots of every round, so a parent
+		// stalled on a pending child is unblocked while other edges keep the pool busy
+		idx_t submitted = 0;
+		for (idx_t s = 0; s < k1 && submitted < slots; s++) {
+			if (!wanted[s].empty()) {
+				submitted += dispatch_wanted(s, slots - submitted);
+			}
+		}
 		// pairs: edges by best score; within an edge, members by score, at most 2 pairs each in the
 		// first pass (keeps future frontiers and the pool full), then fill
 		vector<idx_t> edges_by_score;
@@ -2005,7 +2026,6 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 		}
 		std::sort(edges_by_score.begin(), edges_by_score.end(),
 		          [&](idx_t a, idx_t b) { return edge_best[a] > edge_best[b]; });
-		idx_t submitted = 0;
 		for (const auto e : edges_by_score) {
 			if (submitted >= slots) {
 				break;

@@ -110,6 +110,73 @@ SELECT count(*) FROM ja, jb WHERE ai_filter('[p=100] ua? ' || x) AND ai_filter('
 ----
 120
 
+# --- a wrapper whose OWN result is NULL (`= 'yes'` over a missing answer) is a NULL verdict, so a NOT
+#     above it (De Morgan puts the NOT on the leaf) is NULL, never true: NOT (NULL AND true) = NULL
+query I
+SELECT count(*) FROM t WHERE NOT (ai_complete('[fail] c? ' || a) = 'yes' AND ai_filter('[p=100] y? ' || b));
+----
+0
+
+query II
+SELECT count(*) FILTER (WHERE v IS NULL), count(*) FILTER (WHERE v)
+FROM (SELECT NOT (ai_complete('[fail] c? ' || a) = 'yes' AND ai_filter('[p=100] y? ' || b)) AS v FROM t);
+----
+40	0
+
+# the same under the inline evaluator and in a factor graph edge
+statement ok
+SET ai_factorize = 'off';
+
+query I
+SELECT count(*) FROM t WHERE NOT (ai_complete('[fail] c? ' || a) = 'yes' AND ai_filter('[p=100] y? ' || b));
+----
+0
+
+statement ok
+SET ai_factorize = 'all';
+
+query I
+SELECT count(*) FROM ja, jb WHERE NOT (ai_complete('[fail] c? ' || x || ' ' || y) = 'yes') AND ai_filter('[p=100] e? ' || x || ' ' || y);
+----
+0
+
+# a GENUINE wrapper (not a baked comparison) whose own result is NULL -- lower(x) = 'yes', LIKE, arithmetic on
+# a score -- under an outer NOT: NOT NULL is NULL on the region, the inline evaluator and the factor graph
+query III
+SELECT (SELECT count(*) FROM t WHERE NOT (lower(ai_complete('[fail] c? ' || a)) = 'yes' AND ai_filter('[p=100] y? ' || b))),
+       (SELECT count(*) FROM t WHERE NOT (ai_complete('[fail] c? ' || a) LIKE 'y%' AND ai_filter('[p=100] y? ' || b))),
+       (SELECT count(*) FROM t WHERE NOT (ai_score('[fail] s? ' || a) + 1 > 3 AND ai_filter('[p=100] y? ' || b)));
+----
+0	0	0
+
+statement ok
+SET ai_factorize = 'off';
+
+query I
+SELECT count(*) FROM t WHERE NOT (lower(ai_complete('[fail] c? ' || a)) = 'yes' AND ai_filter('[p=100] y? ' || b));
+----
+0
+
+statement ok
+SET ai_factorize = 'all';
+
+query I
+SELECT count(*) FROM ja, jb WHERE NOT (lower(ai_complete('[fail] c? ' || x || y)) = 'yes' AND ai_filter('[p=100] e? ' || x || ' ' || y));
+----
+0
+
+# the wrapper over an ANSWERED leaf still decides: NOT (false AND true) = true
+query I
+SELECT count(*) FROM t WHERE NOT (lower(ai_complete('[p=100] c? ' || a)) = 'never' AND ai_filter('[p=100] y? ' || b));
+----
+40
+
+# IS NULL and coalesce still decide: the wrapper's result is a real boolean there
+query I
+SELECT count(*) FROM t WHERE NOT (ai_complete('[fail] c? ' || a) IS NULL AND ai_filter('[p=0] y? ' || b));
+----
+40
+
 query I
 SELECT sum(failed_calls) > 0 FROM ai_usage();
 ----

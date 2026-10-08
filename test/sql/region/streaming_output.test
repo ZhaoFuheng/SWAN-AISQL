@@ -54,9 +54,11 @@ SELECT count(*) FROM (
 ----
 1
 
-# the first row went out while most of the 200 prompts were still queued, and those were never asked
+# the first row went out while most of the 200 prompts were still queued, and those were never asked. How
+# many were in flight or dispatched before the stop reached the regions is timing-dependent (56 to 119 calls
+# across quiet runs, more under CPU load), so the bound only pins that well over a quarter were never asked.
 query I
-SELECT sum(llm_calls)::BIGINT < 100 FROM ai_usage();
+SELECT sum(llm_calls)::BIGINT < 150 FROM ai_usage();
 ----
 true
 
