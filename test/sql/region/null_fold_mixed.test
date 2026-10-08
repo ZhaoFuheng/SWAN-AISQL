@@ -160,10 +160,55 @@ SELECT count(*) FROM t WHERE NOT (lower(ai_complete('[fail] c? ' || a)) = 'yes' 
 statement ok
 SET ai_factorize = 'all';
 
+# NOT over the whole conjunction is not a conjunction any more (O(N(L0),N(L1))): this join stays a region
+# over the cross product, so it checks the region's fold, not the graph's
+query II
+EXPLAIN SELECT count(*) FROM ja, jb WHERE NOT (lower(ai_complete('[fail] c? ' || x || y)) = 'yes' AND ai_filter('[p=100] e? ' || x || ' ' || y));
+----
+physical_plan	<!REGEX>:(?s).*Ai Factor Graph.*
+
 query I
 SELECT count(*) FROM ja, jb WHERE NOT (lower(ai_complete('[fail] c? ' || x || y)) = 'yes' AND ai_filter('[p=100] e? ' || x || ' ' || y));
 ----
 0
+
+# the FACTOR GRAPH takes a conjunction whose leaf carries the NOT inside its wrapper: a NULL wrapper result
+# is a NULL verdict for the pair (edge leaf) or the member (unary leaf), and IS NULL over it decides
+query II
+EXPLAIN SELECT count(*) FROM ja, jb WHERE NOT (lower(ai_complete('[fail] c? ' || x || y)) = 'yes') AND ai_filter('[p=100] e? ' || x || ' ' || y);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+query I
+SELECT count(*) FROM ja, jb WHERE NOT (lower(ai_complete('[fail] c? ' || x || y)) = 'yes') AND ai_filter('[p=100] e? ' || x || ' ' || y);
+----
+0
+
+query II
+EXPLAIN SELECT count(*) FROM ja, jb WHERE NOT (lower(ai_complete('[fail] u? ' || x)) = 'yes') AND ai_filter('[p=100] e? ' || x || ' ' || y);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+query I
+SELECT count(*) FROM ja, jb WHERE NOT (lower(ai_complete('[fail] u? ' || x)) = 'yes') AND ai_filter('[p=100] e? ' || x || ' ' || y);
+----
+0
+
+query II
+EXPLAIN SELECT count(*) FROM ja, jb WHERE (lower(ai_complete('[fail] c? ' || x || y)) = 'yes') IS NULL AND ai_filter('[p=100] e? ' || x || ' ' || y);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+query I
+SELECT count(*) FROM ja, jb WHERE (lower(ai_complete('[fail] c? ' || x || y)) = 'yes') IS NULL AND ai_filter('[p=100] e? ' || x || ' ' || y);
+----
+120
+
+# an ANSWERED wrapper under the graph still decides: NOT (false) AND true keeps every pair
+query I
+SELECT count(*) FROM ja, jb WHERE NOT (lower(ai_complete('[p=100] c? ' || x || y)) = 'never') AND ai_filter('[p=100] e? ' || x || ' ' || y);
+----
+120
 
 # the wrapper over an ANSWERED leaf still decides: NOT (false AND true) = true
 query I
