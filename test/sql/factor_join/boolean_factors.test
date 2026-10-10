@@ -51,11 +51,12 @@ physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
 statement ok
 CREATE TABLE g3 AS SELECT x, y, z FROM ta, tb, tc WHERE (ai_filter('[p=50] u3 ' || x) OR ai_filter('[p=30] e4 ' || x || ' ' || y)) AND (ai_filter('[p=40] e5 ' || y || ' ' || z) AND NOT (ai_filter('[p=50] u4 ' || z) AND ai_filter('[p=50] e6 ' || y || ' ' || z)));
 
-# 4. an OR that spans three sides is not a factor: the join stays a region, and is still right
+# 4. an OR that spans three sides is not a factor: the join is evaluated as two terms (its disjunctive
+#    normal form), each a conjunctive graph, results united
 query II
 EXPLAIN SELECT * FROM ta, tb, tc WHERE (ai_filter('[p=30] e7 ' || x || ' ' || y) OR ai_filter('[p=30] e8 ' || y || ' ' || z)) AND ai_filter('[p=60] u5 ' || z);
 ----
-physical_plan	<!REGEX>:(?s).*Ai Factor Graph.*
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*Terms: 2.*
 
 statement ok
 CREATE TABLE g4 AS SELECT x, y, z FROM ta, tb, tc WHERE (ai_filter('[p=30] e7 ' || x || ' ' || y) OR ai_filter('[p=30] e8 ' || y || ' ' || z)) AND ai_filter('[p=60] u5 ' || z);

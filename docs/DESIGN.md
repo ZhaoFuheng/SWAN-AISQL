@@ -57,7 +57,12 @@ Three consequences follow.
   that is still live, not by `|A| × |B|`. The join predicate is a conjunction of *factors*, each a
   Boolean tree (AND, OR, NOT) over leaves that read one side or the same two sides; a factor is
   evaluated per member or per pair as one unit that folds its tree three-valued and stops as soon
-  as no open leaf could still make it true, so `a OR b` asks `b` only where `a` was false. The scheduler's own state follows the calls made, not the domain:
+  as no open leaf could still make it true, so `a OR b` asks `b` only where `a` was false. Any
+  other shape, an OR or NOT that spans three sides, is taken as the *terms* of its disjunctive
+  normal form: each term is a conjunctive graph over the same member dictionaries, run in turn,
+  cheapest first, and a later term skips the members and pairs an earlier term already proved for
+  every tuple through them; the results are united. The representation is the same for every
+  shape, only the pruning is per term. The scheduler's own state follows the calls made, not the domain:
   per member it keeps counters and the partners it was asked with, and the pairs still to ask are enumerated
   from a cursor, never stored, so a join of two 100k-row sides is scheduled from a few megabytes. Only a
   cyclic edge graph, which takes the staged schedule and lists each edge's live pairs, is capped

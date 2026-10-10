@@ -51,6 +51,11 @@ unique_ptr<AIFilterTreeNode> AIFilterTreeRenumber(const AIFilterTreeNode &node, 
 //! The leaf indices of the tree in tree order (a leaf referenced twice is listed twice).
 void AIFilterTreeCollectLeaves(const AIFilterTreeNode &node, vector<idx_t> &out);
 
+//! The tree as a disjunction of conjunctions of literals (leaf index, negated), after NOT push-down: each
+//! term sorted by leaf, contradictory terms dropped, duplicate and absorbed terms removed. Returns false
+//! when the expansion would exceed `max_terms` terms (the caller keeps the tree as it is).
+bool AIFilterTreeDNF(const AIFilterTreeNode &tree, idx_t max_terms, vector<vector<std::pair<idx_t, bool>>> &terms);
+
 //! Whether some assignment of the still-UNKNOWN leaves makes the tree TRUE (resp. FALSE), given the leaves
 //! already decided. A NULL leaf is neither: it can make neither an AND true nor an OR false. Polarity is
 //! respected: under a NOT a leaf helps by being false.

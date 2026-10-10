@@ -259,6 +259,10 @@ static void RegisterAISettings(DatabaseInstance &db) {
 	                          "Factor graph scheduler state: dense (one byte per pair of each edge) or sparse "
 	                          "(counters per member and the pairs asked; no pair-domain allocation)",
 	                          LogicalType::VARCHAR, EnvOr("AI_FACTOR_STATE", Value("sparse")));
+	config.AddExtensionOption("ai_factor_max_terms",
+	                          "Largest disjunctive normal form (terms) the factor graph takes for a join predicate "
+	                          "that is not a conjunction of factors; beyond it the join runs as a region",
+	                          LogicalType::UBIGINT, Value::UBIGINT(16));
 	config.AddExtensionOption("ai_factor_pair_limit",
 	                          "Largest estimated pair domain (left rows x right rows of one AI join edge) the factor "
 	                          "graph takes under the dense scheduler or for a cyclic edge graph; above it the join is "

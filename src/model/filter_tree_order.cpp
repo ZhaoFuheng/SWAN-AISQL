@@ -380,6 +380,128 @@ bool AIFilterTreeCanBeFalse(const AIFilterTreeNode &node, const vector<AITriStat
 	return false;
 }
 
+using AIDnfTerm = vector<std::pair<idx_t, bool>>;
+
+//! Canonical term: sorted by leaf, duplicates merged; false when a leaf appears in both polarities.
+static bool CanonicalTerm(AIDnfTerm &term) {
+	std::sort(term.begin(), term.end());
+	AIDnfTerm out;
+	for (auto &lit : term) {
+		if (!out.empty() && out.back().first == lit.first) {
+			if (out.back().second != lit.second) {
+				return false; // L AND NOT L
+			}
+			continue;
+		}
+		out.push_back(lit);
+	}
+	term = std::move(out);
+	return true;
+}
+
+static bool DnfOf(const AIFilterTreeNode &node, idx_t max_terms, vector<AIDnfTerm> &out);
+
+//! The complement of a DNF as a DNF (De Morgan + distribution), capped.
+static bool NegateDnf(const vector<AIDnfTerm> &dnf, idx_t max_terms, vector<AIDnfTerm> &out) {
+	out.assign(1, AIDnfTerm {});
+	for (auto &term : dnf) {
+		vector<AIDnfTerm> next;
+		for (auto &partial : out) {
+			for (auto &lit : term) {
+				AIDnfTerm t = partial;
+				t.emplace_back(lit.first, !lit.second);
+				if (CanonicalTerm(t)) {
+					next.push_back(std::move(t));
+				}
+				if (next.size() > max_terms) {
+					return false;
+				}
+			}
+		}
+		out = std::move(next);
+	}
+	return true;
+}
+
+static bool DnfOf(const AIFilterTreeNode &node, idx_t max_terms, vector<AIDnfTerm> &out) {
+	out.clear();
+	switch (node.type) {
+	case AIFilterTreeType::LEAF:
+		out.push_back(AIDnfTerm {{node.leaf_index, false}});
+		return true;
+	case AIFilterTreeType::NOT_OP: {
+		if (node.children[0]->type == AIFilterTreeType::LEAF) {
+			out.push_back(AIDnfTerm {{node.children[0]->leaf_index, true}});
+			return true;
+		}
+		vector<AIDnfTerm> inner;
+		return DnfOf(*node.children[0], max_terms, inner) && NegateDnf(inner, max_terms, out);
+	}
+	case AIFilterTreeType::OR_OP:
+		for (auto &child : node.children) {
+			vector<AIDnfTerm> part;
+			if (!DnfOf(*child, max_terms, part)) {
+				return false;
+			}
+			out.insert(out.end(), part.begin(), part.end());
+			if (out.size() > max_terms) {
+				return false;
+			}
+		}
+		return true;
+	case AIFilterTreeType::AND_OP: {
+		out.assign(1, AIDnfTerm {});
+		for (auto &child : node.children) {
+			vector<AIDnfTerm> part;
+			if (!DnfOf(*child, max_terms, part)) {
+				return false;
+			}
+			vector<AIDnfTerm> next;
+			for (auto &a : out) {
+				for (auto &b : part) {
+					AIDnfTerm t = a;
+					t.insert(t.end(), b.begin(), b.end());
+					if (CanonicalTerm(t)) {
+						next.push_back(std::move(t));
+					}
+					if (next.size() > max_terms) {
+						return false;
+					}
+				}
+			}
+			out = std::move(next);
+		}
+		return true;
+	}
+	}
+	return false;
+}
+
+bool AIFilterTreeDNF(const AIFilterTreeNode &tree, idx_t max_terms, vector<vector<std::pair<idx_t, bool>>> &terms) {
+	terms.clear();
+	vector<AIDnfTerm> raw;
+	if (!DnfOf(tree, max_terms, raw)) {
+		return false;
+	}
+	// duplicates and absorbed terms (a term containing another term is implied by it)
+	std::sort(raw.begin(), raw.end(), [](const AIDnfTerm &a, const AIDnfTerm &b) {
+		return a.size() != b.size() ? a.size() < b.size() : a < b;
+	});
+	for (auto &term : raw) {
+		bool absorbed = false;
+		for (auto &kept : terms) {
+			if (std::includes(term.begin(), term.end(), kept.begin(), kept.end())) {
+				absorbed = true;
+				break;
+			}
+		}
+		if (!absorbed) {
+			terms.push_back(term);
+		}
+	}
+	return true;
+}
+
 bool AIFilterTreeIsConjunction(const AIFilterTreeNode &node) {
 	if (node.type == AIFilterTreeType::LEAF) {
 		return true;

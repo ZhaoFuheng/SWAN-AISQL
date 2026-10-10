@@ -18,6 +18,8 @@
 #include <deque>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
+#include <set>
 
 namespace duckdb {
 
@@ -36,81 +38,90 @@ PhysicalAIFactorGraph::PhysicalAIFactorGraph(PhysicalPlan &physical_plan, vector
 		offset += side_widths[s];
 	}
 	auto &fn = node->Cast<BoundFunctionExpression>();
-	if (!AIFactorDecompose(fn, side_of, factors)) {
+	vector<vector<AIFactor>> term_factors;
+	if (!AIFactorDecompose(fn, side_of, /*max_terms=*/1u << 16, term_factors)) {
 		throw InternalException("AIFactorGraph: node is not factor-decomposable (rewrite gate should have caught it)");
 	}
-	// Merge the factors of one side (or one pair of sides) into that side's (edge's) leaf list and tree: the
-	// AND of the factors' trees, each renumbered to its leaves' positions in the merged list.
-	unary_leaves.resize(side_widths.size());
-	unary_trees.resize(side_widths.size());
-	vector<vector<string>> unary_parts(side_widths.size());
-	vector<vector<string>> edge_parts;
-	auto merge = [&](vector<idx_t> &leaf_ids, vector<string> &parts, const AIFactor &factor) {
-		vector<idx_t> leaf_map(factor.leaf_ids.size());
-		for (idx_t i = 0; i < factor.leaf_ids.size(); i++) {
-			leaf_map[i] = leaf_ids.size();
-			leaf_ids.push_back(factor.leaf_ids[i]);
+	// Per term, merge the factors of one side (or one pair of sides) into that side's (edge's) leaf list and
+	// tree: the AND of the factors' trees, each renumbered to its leaves' positions in the merged list.
+	for (auto &factors : term_factors) {
+		TermPlan plan;
+		plan.factors = factors;
+		plan.unary_leaves.resize(side_widths.size());
+		plan.unary_trees.resize(side_widths.size());
+		vector<vector<string>> unary_parts(side_widths.size());
+		vector<vector<string>> edge_parts;
+		auto merge = [&](vector<idx_t> &leaf_ids, vector<string> &parts, const AIFactor &factor) {
+			vector<idx_t> leaf_map(factor.leaf_ids.size());
+			for (idx_t i = 0; i < factor.leaf_ids.size(); i++) {
+				leaf_map[i] = leaf_ids.size();
+				leaf_ids.push_back(factor.leaf_ids[i]);
+			}
+			auto tree = AIFilterTreeParse(factor.tree);
+			if (!tree) {
+				throw InternalException("AIFactorGraph: unparseable factor tree '%s'", factor.tree);
+			}
+			parts.push_back(AIFilterTreeSerialize(*AIFilterTreeRenumber(*tree, leaf_map)));
+		};
+		for (auto &factor : plan.factors) {
+			if (factor.sides.size() == 1) {
+				merge(plan.unary_leaves[factor.sides[0]], unary_parts[factor.sides[0]], factor);
+				continue;
+			}
+			auto it = std::find_if(plan.edges.begin(), plan.edges.end(),
+			                       [&](const Edge &e) { return e.s == factor.sides[0] && e.t == factor.sides[1]; });
+			if (it == plan.edges.end()) {
+				plan.edges.push_back(Edge {factor.sides[0], factor.sides[1], {}, ""});
+				edge_parts.emplace_back();
+				it = plan.edges.end() - 1;
+			}
+			merge(it->leaf_ids, edge_parts[NumericCast<idx_t>(it - plan.edges.begin())], factor);
 		}
-		auto tree = AIFilterTreeParse(factor.tree);
-		if (!tree) {
-			throw InternalException("AIFactorGraph: unparseable factor tree '%s'", factor.tree);
+		auto conjoin = [](const vector<string> &parts) {
+			if (parts.size() == 1) {
+				return parts[0];
+			}
+			string tree = "A(";
+			for (idx_t i = 0; i < parts.size(); i++) {
+				tree += (i ? "," : "") + parts[i];
+			}
+			return tree + ")";
+		};
+		for (idx_t s = 0; s < side_widths.size(); s++) {
+			if (!unary_parts[s].empty()) {
+				plan.unary_trees[s] = conjoin(unary_parts[s]);
+			}
 		}
-		parts.push_back(AIFilterTreeSerialize(*AIFilterTreeRenumber(*tree, leaf_map)));
-	};
-	for (auto &factor : factors) {
-		if (factor.sides.size() == 1) {
-			merge(unary_leaves[factor.sides[0]], unary_parts[factor.sides[0]], factor);
-			continue;
+		for (idx_t e = 0; e < plan.edges.size(); e++) {
+			plan.edges[e].tree = conjoin(edge_parts[e]);
 		}
-		auto it = std::find_if(edges.begin(), edges.end(),
-		                       [&](const Edge &e) { return e.s == factor.sides[0] && e.t == factor.sides[1]; });
-		if (it == edges.end()) {
-			edges.push_back(Edge {factor.sides[0], factor.sides[1], {}, ""});
-			edge_parts.emplace_back();
-			it = edges.end() - 1;
-		}
-		merge(it->leaf_ids, edge_parts[NumericCast<idx_t>(it - edges.begin())], factor);
-	}
-	auto conjoin = [](const vector<string> &parts) {
-		if (parts.size() == 1) {
-			return parts[0];
-		}
-		string tree = "A(";
-		for (idx_t i = 0; i < parts.size(); i++) {
-			tree += (i ? "," : "") + parts[i];
-		}
-		return tree + ")";
-	};
-	for (idx_t s = 0; s < side_widths.size(); s++) {
-		if (!unary_parts[s].empty()) {
-			unary_trees[s] = conjoin(unary_parts[s]);
-		}
-	}
-	for (idx_t e = 0; e < edges.size(); e++) {
-		edges[e].tree = conjoin(edge_parts[e]);
+		terms.push_back(std::move(plan));
 	}
 }
 
 InsertionOrderPreservingMap<string> PhysicalAIFactorGraph::ParamsToString() const {
 	InsertionOrderPreservingMap<string> result;
 	result["Sides"] = std::to_string(side_widths.size());
-	string edge_str;
-	for (auto &e : edges) {
-		if (!edge_str.empty()) {
-			edge_str += ", ";
+	// per term: its edges, and each factor's tree in the node's leaf numbering (its own numbering is positional)
+	string edge_str, factor_str;
+	for (auto &term : terms) {
+		string edges_of_term, factors_of_term;
+		for (auto &e : term.edges) {
+			edges_of_term +=
+			    (edges_of_term.empty() ? "" : ", ") + ("S" + std::to_string(e.s) + "-S" + std::to_string(e.t));
 		}
-		edge_str += "S" + std::to_string(e.s) + "-S" + std::to_string(e.t);
+		for (auto &f : term.factors) {
+			auto tree = AIFilterTreeParse(f.tree);
+			factors_of_term += (factors_of_term.empty() ? "" : ", ") +
+			                   (tree ? AIFilterTreeSerialize(*AIFilterTreeRenumber(*tree, f.leaf_ids)) : f.tree);
+		}
+		edge_str += (edge_str.empty() ? "" : " | ") + edges_of_term;
+		factor_str += (factor_str.empty() ? "" : " | ") + factors_of_term;
+	}
+	if (terms.size() > 1) {
+		result["Terms"] = std::to_string(terms.size());
 	}
 	result["Edges"] = edge_str;
-	// each factor's tree in the node's leaf numbering (its own numbering is positional)
-	string factor_str;
-	for (auto &f : factors) {
-		if (!factor_str.empty()) {
-			factor_str += ", ";
-		}
-		auto tree = AIFilterTreeParse(f.tree);
-		factor_str += tree ? AIFilterTreeSerialize(*AIFilterTreeRenumber(*tree, f.leaf_ids)) : f.tree;
-	}
 	result["Factors"] = factor_str;
 	result["Mode"] = "factor graph (member/pair domains, exact backward pruning)";
 	return result;
@@ -259,15 +270,16 @@ static void EvaluateDomain(ClientContext &context, const Expression &sub_node, c
 
 //! Orient the edge graph as a forest (BFS per component). parent_edge_of_side[s] = the edge
 //! connecting s to its parent (INVALID for roots); side_level[s] = BFS depth. False on a cycle.
-static bool OrientForest(const PhysicalAIFactorGraph &op, const FactorGraphSinkState &sink,
-                         vector<idx_t> &parent_edge_of_side, vector<idx_t> &side_level) {
+static bool OrientForest(const PhysicalAIFactorGraph &op, const PhysicalAIFactorGraph::TermPlan &plan,
+                         const FactorGraphSinkState &sink, vector<idx_t> &parent_edge_of_side,
+                         vector<idx_t> &side_level) {
 	const idx_t k = op.side_widths.size();
 	parent_edge_of_side.assign(k, DConstants::INVALID_INDEX);
 	side_level.assign(k, 0);
 	vector<vector<idx_t>> adj(k);
-	for (idx_t e = 0; e < op.edges.size(); e++) {
-		adj[op.edges[e].s].push_back(e);
-		adj[op.edges[e].t].push_back(e);
+	for (idx_t e = 0; e < plan.edges.size(); e++) {
+		adj[plan.edges[e].s].push_back(e);
+		adj[plan.edges[e].t].push_back(e);
 	}
 	// Root each component where the pruning starts: a unary-pruned side (most unary leaves,
 	// then fewest members), so strict-need support flows outward from the smallest confirmed
@@ -282,13 +294,13 @@ static bool OrientForest(const PhysicalAIFactorGraph &op, const FactorGraphSinkS
 		if ((x == op.existential_side) != (y == op.existential_side)) {
 			return x == op.existential_side;
 		}
-		if (op.unary_leaves[x].size() != op.unary_leaves[y].size()) {
-			return op.unary_leaves[x].size() > op.unary_leaves[y].size();
+		if (plan.unary_leaves[x].size() != plan.unary_leaves[y].size()) {
+			return plan.unary_leaves[x].size() > plan.unary_leaves[y].size();
 		}
 		return sink.sides[x].reps.size() < sink.sides[y].reps.size();
 	});
 	vector<char> visited(k, 0);
-	vector<char> edge_used(op.edges.size(), 0);
+	vector<char> edge_used(plan.edges.size(), 0);
 	for (const auto root : root_order) {
 		if (visited[root]) {
 			continue;
@@ -303,7 +315,7 @@ static bool OrientForest(const PhysicalAIFactorGraph &op, const FactorGraphSinkS
 					continue;
 				}
 				edge_used[e] = 1;
-				const idx_t other = op.edges[e].s == s ? op.edges[e].t : op.edges[e].s;
+				const idx_t other = plan.edges[e].s == s ? plan.edges[e].t : plan.edges[e].s;
 				if (visited[other]) {
 					return false; // cycle: fall back to staged evaluation
 				}
@@ -460,6 +472,7 @@ struct GraphStreamPool {
 struct GraphUnitBaker {
 	ClientContext &context;
 	const PhysicalAIFactorGraph &op;
+	const PhysicalAIFactorGraph::TermPlan &plan;
 	FactorGraphSinkState &sink;
 	vector<unique_ptr<Expression>> side_sub, edge_sub;
 	vector<vector<LogicalType>> side_types, edge_types;
@@ -475,10 +488,11 @@ struct GraphUnitBaker {
 	vector<idx_t> cache_split;
 	vector<char> cache_group_s; // group axis: 1 = edge.s owns the prefix, 0 = edge.t
 
-	GraphUnitBaker(ClientContext &context_p, const PhysicalAIFactorGraph &op_p, FactorGraphSinkState &sink_p)
-	    : context(context_p), op(op_p), sink(sink_p) {
+	GraphUnitBaker(ClientContext &context_p, const PhysicalAIFactorGraph &op_p,
+	               const PhysicalAIFactorGraph::TermPlan &plan_p, FactorGraphSinkState &sink_p)
+	    : context(context_p), op(op_p), plan(plan_p), sink(sink_p) {
 		const idx_t k1 = op.side_widths.size();
-		const idx_t ne = op.edges.size();
+		const idx_t ne = plan.edges.size();
 		const idx_t total_width = op.side_offsets.back() + op.side_widths.back();
 		auto &fn = op.node->Cast<BoundFunctionExpression>();
 		side_sub.resize(k1);
@@ -486,14 +500,14 @@ struct GraphUnitBaker {
 		side_exec.resize(k1);
 		side_row.resize(k1);
 		for (idx_t s = 0; s < k1; s++) {
-			if (op.unary_leaves[s].empty()) {
+			if (plan.unary_leaves[s].empty()) {
 				continue;
 			}
 			vector<idx_t> index_map(total_width, DConstants::INVALID_INDEX);
 			for (idx_t c = 0; c < op.side_widths[s]; c++) {
 				index_map[op.side_offsets[s] + c] = c;
 			}
-			side_sub[s] = AIFactorSubNode(fn, op.unary_leaves[s], index_map, op.unary_trees[s]);
+			side_sub[s] = AIFactorSubNode(fn, plan.unary_leaves[s], index_map, plan.unary_trees[s]);
 			side_types[s].assign(op.types.begin() + NumericCast<int64_t>(op.side_offsets[s]),
 			                     op.types.begin() + NumericCast<int64_t>(op.side_offsets[s] + op.side_widths[s]));
 			side_types[s].push_back(LogicalType::BIGINT);
@@ -504,7 +518,7 @@ struct GraphUnitBaker {
 		edge_ops_exec.resize(ne);
 		edge_row.resize(ne);
 		for (idx_t e = 0; e < ne; e++) {
-			auto &edge = op.edges[e];
+			auto &edge = plan.edges[e];
 			vector<idx_t> index_map(total_width, DConstants::INVALID_INDEX);
 			for (idx_t c = 0; c < op.side_widths[edge.s]; c++) {
 				index_map[op.side_offsets[edge.s] + c] = c;
@@ -548,7 +562,7 @@ struct GraphUnitBaker {
 				walk(expr);
 				bool s_axis = false, t_axis = false;
 				for (const auto col : refs) {
-					(col < op.side_widths[op.edges[e].s] ? s_axis : t_axis) = true;
+					(col < op.side_widths[plan.edges[e].s] ? s_axis : t_axis) = true;
 				}
 				return s_axis && t_axis ? 3 : (t_axis ? 2 : (s_axis ? 1 : 0));
 			};
@@ -590,14 +604,14 @@ struct GraphUnitBaker {
 		return cache_group_s[e] ? a : b;
 	}
 	idx_t CacheGroupSide(idx_t e) const {
-		return cache_group_s[e] ? op.edges[e].s : op.edges[e].t;
+		return cache_group_s[e] ? plan.edges[e].s : plan.edges[e].t;
 	}
 	const Expression *SubNode(bool is_unary, idx_t domain) const {
 		return is_unary ? side_sub[domain].get() : edge_sub[domain].get();
 	}
 
 	void FillPairRow(DataChunk &row, idx_t e, idx_t a, idx_t b) {
-		auto &edge = op.edges[e];
+		auto &edge = plan.edges[e];
 		row.Reset();
 		row.SetChildCardinality(1);
 		for (idx_t c = 0; c < op.side_widths[edge.s]; c++) {
@@ -699,11 +713,13 @@ struct GraphUnitBaker {
 };
 
 static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGraph &op,
+                                      const PhysicalAIFactorGraph::TermPlan &plan, int64_t term_limit,
                                       FactorGraphSinkState &sink, const string &query_text,
                                       const vector<idx_t> &parent_edge_of_side, const vector<idx_t> &side_level,
-                                      vector<vector<char>> &live, vector<vector<std::pair<idx_t, idx_t>>> &edge_pass) {
+                                      vector<vector<char>> &live, vector<vector<std::pair<idx_t, idx_t>>> &edge_pass,
+                                      const vector<vector<std::pair<idx_t, idx_t>>> &pre_true) {
 	const idx_t k1 = op.side_widths.size();
-	const idx_t ne = op.edges.size();
+	const idx_t ne = plan.edges.size();
 	const idx_t total_width = op.side_offsets.back() + op.side_widths.back();
 	auto &fn = op.node->Cast<BoundFunctionExpression>();
 	const idx_t batch_cap = MaxValue<idx_t>(AIConfig::Get().max_concurrency, 1);
@@ -712,9 +728,9 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 	vector<idx_t> child_of(ne);
 	vector<idx_t> parent_of(ne);
 	for (idx_t e = 0; e < ne; e++) {
-		const bool s_is_child = parent_edge_of_side[op.edges[e].s] == e;
-		child_of[e] = s_is_child ? op.edges[e].s : op.edges[e].t;
-		parent_of[e] = s_is_child ? op.edges[e].t : op.edges[e].s;
+		const bool s_is_child = parent_edge_of_side[plan.edges[e].s] == e;
+		child_of[e] = s_is_child ? plan.edges[e].s : plan.edges[e].t;
+		parent_of[e] = s_is_child ? plan.edges[e].t : plan.edges[e].s;
 	}
 	// Edge dispatch order: shallower child first (upstream support arrives first).
 	vector<idx_t> edge_order(ne);
@@ -727,15 +743,15 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 	// Member unary state: 0 pending, 1 confirmed-true, 2 false. Sides without unary leaves confirm.
 	vector<vector<char>> uval(k1);
 	for (idx_t s = 0; s < k1; s++) {
-		uval[s].assign(sink.sides[s].reps.size(), op.unary_leaves[s].empty() ? 1 : 0);
+		uval[s].assign(sink.sides[s].reps.size(), plan.unary_leaves[s].empty() ? 1 : 0);
 	}
 	// Pair state per edge (row-major over edge.s x edge.t): 0 unknown, 1 true, 2 false.
 	vector<vector<char>> pval(ne);
 	for (idx_t e = 0; e < ne; e++) {
-		pval[e].assign(sink.sides[op.edges[e].s].reps.size() * sink.sides[op.edges[e].t].reps.size(), 0);
+		pval[e].assign(sink.sides[plan.edges[e].s].reps.size() * sink.sides[plan.edges[e].t].reps.size(), 0);
 	}
 	auto pkey = [&](idx_t e, idx_t si, idx_t tj) {
-		return si * sink.sides[op.edges[e].t].reps.size() + tj;
+		return si * sink.sides[plan.edges[e].t].reps.size() + tj;
 	};
 
 	// A parent-side member supports its child edge once it has a confirmed-true pair on ITS
@@ -745,8 +761,8 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 		if (pe == DConstants::INVALID_INDEX) {
 			return true;
 		}
-		const bool m_on_s_axis = op.edges[pe].s == s;
-		const idx_t nother = sink.sides[m_on_s_axis ? op.edges[pe].t : op.edges[pe].s].reps.size();
+		const bool m_on_s_axis = plan.edges[pe].s == s;
+		const idx_t nother = sink.sides[m_on_s_axis ? plan.edges[pe].t : plan.edges[pe].s].reps.size();
 		for (idx_t q = 0; q < nother; q++) {
 			const idx_t key = m_on_s_axis ? pkey(pe, m, q) : pkey(pe, q, m);
 			if (pval[pe][key] == 1) {
@@ -763,7 +779,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 		while (changed) {
 			changed = false;
 			for (idx_t e = 0; e < ne; e++) {
-				auto &edge = op.edges[e];
+				auto &edge = plan.edges[e];
 				const idx_t ns = sink.sides[edge.s].reps.size();
 				const idx_t nt = sink.sides[edge.t].reps.size();
 				for (idx_t i = 0; i < ns; i++) {
@@ -823,7 +839,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 		// TRUE-pair adjacency once per refresh
 		vector<vector<std::unordered_map<idx_t, vector<idx_t>>>> adj(ne);
 		for (idx_t e = 0; e < ne; e++) {
-			auto &edge = op.edges[e];
+			auto &edge = plan.edges[e];
 			adj[e].resize(2);
 			const idx_t ns = sink.sides[edge.s].reps.size();
 			const idx_t nt = sink.sides[edge.t].reps.size();
@@ -852,12 +868,12 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 					return true;
 				}
 				for (idx_t r = 0; r < sink.sides[side].reps.size(); r++) {
-					if (!live[side][r] || (!op.unary_leaves[side].empty() && uval[side][r] != 1)) {
+					if (!live[side][r] || (!plan.unary_leaves[side].empty() && uval[side][r] != 1)) {
 						continue;
 					}
 					bool ok = true;
 					for (idx_t e = 0; e < ne && ok; e++) {
-						auto &ed = op.edges[e];
+						auto &ed = plan.edges[e];
 						idx_t other = DConstants::INVALID_INDEX;
 						bool on_s = false;
 						if (ed.s == side) {
@@ -896,7 +912,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 		}
 		for (idx_t m = 0; m < satisfied.size(); m++) {
 			useful[es][m] =
-			    static_cast<char>(live[es][m] && !satisfied[m] && (op.unary_leaves[es].empty() || uval[es][m] == 1));
+			    static_cast<char>(live[es][m] && !satisfied[m] && (plan.unary_leaves[es].empty() || uval[es][m] == 1));
 		}
 		// sides in increasing level order inherit usefulness across their parent edge
 		vector<idx_t> order(k1);
@@ -909,11 +925,11 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 			if (pe == DConstants::INVALID_INDEX) {
 				continue;
 			}
-			auto &edge = op.edges[pe];
+			auto &edge = plan.edges[pe];
 			const bool s_is_s = edge.s == s;
 			const idx_t ps = s_is_s ? edge.t : edge.s;
 			for (idx_t m = 0; m < sink.sides[s].reps.size(); m++) {
-				if (!live[s][m] || (!op.unary_leaves[s].empty() && uval[s][m] != 1)) {
+				if (!live[s][m] || (!plan.unary_leaves[s].empty() && uval[s][m] != 1)) {
 					continue;
 				}
 				const idx_t nother = sink.sides[ps].reps.size();
@@ -933,20 +949,20 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 	refresh_existential();
 
 	// Sub-nodes, chunk layouts and the prefix-cache split, built once per domain.
-	GraphUnitBaker baker(context, op, sink);
+	GraphUnitBaker baker(context, op, plan, sink);
 	auto &side_sub = baker.side_sub;
 	auto &edge_sub = baker.edge_sub;
 
 	if (AIConfig::Get().debug_log.find("graph") != string::npos) {
 		for (idx_t e = 0; e < ne; e++) {
 			fprintf(stderr, "[graph] edge%llu sides %llu-%llu parent=%llu child=%llu childlevel=%llu\n",
-			        (unsigned long long)e, (unsigned long long)op.edges[e].s, (unsigned long long)op.edges[e].t,
+			        (unsigned long long)e, (unsigned long long)plan.edges[e].s, (unsigned long long)plan.edges[e].t,
 			        (unsigned long long)parent_of[e], (unsigned long long)child_of[e],
 			        (unsigned long long)side_level[child_of[e]]);
 		}
 		for (idx_t s = 0; s < k1; s++) {
 			fprintf(stderr, "[graph] side%llu reps=%llu unary_leaves=%llu\n", (unsigned long long)s,
-			        (unsigned long long)sink.sides[s].reps.size(), (unsigned long long)op.unary_leaves[s].size());
+			        (unsigned long long)sink.sides[s].reps.size(), (unsigned long long)plan.unary_leaves[s].size());
 		}
 	}
 	// Adaptive mode: observed pass-rate statistics drive frontier priorities -- the graph-level
@@ -960,10 +976,10 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 	vector<idx_t> ed_evals(ne, 0), ed_passes(ne, 0);
 	vector<vector<idx_t>> me_evals_s(ne), me_passes_s(ne), me_evals_t(ne), me_passes_t(ne);
 	for (idx_t e = 0; e < ne; e++) {
-		me_evals_s[e].assign(sink.sides[op.edges[e].s].reps.size(), 0);
-		me_passes_s[e].assign(sink.sides[op.edges[e].s].reps.size(), 0);
-		me_evals_t[e].assign(sink.sides[op.edges[e].t].reps.size(), 0);
-		me_passes_t[e].assign(sink.sides[op.edges[e].t].reps.size(), 0);
+		me_evals_s[e].assign(sink.sides[plan.edges[e].s].reps.size(), 0);
+		me_passes_s[e].assign(sink.sides[plan.edges[e].s].reps.size(), 0);
+		me_evals_t[e].assign(sink.sides[plan.edges[e].t].reps.size(), 0);
+		me_passes_t[e].assign(sink.sides[plan.edges[e].t].reps.size(), 0);
 	}
 	auto est = [](idx_t passes, idx_t evals) {
 		return (1.0 + static_cast<double>(passes)) / (2.0 + static_cast<double>(evals));
@@ -980,7 +996,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 			if (e == skip_edge || (only_edge != DConstants::INVALID_INDEX && e != only_edge)) {
 				continue;
 			}
-			auto &edge = op.edges[e];
+			auto &edge = plan.edges[e];
 			if (edge.s == s) {
 				const idx_t nt = sink.sides[edge.t].reps.size();
 				for (idx_t j = 0; j < nt; j++) {
@@ -1001,7 +1017,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 	// the call envelope -- finishing one sibling can kill the member and cancel the others --
 	// while the per-member ORDER is where adaptivity earns its call savings.
 	auto edge_incomplete_for = [&](idx_t e, idx_t s, idx_t m) {
-		auto &edge = op.edges[e];
+		auto &edge = plan.edges[e];
 		if (edge.s == s) {
 			const idx_t nt = sink.sides[edge.t].reps.size();
 			for (idx_t j = 0; j < nt; j++) {
@@ -1026,7 +1042,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 			if (parent_of[e] != s || !edge_incomplete_for(e, s, m)) {
 				continue;
 			}
-			const double p_pass = member_est(e, op.edges[e].s == s, m);
+			const double p_pass = member_est(e, plan.edges[e].s == s, m);
 			if (p_pass < open_est) {
 				open_est = p_pass;
 				open = e;
@@ -1061,7 +1077,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 	auto confirmed_at_least = [&](int64_t want) {
 		vector<vector<std::unordered_map<idx_t, vector<idx_t>>>> adj(ne);
 		for (idx_t e = 0; e < ne; e++) {
-			auto &edge = op.edges[e];
+			auto &edge = plan.edges[e];
 			adj[e].resize(2);
 			const idx_t ns = sink.sides[edge.s].reps.size();
 			const idx_t nt = sink.sides[edge.t].reps.size();
@@ -1086,12 +1102,12 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 				return confirmed >= want;
 			}
 			for (idx_t r = 0; r < sink.sides[side].reps.size(); r++) {
-				if (!live[side][r] || (!op.unary_leaves[side].empty() && uval[side][r] != 1)) {
+				if (!live[side][r] || (!plan.unary_leaves[side].empty() && uval[side][r] != 1)) {
 					continue;
 				}
 				bool ok = true;
 				for (idx_t e = 0; e < ne && ok; e++) {
-					auto &ed = op.edges[e];
+					auto &ed = plan.edges[e];
 					if (ed.s == side && ed.t < side) {
 						auto it = adj[e][0].find(r);
 						ok = it != adj[e][0].end() &&
@@ -1166,6 +1182,15 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 			me_passes_t[domain][b] += value ? 1 : 0;
 		}
 	};
+	// pairs an earlier term already proved for every tuple through them: TRUE without a call (they also
+	// enter the pass-rate statistics, which only biases the order a little toward asking them later)
+	for (idx_t e = 0; e < ne; e++) {
+		for (const auto &pr : pre_true[e]) {
+			apply_value(false, e, pr.first, pr.second, true);
+		}
+	}
+	cascade();
+	refresh_existential();
 	auto harvest = [&](bool blocking) {
 		vector<GraphStreamPool::Done> dones;
 		pool.Drain(dones, blocking);
@@ -1190,7 +1215,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 	// Frontier loop: submit up to the free slots from the best domain, then harvest completions
 	// as they land -- continuous refill, no drain barriers.
 	for (;;) {
-		if (op.limit >= 0 && confirmed_at_least(op.limit)) {
+		if (term_limit >= 0 && confirmed_at_least(term_limit)) {
 			break; // k1 output rows confirmed: the LIMIT above needs nothing more
 		}
 		harvest(false); // apply anything that landed while selecting
@@ -1205,7 +1230,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 			double best_unary_score = -1;
 			idx_t best_unary_side = k1;
 			for (idx_t s = 0; s < k1; s++) {
-				if (op.unary_leaves[s].empty()) {
+				if (plan.unary_leaves[s].empty()) {
 					continue;
 				}
 				for (idx_t m = 0; m < uval[s].size(); m++) {
@@ -1225,7 +1250,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 			double best_pair_score = -1;
 			idx_t best_pair_edge = ne;
 			for (idx_t e = 0; e < ne; e++) {
-				auto &edge = op.edges[e];
+				auto &edge = plan.edges[e];
 				const idx_t ns = sink.sides[edge.s].reps.size();
 				const idx_t nt = sink.sides[edge.t].reps.size();
 				for (idx_t i = 0; i < ns; i++) {
@@ -1278,7 +1303,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 				break;
 			}
 			// batch = top-scoring ready pairs of the chosen edge
-			auto &edge = op.edges[best_pair_edge];
+			auto &edge = plan.edges[best_pair_edge];
 			const idx_t e = best_pair_edge;
 			const idx_t ns = sink.sides[edge.s].reps.size();
 			const idx_t nt = sink.sides[edge.t].reps.size();
@@ -1330,7 +1355,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 		idx_t pick_side = k1;
 		vector<idx_t> members;
 		for (idx_t s = 0; s < k1 && members.empty(); s++) {
-			if (op.unary_leaves[s].empty()) {
+			if (plan.unary_leaves[s].empty()) {
 				continue;
 			}
 			for (idx_t m = 0; m < uval[s].size() && members.size() < slots; m++) {
@@ -1353,7 +1378,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 		idx_t pick_edge = ne;
 		vector<std::pair<idx_t, idx_t>> pairs;
 		for (const auto e : edge_order) {
-			auto &edge = op.edges[e];
+			auto &edge = plan.edges[e];
 			const idx_t ns = sink.sides[edge.s].reps.size();
 			const idx_t nt = sink.sides[edge.t].reps.size();
 			for (idx_t i = 0; i < ns && pairs.size() < slots; i++) {
@@ -1391,7 +1416,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 	pool.Shutdown(); // limit/existential early exits may leave stragglers: join before touching state
 
 	for (idx_t s = 0; s < k1; s++) {
-		if (op.unary_leaves[s].empty()) {
+		if (plan.unary_leaves[s].empty()) {
 			continue;
 		}
 		for (idx_t m = 0; m < uval[s].size(); m++) {
@@ -1401,7 +1426,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 		}
 	}
 	for (idx_t e = 0; e < ne; e++) {
-		auto &edge = op.edges[e];
+		auto &edge = plan.edges[e];
 		const idx_t ns = sink.sides[edge.s].reps.size();
 		const idx_t nt = sink.sides[edge.t].reps.size();
 		for (idx_t i = 0; i < ns; i++) {
@@ -1424,37 +1449,39 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 // O(members) per batch where the dense scheduler scans the pair domain.
 //===--------------------------------------------------------------------===//
 static void SparseLazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGraph &op,
+                                            const PhysicalAIFactorGraph::TermPlan &plan, int64_t term_limit,
                                             FactorGraphSinkState &sink, const string &query_text,
                                             const vector<idx_t> &parent_edge_of_side, const vector<idx_t> &side_level,
                                             vector<vector<char>> &live,
-                                            vector<vector<std::pair<idx_t, idx_t>>> &edge_pass) {
+                                            vector<vector<std::pair<idx_t, idx_t>>> &edge_pass,
+                                            const vector<vector<std::pair<idx_t, idx_t>>> &pre_true) {
 	const idx_t k1 = op.side_widths.size();
-	const idx_t ne = op.edges.size();
+	const idx_t ne = plan.edges.size();
 	const idx_t batch_cap = MaxValue<idx_t>(AIConfig::Get().max_concurrency, 1);
 
 	vector<idx_t> child_of(ne), parent_of(ne);
 	for (idx_t e = 0; e < ne; e++) {
-		const bool s_is_child = parent_edge_of_side[op.edges[e].s] == e;
-		child_of[e] = s_is_child ? op.edges[e].s : op.edges[e].t;
-		parent_of[e] = s_is_child ? op.edges[e].t : op.edges[e].s;
+		const bool s_is_child = parent_edge_of_side[plan.edges[e].s] == e;
+		child_of[e] = s_is_child ? plan.edges[e].s : plan.edges[e].t;
+		parent_of[e] = s_is_child ? plan.edges[e].t : plan.edges[e].s;
 	}
 	vector<vector<idx_t>> incident(k1);
 	for (idx_t e = 0; e < ne; e++) {
-		incident[op.edges[e].s].push_back(e);
-		incident[op.edges[e].t].push_back(e);
+		incident[plan.edges[e].s].push_back(e);
+		incident[plan.edges[e].t].push_back(e);
 	}
 	auto axis_of = [&](idx_t e, idx_t s) {
-		return op.edges[e].s == s ? 0 : 1;
+		return plan.edges[e].s == s ? 0 : 1;
 	};
 	auto side_of_axis = [&](idx_t e, int x) {
-		return x ? op.edges[e].t : op.edges[e].s;
+		return x ? plan.edges[e].t : plan.edges[e].s;
 	};
 
 	// Member unary state: 0 pending, 1 confirmed-true, 2 false, 3 dispatched.
 	vector<vector<char>> uval(k1);
 	vector<idx_t> live_count(k1, 0);
 	for (idx_t s = 0; s < k1; s++) {
-		uval[s].assign(sink.sides[s].reps.size(), op.unary_leaves[s].empty() ? 1 : 0);
+		uval[s].assign(sink.sides[s].reps.size(), plan.unary_leaves[s].empty() ? 1 : 0);
 		for (const auto f : live[s]) {
 			live_count[s] += f;
 		}
@@ -1498,6 +1525,15 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 	vector<vector<char>> wanted_flag(k1);
 	for (idx_t s = 0; s < k1; s++) {
 		wanted_flag[s].assign(sink.sides[s].reps.size(), 0);
+	}
+	// pairs an earlier term proved (keyed s_rep * |t| + t_rep): landed as TRUE below, and the cursor steps
+	// over them so they are never asked again
+	vector<std::unordered_set<idx_t>> pre_known(ne);
+	for (idx_t e = 0; e < ne; e++) {
+		const idx_t nt = sink.sides[plan.edges[e].t].reps.size();
+		for (const auto &pr : pre_true[e]) {
+			pre_known[e].insert(pr.first * nt + pr.second);
+		}
 	}
 
 	auto unknown = [&](idx_t e, int x, idx_t m) -> idx_t {
@@ -1621,7 +1657,7 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 		// [e][0]: live s_rep -> live t_reps with a confirmed pair, [1]: the transpose
 		vector<vector<std::unordered_map<idx_t, vector<idx_t>>>> adj(ne);
 		for (idx_t e = 0; e < ne; e++) {
-			auto &edge = op.edges[e];
+			auto &edge = plan.edges[e];
 			adj[e].resize(2);
 			auto &as = A(e, 0);
 			for (idx_t i = 0; i < as.ptrue.size(); i++) {
@@ -1662,12 +1698,12 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 					return true;
 				}
 				for (idx_t r = 0; r < sink.sides[side].reps.size(); r++) {
-					if (!live[side][r] || (!op.unary_leaves[side].empty() && uval[side][r] != 1)) {
+					if (!live[side][r] || (!plan.unary_leaves[side].empty() && uval[side][r] != 1)) {
 						continue;
 					}
 					bool ok = true;
 					for (const auto e : incident[side]) {
-						auto &ed = op.edges[e];
+						auto &ed = plan.edges[e];
 						const idx_t other = ed.s == side ? ed.t : ed.s;
 						if (assignment[other] == DConstants::INVALID_INDEX) {
 							continue;
@@ -1697,7 +1733,7 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 		}
 		for (idx_t m = 0; m < satisfied.size(); m++) {
 			useful[es][m] =
-			    static_cast<char>(live[es][m] && !satisfied[m] && (op.unary_leaves[es].empty() || uval[es][m] == 1));
+			    static_cast<char>(live[es][m] && !satisfied[m] && (plan.unary_leaves[es].empty() || uval[es][m] == 1));
 		}
 		vector<idx_t> order(k1);
 		for (idx_t s = 0; s < k1; s++) {
@@ -1713,7 +1749,7 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 			const idx_t ps = side_of_axis(pe, 1 - x);
 			auto &a = A(pe, x);
 			for (idx_t m = 0; m < sink.sides[s].reps.size(); m++) {
-				if (!live[s][m] || (!op.unary_leaves[s].empty() && uval[s][m] != 1)) {
+				if (!live[s][m] || (!plan.unary_leaves[s].empty() && uval[s][m] != 1)) {
 					continue;
 				}
 				for (const auto q : a.ptrue[m]) {
@@ -1787,12 +1823,12 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 				return confirmed >= want;
 			}
 			for (idx_t r = 0; r < sink.sides[side].reps.size(); r++) {
-				if (!live[side][r] || (!op.unary_leaves[side].empty() && uval[side][r] != 1)) {
+				if (!live[side][r] || (!plan.unary_leaves[side].empty() && uval[side][r] != 1)) {
 					continue;
 				}
 				bool ok = true;
 				for (idx_t e = 0; e < ne && ok; e++) {
-					auto &ed = op.edges[e];
+					auto &ed = plan.edges[e];
 					if (ed.s == side && ed.t < side) {
 						auto it = adj[e][0].find(r);
 						ok = it != adj[e][0].end() &&
@@ -1820,7 +1856,7 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 	};
 
 	// Streaming driver (see the dense scheduler): persistent pool, single-flight, dispatch marking.
-	GraphUnitBaker baker(context, op, sink);
+	GraphUnitBaker baker(context, op, plan, sink);
 	GraphStreamPool pool;
 	pool.Start(context, batch_cap, query_text);
 	std::unordered_map<string, vector<GraphStreamPool::Done>> parked;
@@ -1874,7 +1910,7 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 			as.pass_any[a]++;
 			at.pass_any[b]++;
 		}
-		const idx_t s = op.edges[domain].s, t = op.edges[domain].t;
+		const idx_t s = plan.edges[domain].s, t = plan.edges[domain].t;
 		if (!live[s][a] || !live[t][b]) {
 			return; // a dead endpoint: the pair can neither keep anyone alive nor be emitted
 		}
@@ -1892,6 +1928,15 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 			touched.emplace_back(t, b);
 		}
 	};
+	// pairs an earlier term already proved for every tuple through them: TRUE without a call (they also
+	// enter the pass-rate statistics, which only biases the order a little toward asking them later)
+	for (idx_t e = 0; e < ne; e++) {
+		for (const auto &pr : pre_true[e]) {
+			apply_value(false, e, pr.first, pr.second, true);
+		}
+	}
+	cascade();
+	refresh_existential();
 	auto harvest = [&](bool blocking) {
 		vector<GraphStreamPool::Done> dones;
 		pool.Drain(dones, blocking);
@@ -1919,12 +1964,18 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 	auto next_partner = [&](idx_t e, idx_t pm, idx_t &j_out) {
 		const idx_t cs = child_of[e];
 		const idx_t nt = sink.sides[cs].reps.size();
+		const bool s_is_parent = parent_of[e] == plan.edges[e].s;
+		const idx_t nt_edge = sink.sides[plan.edges[e].t].reps.size();
 		auto &cur = cursor[e][pm];
 		const idx_t start = nt == 0 ? 0 : (pm * 7919) % nt;
 		while (cur < nt) {
 			const idx_t j = (start + cur) % nt;
 			if (!live[cs][j]) {
 				cur++;
+				continue;
+			}
+			if (!pre_known[e].empty() && pre_known[e].count(s_is_parent ? pm * nt_edge + j : j * nt_edge + pm)) {
+				cur++; // proved by an earlier term
 				continue;
 			}
 			if (uval[cs][j] != 1) {
@@ -1943,7 +1994,7 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 
 	// Frontier loop: score members, submit up to the free slots from the best domain, harvest.
 	for (;;) {
-		if (op.limit >= 0 && confirmed_at_least(op.limit)) {
+		if (term_limit >= 0 && confirmed_at_least(term_limit)) {
 			break;
 		}
 		harvest(false);
@@ -1957,7 +2008,7 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 		double best_unary_score = -1;
 		idx_t best_unary_side = k1;
 		for (idx_t s = 0; s < k1; s++) {
-			if (op.unary_leaves[s].empty()) {
+			if (plan.unary_leaves[s].empty()) {
 				continue;
 			}
 			for (idx_t m = 0; m < uval[s].size(); m++) {
@@ -2090,7 +2141,7 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 						if (!next_partner(e, pm, j)) {
 							break;
 						}
-						const bool s_is_parent = parent_of[e] == op.edges[e].s;
+						const bool s_is_parent = parent_of[e] == plan.edges[e].s;
 						submit_unit(false, e, s_is_parent ? pm : j, s_is_parent ? j : pm);
 						submitted++;
 					}
@@ -2147,7 +2198,7 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 	pool.Shutdown();
 
 	for (idx_t s = 0; s < k1; s++) {
-		if (op.unary_leaves[s].empty()) {
+		if (plan.unary_leaves[s].empty()) {
 			continue;
 		}
 		for (idx_t m = 0; m < uval[s].size(); m++) {
@@ -2157,7 +2208,7 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 		}
 	}
 	for (idx_t e = 0; e < ne; e++) {
-		auto &edge = op.edges[e];
+		auto &edge = plan.edges[e];
 		auto &as = A(e, 0);
 		for (idx_t i = 0; i < as.ptrue.size(); i++) {
 			if (!live[edge.s][i]) {
@@ -2172,17 +2223,15 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 	}
 }
 
-void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGraph &op, FactorGraphSinkState &sink,
-                              FactorGraphSourceState &state) {
-	const string query_text = context.GetCurrentQuery();
+//! One term: a conjunctive factor graph over the sides, from the members still `live` (an earlier term may
+//! have proved some entirely) and the `pre_true` pairs per edge (likewise). Appends its surviving tuples.
+static void RunTerm(ClientContext &context, const PhysicalAIFactorGraph &op,
+                    const PhysicalAIFactorGraph::TermPlan &plan, int64_t term_limit, FactorGraphSinkState &sink,
+                    const string &query_text, vector<vector<char>> &live,
+                    const vector<vector<std::pair<idx_t, idx_t>>> &pre_true, vector<vector<idx_t>> &assignments) {
 	const idx_t k = op.side_widths.size();
 	const idx_t total_width = op.side_offsets.back() + op.side_widths.back();
 	auto &fn = op.node->Cast<BoundFunctionExpression>();
-
-	vector<vector<char>> live(k);
-	for (idx_t s = 0; s < k; s++) {
-		live[s].assign(sink.sides[s].reps.size(), 1);
-	}
 
 	auto live_count = [&](idx_t s) {
 		idx_t n = 0;
@@ -2191,18 +2240,18 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 		}
 		return n;
 	};
-	const idx_t ne = op.edges.size();
+	const idx_t ne = plan.edges.size();
 	vector<vector<std::pair<idx_t, idx_t>>> edge_pass(ne);
 	bool lazy_done = false;
 	{
 		vector<idx_t> parent_edge_of_side, side_level;
-		if (OrientForest(op, sink, parent_edge_of_side, side_level)) {
+		if (OrientForest(op, plan, sink, parent_edge_of_side, side_level)) {
 			if (AIVarcharSetting(context, "ai_factor_state", "dense") == "sparse") {
-				SparseLazyFactorGraphEvaluation(context, op, sink, query_text, parent_edge_of_side, side_level, live,
-				                                edge_pass);
+				SparseLazyFactorGraphEvaluation(context, op, plan, term_limit, sink, query_text, parent_edge_of_side,
+				                                side_level, live, edge_pass, pre_true);
 			} else {
-				LazyFactorGraphEvaluation(context, op, sink, query_text, parent_edge_of_side, side_level, live,
-				                          edge_pass);
+				LazyFactorGraphEvaluation(context, op, plan, term_limit, sink, query_text, parent_edge_of_side,
+				                          side_level, live, edge_pass, pre_true);
 			}
 			lazy_done = true;
 		}
@@ -2211,14 +2260,14 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 		// 1. Unary pre-pass: side predicates over member domains; a false member dies before any
 		//    tuple containing it exists.
 		for (idx_t s = 0; s < k; s++) {
-			if (op.unary_leaves[s].empty() || sink.sides[s].reps.empty()) {
+			if (plan.unary_leaves[s].empty() || sink.sides[s].reps.empty()) {
 				continue;
 			}
 			vector<idx_t> index_map(total_width, DConstants::INVALID_INDEX);
 			for (idx_t c = 0; c < op.side_widths[s]; c++) {
 				index_map[op.side_offsets[s] + c] = c;
 			}
-			auto sub_node = AIFactorSubNode(fn, op.unary_leaves[s], index_map, op.unary_trees[s]);
+			auto sub_node = AIFactorSubNode(fn, plan.unary_leaves[s], index_map, plan.unary_trees[s]);
 			vector<LogicalType> chunk_types(op.types.begin() + NumericCast<int64_t>(op.side_offsets[s]),
 			                                op.types.begin() +
 			                                    NumericCast<int64_t>(op.side_offsets[s] + op.side_widths[s]));
@@ -2249,21 +2298,27 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 				if (edge_done[e]) {
 					continue;
 				}
-				const idx_t size = live_count(op.edges[e].s) * live_count(op.edges[e].t);
+				const idx_t size = live_count(plan.edges[e].s) * live_count(plan.edges[e].t);
 				if (best == ne || size < best_size) {
 					best = e;
 					best_size = size;
 				}
 			}
-			auto &edge = op.edges[best];
+			auto &edge = plan.edges[best];
 			edge_done[best] = 1;
+			std::unordered_set<idx_t> known_true;
+			const idx_t nt_edge = sink.sides[edge.t].reps.size();
+			for (const auto &pr : pre_true[best]) {
+				known_true.insert(pr.first * nt_edge + pr.second);
+				edge_pass[best].push_back(pr);
+			}
 			vector<std::pair<idx_t, idx_t>> pairs;
 			for (idx_t i = 0; i < sink.sides[edge.s].reps.size(); i++) {
 				if (!live[edge.s][i]) {
 					continue;
 				}
 				for (idx_t j = 0; j < sink.sides[edge.t].reps.size(); j++) {
-					if (live[edge.t][j]) {
+					if (live[edge.t][j] && !known_true.count(i * nt_edge + j)) {
 						pairs.emplace_back(i, j);
 					}
 				}
@@ -2313,7 +2368,7 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 					if (!edge_done[e]) {
 						continue;
 					}
-					auto &ed = op.edges[e];
+					auto &ed = plan.edges[e];
 					vector<char> has_s(sink.sides[ed.s].reps.size(), 0);
 					vector<char> has_t(sink.sides[ed.t].reps.size(), 0);
 					for (auto &pair : edge_pass[e]) {
@@ -2345,7 +2400,7 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 	for (idx_t e = 0; e < ne; e++) {
 		adj[e].resize(2);
 		for (auto &pair : edge_pass[e]) {
-			if (live[op.edges[e].s][pair.first] && live[op.edges[e].t][pair.second]) {
+			if (live[plan.edges[e].s][pair.first] && live[plan.edges[e].t][pair.second]) {
 				adj[e][0][pair.first].push_back(pair.second);
 				adj[e][1][pair.second].push_back(pair.first);
 			}
@@ -2354,7 +2409,7 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 	vector<idx_t> assignment(k);
 	std::function<void(idx_t)> enumerate = [&](idx_t side) {
 		if (side == k) {
-			state.assignments.push_back(assignment);
+			assignments.push_back(assignment);
 			return;
 		}
 		for (idx_t r = 0; r < sink.sides[side].reps.size(); r++) {
@@ -2363,7 +2418,7 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 			}
 			bool ok = true;
 			for (idx_t e = 0; e < ne && ok; e++) {
-				auto &ed = op.edges[e];
+				auto &ed = plan.edges[e];
 				// check edges whose OTHER endpoint is already assigned (< side)
 				if (ed.s == side && ed.t < side) {
 					auto it = adj[e][0].find(r);
@@ -2389,6 +2444,91 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 	if (!any_empty) {
 		enumerate(0);
 	}
+}
+
+//! The node's terms in sequence, their results united. Before a later term runs, what the union already
+//! proves is taken out of its domains: a member is COVERED when every tuple through it is in the union
+//! (then nothing asked about it can change a result), a pair likewise; in existential mode a member of the
+//! existential side with one confirmed tuple is done. With several terms a LIMIT stops between terms only
+//! (a term's own early stop could count tuples the union already holds).
+void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGraph &op, FactorGraphSinkState &sink,
+                              FactorGraphSourceState &state) {
+	const string query_text = context.GetCurrentQuery();
+	const idx_t k = op.side_widths.size();
+	const bool multi = op.terms.size() > 1;
+	std::set<vector<idx_t>> union_set;
+	auto product_except = [&](const vector<idx_t> &skip) {
+		idx_t n = 1;
+		for (idx_t s = 0; s < k; s++) {
+			if (std::find(skip.begin(), skip.end(), s) == skip.end()) {
+				n *= sink.sides[s].reps.size();
+			}
+		}
+		return n;
+	};
+	auto union_rows = [&]() {
+		int64_t rows = 0;
+		for (auto &t : union_set) {
+			int64_t product = 1;
+			for (idx_t s = 0; s < k; s++) {
+				product *= NumericCast<int64_t>(sink.sides[s].counts[t[s]]);
+			}
+			rows += product;
+		}
+		return rows;
+	};
+	for (idx_t ti = 0; ti < op.terms.size(); ti++) {
+		auto &plan = op.terms[ti];
+		if (multi && op.limit >= 0 && union_rows() >= op.limit) {
+			break;
+		}
+		vector<vector<char>> live(k);
+		for (idx_t s = 0; s < k; s++) {
+			live[s].assign(sink.sides[s].reps.size(), 1);
+		}
+		vector<vector<std::pair<idx_t, idx_t>>> pre_true(plan.edges.size());
+		if (ti > 0) {
+			// member coverage: tuples through m already in the union == all tuples through m
+			for (idx_t s = 0; s < k; s++) {
+				vector<idx_t> through(sink.sides[s].reps.size(), 0);
+				for (auto &t : union_set) {
+					through[t[s]]++;
+				}
+				const idx_t all = product_except({s});
+				for (idx_t m = 0; m < through.size(); m++) {
+					if (through[m] == all || (s == op.existential_side && through[m] > 0)) {
+						live[s][m] = 0;
+					}
+				}
+			}
+			// pair coverage per edge of this term
+			for (idx_t e = 0; e < plan.edges.size(); e++) {
+				auto &edge = plan.edges[e];
+				const idx_t nt = sink.sides[edge.t].reps.size();
+				std::unordered_map<idx_t, idx_t> through;
+				for (auto &t : union_set) {
+					through[t[edge.s] * nt + t[edge.t]]++;
+				}
+				const idx_t all = product_except({edge.s, edge.t});
+				for (auto &kv : through) {
+					const idx_t i = kv.first / nt, j = kv.first % nt;
+					if (kv.second == all && live[edge.s][i] && live[edge.t][j]) {
+						pre_true[e].emplace_back(i, j);
+					}
+				}
+			}
+		}
+		vector<vector<idx_t>> assignments;
+		RunTerm(context, op, plan, multi ? -1 : op.limit, sink, query_text, live, pre_true, assignments);
+		if (!multi) {
+			state.assignments = std::move(assignments);
+			return;
+		}
+		for (auto &a : assignments) {
+			union_set.insert(a);
+		}
+	}
+	state.assignments.assign(union_set.begin(), union_set.end());
 }
 
 SourceResultType PhysicalAIFactorGraph::GetDataInternal(ExecutionContext &context, DataChunk &chunk,

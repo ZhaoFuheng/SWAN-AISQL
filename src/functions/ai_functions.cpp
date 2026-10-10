@@ -3568,8 +3568,57 @@ bool AIFactorPartition(const AIFilterTreeNode &tree, const vector<vector<idx_t>>
 	return !out_factors.empty();
 }
 
-bool AIFactorDecompose(const BoundFunctionExpression &node, const vector<idx_t> &side_of,
-                       vector<AIFactor> &out_factors) {
+bool AIFactorTerms(const AIFilterTreeNode &tree, const vector<vector<idx_t>> &leaf_sides, idx_t max_terms,
+                   vector<vector<AIFactor>> &out_terms) {
+	out_terms.clear();
+	for (auto &sides : leaf_sides) {
+		if (sides.empty() || sides.size() > 2) {
+			return false; // a leaf reading no side or three sides has no domain in the graph
+		}
+	}
+	vector<AIFactor> factors;
+	if (AIFactorPartition(tree, leaf_sides, factors)) {
+		out_terms.push_back(std::move(factors));
+		return true;
+	}
+	vector<vector<std::pair<idx_t, bool>>> dnf;
+	if (!AIFilterTreeDNF(tree, max_terms, dnf) || dnf.empty()) {
+		return false;
+	}
+	for (auto &term : dnf) {
+		string tree_str;
+		for (auto &lit : term) {
+			const string leaf = "L" + std::to_string(lit.first);
+			tree_str += (tree_str.empty() ? "" : ",") + (lit.second ? "N(" + leaf + ")" : leaf);
+		}
+		if (term.size() > 1) {
+			tree_str = "A(" + tree_str + ")";
+		}
+		auto term_tree = AIFilterTreeParse(tree_str);
+		vector<AIFactor> term_factors;
+		if (!term_tree || !AIFactorPartition(*term_tree, leaf_sides, term_factors)) {
+			return false;
+		}
+		out_terms.push_back(std::move(term_factors));
+	}
+	// Terms with fewer edges first: a side-only term is cheap (one call per member) and what it proves
+	// covers whole members for the terms after it; among equals, fewer leaves first.
+	std::stable_sort(out_terms.begin(), out_terms.end(), [](const vector<AIFactor> &a, const vector<AIFactor> &b) {
+		auto key = [](const vector<AIFactor> &t) {
+			idx_t edges = 0, leaves = 0;
+			for (auto &f : t) {
+				edges += f.sides.size() == 2;
+				leaves += f.leaf_ids.size();
+			}
+			return std::make_pair(edges, leaves);
+		};
+		return key(a) < key(b);
+	});
+	return true;
+}
+
+bool AIFactorDecompose(const BoundFunctionExpression &node, const vector<idx_t> &side_of, idx_t max_terms,
+                       vector<vector<AIFactor>> &out_terms) {
 	if (!node.BindInfo()) {
 		return false;
 	}
@@ -3592,7 +3641,7 @@ bool AIFactorDecompose(const BoundFunctionExpression &node, const vector<idx_t> 
 		}
 		std::sort(sides.begin(), sides.end());
 	}
-	return AIFactorPartition(*bind_data.tree, leaf_sides, out_factors);
+	return AIFactorTerms(*bind_data.tree, leaf_sides, max_terms, out_terms);
 }
 
 static void AIFactorRemapRefs(Expression &expr, const vector<idx_t> &index_map) {

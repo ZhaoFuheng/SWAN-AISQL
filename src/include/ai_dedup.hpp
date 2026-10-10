@@ -93,11 +93,18 @@ struct AIFactor {
 bool AIFactorPartition(const AIFilterTreeNode &tree, const vector<vector<idx_t>> &leaf_sides,
                        vector<AIFactor> &out_factors);
 
-//! Decompose a RESOLVED folded node into factors: classify each leaf by the sides its argument columns
-//! belong to (`side_of[col]` = owning side per combined-layout column index), then partition its tree.
-//! Returns false when the tree is not a conjunction of one- or two-side factors.
-bool AIFactorDecompose(const BoundFunctionExpression &node, const vector<idx_t> &side_of,
-                       vector<AIFactor> &out_factors);
+//! The TERMS of a folded node: one list of factors when the tree partitions as a conjunction of factors,
+//! else the tree's disjunctive normal form (at most `max_terms` terms), each term a conjunction of literals
+//! over leaves and hence a conjunctive factor graph of its own. The join's result is the union of the
+//! terms' results, so any Boolean shape over one- and two-side leaves is evaluated factorized.
+bool AIFactorTerms(const AIFilterTreeNode &tree, const vector<vector<idx_t>> &leaf_sides, idx_t max_terms,
+                   vector<vector<AIFactor>> &out_terms);
+
+//! Decompose a RESOLVED folded node into terms of factors: classify each leaf by the sides its argument
+//! columns belong to (`side_of[col]` = owning side per combined-layout column index), then AIFactorTerms.
+//! Returns false when a leaf reads no side or more than two, or the normal form exceeds `max_terms`.
+bool AIFactorDecompose(const BoundFunctionExpression &node, const vector<idx_t> &side_of, idx_t max_terms,
+                       vector<vector<AIFactor>> &out_terms);
 
 //! Flatten a CALL-PROMPT expression into its ordered concat operands (a non-concat expression
 //! yields itself). Used to split pair prompts into a cacheable left-member prefix and a

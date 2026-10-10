@@ -523,27 +523,37 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 		}
 		std::sort(all_leaf_sides[l].begin(), all_leaf_sides[l].end());
 	}
-	vector<AIFactor> factors;
-	if (!ok || !AIFactorPartition(*tree, all_leaf_sides, factors)) {
+	// The node's terms: one when the tree is a conjunction of factors, else its disjunctive normal form
+	// (capped by ai_factor_max_terms), each term a conjunctive factor graph, results united.
+	const idx_t max_terms = NumericCast<idx_t>(AIUBigintSetting(optimizer.context, "ai_factor_max_terms", 16));
+	vector<vector<AIFactor>> terms;
+	if (!ok || !AIFactorTerms(*tree, all_leaf_sides, max_terms, terms)) {
 		return false;
 	}
-	for (auto &factor : factors) {
-		if (factor.sides.size() != 2) {
-			continue;
+	any_edge = terms.size() > 1; // several terms are worth the graph even where each is one-sided
+	for (auto &factors : terms) {
+		for (idx_t s = 0; s < sides.size(); s++) {
+			uf[s] = s; // the cycle check is per term
 		}
-		const double pairs =
-		    static_cast<double>(side_card[factor.sides[0]]) * static_cast<double>(side_card[factor.sides[1]]);
-		largest_domain = MaxValue<double>(largest_domain, pairs);
-		const auto key = std::make_pair(factor.sides[0], factor.sides[1]);
-		if (seen_edges.insert(key).second) {
-			const idx_t a = find(factor.sides[0]), b = find(factor.sides[1]);
-			if (a == b) {
-				cyclic = true; // an edge between two already-connected sides closes a cycle
-			} else {
-				uf[a] = b;
+		seen_edges.clear();
+		for (auto &factor : factors) {
+			if (factor.sides.size() != 2) {
+				continue;
 			}
+			const double pairs =
+			    static_cast<double>(side_card[factor.sides[0]]) * static_cast<double>(side_card[factor.sides[1]]);
+			largest_domain = MaxValue<double>(largest_domain, pairs);
+			const auto key = std::make_pair(factor.sides[0], factor.sides[1]);
+			if (seen_edges.insert(key).second) {
+				const idx_t a = find(factor.sides[0]), b = find(factor.sides[1]);
+				if (a == b) {
+					cyclic = true; // an edge between two already-connected sides closes a cycle
+				} else {
+					uf[a] = b;
+				}
+			}
+			any_edge = true;
 		}
-		any_edge = true;
 	}
 	if ((!sparse_state || cyclic) && largest_domain > static_cast<double>(pair_limit)) {
 		ok = false; // too large a pair domain for per-pair state
