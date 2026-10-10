@@ -475,6 +475,7 @@ struct GraphUnitBaker {
 	const PhysicalAIFactorGraph::TermPlan &plan;
 	FactorGraphSinkState &sink;
 	vector<unique_ptr<Expression>> side_sub, edge_sub;
+	vector<string> side_sig, edge_sig; // tree + leaf meta: what a verdict depends on besides the prompts
 	vector<vector<LogicalType>> side_types, edge_types;
 	vector<unique_ptr<ExpressionExecutor>> side_exec, edge_exec, edge_ops_exec;
 	vector<unique_ptr<DataChunk>> side_row, edge_row;
@@ -496,6 +497,7 @@ struct GraphUnitBaker {
 		const idx_t total_width = op.side_offsets.back() + op.side_widths.back();
 		auto &fn = op.node->Cast<BoundFunctionExpression>();
 		side_sub.resize(k1);
+		side_sig.resize(k1);
 		side_types.resize(k1);
 		side_exec.resize(k1);
 		side_row.resize(k1);
@@ -508,11 +510,13 @@ struct GraphUnitBaker {
 				index_map[op.side_offsets[s] + c] = c;
 			}
 			side_sub[s] = AIFactorSubNode(fn, plan.unary_leaves[s], index_map, plan.unary_trees[s]);
+			side_sig[s] = AIFactorSubNodeSignature(*side_sub[s]);
 			side_types[s].assign(op.types.begin() + NumericCast<int64_t>(op.side_offsets[s]),
 			                     op.types.begin() + NumericCast<int64_t>(op.side_offsets[s] + op.side_widths[s]));
 			side_types[s].push_back(LogicalType::BIGINT);
 		}
 		edge_sub.resize(ne);
+		edge_sig.resize(ne);
 		edge_types.resize(ne);
 		edge_exec.resize(ne);
 		edge_ops_exec.resize(ne);
@@ -527,6 +531,7 @@ struct GraphUnitBaker {
 				index_map[op.side_offsets[edge.t] + c] = op.side_widths[edge.s] + c;
 			}
 			edge_sub[e] = AIFactorSubNode(fn, edge.leaf_ids, index_map, edge.tree);
+			edge_sig[e] = AIFactorSubNodeSignature(*edge_sub[e]);
 			edge_types[e].assign(op.types.begin() + NumericCast<int64_t>(op.side_offsets[edge.s]),
 			                     op.types.begin() +
 			                         NumericCast<int64_t>(op.side_offsets[edge.s] + op.side_widths[edge.s]));
@@ -687,7 +692,10 @@ struct GraphUnitBaker {
 	}
 
 	//! One unit's prompts (+ prefixes when the pair prompt is cache-split) and its single-flight key:
-	//! prefix+prompt concatenated, so cached and plain forms of the same pair share one flight.
+	//! prefix+prompt concatenated, so cached and plain forms of the same pair share one flight. The key
+	//! ends with the factor's signature (tree + leaf meta): the flight shares the factor's VERDICT, so two
+	//! factors whose prompts coincide (sides of identical text) but differ in NOT, OR/AND or a wrapper
+	//! must not share it.
 	void Unit(bool is_unary, idx_t domain, idx_t a, idx_t b, vector<string> &prompts, vector<string> &prefixes,
 	          string &key) {
 		prompts.clear();
@@ -708,7 +716,8 @@ struct GraphUnitBaker {
 			key += prompts[l];
 			key += '\x1f';
 		}
-		key += is_unary ? "u" : "e"; // unary and edge sub-nodes may share prompt text but not meta
+		key += is_unary ? "u" : "e";
+		key += is_unary ? side_sig[domain] : edge_sig[domain];
 	}
 };
 

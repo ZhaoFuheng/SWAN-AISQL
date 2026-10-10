@@ -3719,4 +3719,9 @@ unique_ptr<Expression> AIFactorSubNode(const BoundFunctionExpression &node, cons
 	return make_uniq<BoundFunctionExpression>(node.Function(), std::move(args), std::move(sub_bind));
 }
 
+string AIFactorSubNodeSignature(const Expression &sub_node) {
+	auto &bind_data = sub_node.Cast<BoundFunctionExpression>().BindInfo()->Cast<AIFilterWithEmbedBindData>();
+	return bind_data.tree_str + "|" + bind_data.meta;
+}
+
 } // namespace duckdb

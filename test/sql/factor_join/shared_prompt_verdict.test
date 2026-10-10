@@ -1,0 +1,114 @@
+# name: test/sql/factor_join/shared_prompt_verdict.test
+# description: Two factors whose prompts coincide do not share a verdict unless their Boolean tree and leaf
+# group: [factor_join]
+
+#              meta coincide too. The graph's single-flight table shares a factor's VERDICT between units with
+#              the same prompts. When sides hold identical text, an edge over (a, b) and an edge over (b, c)
+#              bake the same prompts for the same pair of texts, so a NOT, an OR against an AND, or a wrapper
+#              on one of them must keep the flights apart (the key carries tree + meta). Identical factors
+#              still share: no prompt goes to the model twice.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE ta AS SELECT 't' || i::VARCHAR AS x FROM range(12) r(i);
+
+statement ok
+CREATE TABLE tb AS SELECT 't' || i::VARCHAR AS y FROM range(12) r(i);
+
+statement ok
+CREATE TABLE tc AS SELECT 't' || i::VARCHAR AS z FROM range(12) r(i);
+
+# references under the region (no graph)
+statement ok
+SET ai_factorize = 'off';
+
+statement ok
+CREATE TABLE r_not AS SELECT * FROM ta, tb, tc WHERE NOT ai_filter('[p=50] P ' || x || ' ' || y) AND ai_filter('[p=50] P ' || y || ' ' || z);
+
+statement ok
+CREATE TABLE r_or AS SELECT * FROM ta, tb, tc WHERE (ai_filter('[p=50] P ' || x || ' ' || y) OR ai_filter('[p=50] Q ' || x || ' ' || y)) AND (ai_filter('[p=50] P ' || y || ' ' || z) AND ai_filter('[p=50] Q ' || y || ' ' || z));
+
+statement ok
+CREATE TABLE r_wrap AS SELECT * FROM ta, tb, tc WHERE ai_score('[p=50] S ' || x || ' ' || y) > 2 AND ai_score('[p=50] S ' || y || ' ' || z) > 6;
+
+statement ok
+SET ai_factorize = 'all';
+
+foreach state sparse dense
+
+statement ok
+SET ai_factor_state = '{state}';
+
+# NOT on one edge, plain on the other: the shapes are one term with factors L0 and N(L1)
+query II
+EXPLAIN SELECT * FROM ta, tb, tc WHERE NOT ai_filter('[p=50] P ' || x || ' ' || y) AND ai_filter('[p=50] P ' || y || ' ' || z);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*N\(L1\).*
+
+statement ok
+CREATE OR REPLACE TABLE g_not AS SELECT * FROM ta, tb, tc WHERE NOT ai_filter('[p=50] P ' || x || ' ' || y) AND ai_filter('[p=50] P ' || y || ' ' || z);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM g_not EXCEPT SELECT * FROM r_not) UNION ALL (SELECT * FROM r_not EXCEPT SELECT * FROM g_not));
+----
+0
+
+query I
+SELECT count(*) > 0 FROM g_not;
+----
+true
+
+# an OR edge against an AND edge over the same prompt texts
+statement ok
+CREATE OR REPLACE TABLE g_or AS SELECT * FROM ta, tb, tc WHERE (ai_filter('[p=50] P ' || x || ' ' || y) OR ai_filter('[p=50] Q ' || x || ' ' || y)) AND (ai_filter('[p=50] P ' || y || ' ' || z) AND ai_filter('[p=50] Q ' || y || ' ' || z));
+
+query I
+SELECT count(*) FROM ((SELECT * FROM g_or EXCEPT SELECT * FROM r_or) UNION ALL (SELECT * FROM r_or EXCEPT SELECT * FROM g_or));
+----
+0
+
+# the same score prompt under two wrappers (> 2 and > 6): two wrapped leaves, different verdicts
+query II
+EXPLAIN SELECT * FROM ta, tb, tc WHERE ai_score('[p=50] S ' || x || ' ' || y) > 2 AND ai_score('[p=50] S ' || y || ' ' || z) > 6;
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+statement ok
+CREATE OR REPLACE TABLE g_wrap AS SELECT * FROM ta, tb, tc WHERE ai_score('[p=50] S ' || x || ' ' || y) > 2 AND ai_score('[p=50] S ' || y || ' ' || z) > 6;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM g_wrap EXCEPT SELECT * FROM r_wrap) UNION ALL (SELECT * FROM r_wrap EXCEPT SELECT * FROM g_wrap));
+----
+0
+
+query I
+SELECT (SELECT count(*) FROM g_wrap) > 0 AND (SELECT count(*) FROM g_wrap) < (SELECT count(*) FROM ta, tb, tc);
+----
+true
+
+# identical factors still share one flight per prompt: two plain edges over the same texts never send a
+# prompt to the model twice (at most the 144 distinct pair prompts, usually fewer with pruning)
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) > 0 FROM ta, tb, tc WHERE ai_filter('[p=50] P ' || x || ' ' || y) AND ai_filter('[p=50] P ' || y || ' ' || z);
+----
+true
+
+query I
+SELECT sum(llm_calls) <= 144 FROM ai_usage();
+----
+true
+
+endloop
+
+statement ok
+CALL ai_mock_stop();

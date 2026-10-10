@@ -126,6 +126,10 @@ bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub
 unique_ptr<Expression> AIFactorSubNode(const BoundFunctionExpression &node, const vector<idx_t> &leaf_ids,
                                        const vector<idx_t> &index_map, const string &tree_str = "");
 
+//! What a sub-node's verdict depends on besides its prompts: its Boolean tree and its per-leaf meta
+//! (leaf kind, NOT, wrapper). Two units whose prompts coincide share one call only when this matches too.
+string AIFactorSubNodeSignature(const Expression &sub_node);
+
 //===--------------------------------------------------------------------===//
 // Per-leaf seams -- the leaf-factorized region. A node's reps are kept PER LEAF (one dictionary on that
 // leaf's own columns: |A| + |B| reps, never |A| x |B|), a leaf is evaluated on its own over its distinct
