@@ -2446,11 +2446,13 @@ static void RunTerm(ClientContext &context, const PhysicalAIFactorGraph &op,
 	}
 }
 
-//! The node's terms in sequence, their results united. Before a later term runs, what the union already
-//! proves is taken out of its domains: a member is COVERED when every tuple through it is in the union
-//! (then nothing asked about it can change a result), a pair likewise; in existential mode a member of the
-//! existential side with one confirmed tuple is done. With several terms a LIMIT stops between terms only
-//! (a term's own early stop could count tuples the union already holds).
+//! The node's terms, their results united. Before a term runs, what the union already proves is taken out
+//! of its domains: a member is COVERED when every tuple through it is in the union (then nothing asked about
+//! it can change a result), a pair likewise; in existential mode a member of the existential side with one
+//! confirmed tuple is done. The next term to run is the one with the fewest estimated calls over what is
+//! still live (a side factor: its live members; an edge factor: its live pairs, an upper bound), re-estimated
+//! after every term, so a cheap term's coverage shrinks the expensive ones before they run. With several
+//! terms a LIMIT stops between terms only (a term's own early stop could count tuples the union already holds).
 void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGraph &op, FactorGraphSinkState &sink,
                               FactorGraphSourceState &state) {
 	const string query_text = context.GetCurrentQuery();
@@ -2477,17 +2479,15 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 		}
 		return rows;
 	};
-	for (idx_t ti = 0; ti < op.terms.size(); ti++) {
-		auto &plan = op.terms[ti];
-		if (multi && op.limit >= 0 && union_rows() >= op.limit) {
-			break;
-		}
-		vector<vector<char>> live(k);
+	// a term's domains after coverage, and its call estimate over them
+	auto prepare = [&](const PhysicalAIFactorGraph::TermPlan &plan, bool covered, vector<vector<char>> &live,
+	                   vector<vector<std::pair<idx_t, idx_t>>> &pre_true) {
+		live.assign(k, {});
 		for (idx_t s = 0; s < k; s++) {
 			live[s].assign(sink.sides[s].reps.size(), 1);
 		}
-		vector<vector<std::pair<idx_t, idx_t>>> pre_true(plan.edges.size());
-		if (ti > 0) {
+		pre_true.assign(plan.edges.size(), {});
+		if (covered) {
 			// member coverage: tuples through m already in the union == all tuples through m
 			for (idx_t s = 0; s < k; s++) {
 				vector<idx_t> through(sink.sides[s].reps.size(), 0);
@@ -2518,6 +2518,47 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 				}
 			}
 		}
+		vector<idx_t> live_count(k, 0);
+		for (idx_t s = 0; s < k; s++) {
+			for (const auto f : live[s]) {
+				live_count[s] += f;
+			}
+		}
+		double calls = 0;
+		for (idx_t s = 0; s < k; s++) {
+			calls += plan.unary_leaves[s].empty() ? 0.0 : static_cast<double>(live_count[s]);
+		}
+		for (idx_t e = 0; e < plan.edges.size(); e++) {
+			calls +=
+			    static_cast<double>(live_count[plan.edges[e].s]) * static_cast<double>(live_count[plan.edges[e].t]) -
+			    static_cast<double>(pre_true[e].size());
+		}
+		return calls;
+	};
+	vector<char> done(op.terms.size(), 0);
+	for (idx_t round = 0; round < op.terms.size(); round++) {
+		if (multi && op.limit >= 0 && union_rows() >= op.limit) {
+			break;
+		}
+		// the cheapest remaining term over what is still live (ties: the planner's order)
+		idx_t pick = op.terms.size();
+		double pick_calls = 0;
+		vector<vector<char>> live, cand_live;
+		vector<vector<std::pair<idx_t, idx_t>>> pre_true, cand_pre;
+		for (idx_t ti = 0; ti < op.terms.size(); ti++) {
+			if (done[ti]) {
+				continue;
+			}
+			const double calls = prepare(op.terms[ti], round > 0, cand_live, cand_pre);
+			if (pick == op.terms.size() || calls < pick_calls) {
+				pick = ti;
+				pick_calls = calls;
+				live.swap(cand_live);
+				pre_true.swap(cand_pre);
+			}
+		}
+		done[pick] = 1;
+		auto &plan = op.terms[pick];
 		vector<vector<idx_t>> assignments;
 		RunTerm(context, op, plan, multi ? -1 : op.limit, sink, query_text, live, pre_true, assignments);
 		if (!multi) {

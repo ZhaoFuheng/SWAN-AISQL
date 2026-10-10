@@ -169,8 +169,10 @@ SELECT count(*) FROM ((SELECT * FROM d1 EXCEPT SELECT * FROM g1) UNION ALL (SELE
 ----
 0
 
-# --- pair coverage on an edge two terms share: term 1 (e, ua) proves every tuple of the pairs whose a passed ua,
-#     term 2 (e2, wc) asks e2 only on the other pairs, and never re-asks a proved pair (no cache hit either)
+# --- pair and member coverage on an edge two terms share: whichever term runs first (the estimate picks the
+#     one with fewer live calls, here (e2, wc) with 612 against 630), what it proves is taken out of the
+#     other's domains, no proved pair is asked again (no cache hit either), and the total stays well under
+#     the 1,242 calls of running both terms in full
 statement ok
 SELECT ai_local_cache_clear();
 
@@ -180,10 +182,10 @@ SELECT ai_usage_reset();
 statement ok
 CREATE TABLE g7 AS SELECT x, y, z FROM ta, tb, tc WHERE (ai_filter('[p=100] e-all ' || x || ' ' || y) AND ai_filter('[p=50] ua-half ' || x)) OR (ai_filter('[p=100] e2-all ' || x || ' ' || y) AND ai_filter('[p=50] wc-half ' || z));
 
-query I
-SELECT sum(llm_calls + cache_hits) FROM ai_usage();
+query II
+SELECT sum(llm_calls + cache_hits) < 1000, sum(cache_hits) FROM ai_usage();
 ----
-642
+true	0
 
 # --- count products with terms (duplicates on a side)
 statement ok
@@ -232,6 +234,34 @@ query II
 SELECT (SELECT count(*) FROM g7) > 0, (SELECT count(*) FROM g9) > (SELECT count(*) FROM (SELECT DISTINCT * FROM g9));
 ----
 true	true
+
+# --- which term first is decided by live domain size, not shape: a side term over 2,000 members versus an
+#     edge term over 6 x 5 pairs that passes everything; the edge term runs first (30 calls) and covers every
+#     tuple, so the 2,000 side calls are never made
+statement ok
+CREATE TABLE wa AS SELECT 'wa' || i::VARCHAR AS x FROM range(6) r(i);
+
+statement ok
+CREATE TABLE wb AS SELECT 'wb' || i::VARCHAR AS y FROM range(5) r(i);
+
+statement ok
+CREATE TABLE wc AS SELECT 'wc' || i::VARCHAR AS z FROM range(2000) r(i);
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM wa, wb, wc WHERE ai_filter('[p=50] wide-side ' || z) OR ai_filter('[p=100] tiny-edge ' || x || ' ' || y);
+----
+60000
+
+query I
+SELECT sum(llm_calls + cache_hits) FROM ai_usage();
+----
+30
 
 # --- the term cap: with one term allowed, a two-term shape stays a region
 statement ok
