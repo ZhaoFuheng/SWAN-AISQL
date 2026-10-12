@@ -747,18 +747,46 @@ bool AIBuildMixedLeafArgs(ClientContext &context, const vector<AIMixedLeaf> &lea
 			} catch (...) {
 				return false;
 			}
-			string cats;
-			for (auto &c : ListValue::GetChildren(cats_val)) {
-				if (!cats.empty()) {
-					cats += ", ";
+			// The baked prompt is the scalar's, byte for byte, so the leaf asks the same question the
+			// scalar would and shares its cache entries: the list form frames "Categories: a, b", the
+			// struct form {label: description} frames "Categories (name: description):" with one
+			// "- label: description" line per field (AIClassifyStructFunction). Before, the struct form
+			// was baked through the list frame over its DESCRIPTIONS: the model then answered with a
+			// description, the comparison against the label never held, and every such predicate kept
+			// zero rows.
+			string cats, head, tail;
+			const bool struct_form = children[1]->GetReturnType().id() == LogicalTypeId::STRUCT;
+			if (struct_form) {
+				auto &child_types = StructType::GetChildTypes(children[1]->GetReturnType());
+				auto &descriptions = StructValue::GetChildren(cats_val);
+				string block;
+				for (idx_t f = 0; f < child_types.size(); f++) {
+					const string label = child_types[f].first.GetIdentifierName();
+					block += "- " + label;
+					const string desc =
+					    f < descriptions.size() && !descriptions[f].IsNull() ? descriptions[f].ToString() : string();
+					if (!desc.empty() && desc != label) {
+						block += ": " + desc;
+					}
+					block += "\n";
+					cats += (f ? ", " : "") + label;
 				}
-				cats += StringValue::Get(c);
+				head = "Categories (name: description):\n" + block + "\nInput:\n";
+				tail = "\n\nSelect exactly one category by its name.";
+			} else {
+				for (auto &c : ListValue::GetChildren(cats_val)) {
+					if (!cats.empty()) {
+						cats += ", ";
+					}
+					cats += StringValue::Get(c);
+				}
+				head = "Categories: " + cats + "\n\nInput:\n";
+				tail = "\n\nRespond with exactly one of the listed categories, verbatim.";
 			}
 			vector<unique_ptr<Expression>> parts;
-			parts.push_back(make_uniq<BoundConstantExpression>(Value("Categories: " + cats + "\n\nInput:\n")));
+			parts.push_back(make_uniq<BoundConstantExpression>(Value(head)));
 			parts.push_back(input->Copy());
-			parts.push_back(make_uniq<BoundConstantExpression>(
-			    Value(string("\n\nRespond with exactly one of the listed categories, verbatim."))));
+			parts.push_back(make_uniq<BoundConstantExpression>(Value(tail)));
 			call_prompts[j] = BuildConcat(context, std::move(parts));
 			feat_pred[j] = make_uniq<BoundConstantExpression>(Value(
 			    wrapped ? ("Does the classification satisfy " + wrapper_text + "? Categories: " + cats)

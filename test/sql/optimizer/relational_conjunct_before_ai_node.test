@@ -53,7 +53,7 @@ SELECT ai_local_cache_clear();
 query I
 SELECT count(*) FROM t WHERE id IN ('m1','m2') AND ai_classify(txt, ['pos','neg']) = 'pos' AND ai_filter('[p=60] mentions director? ' || txt);
 ----
-0
+6
 
 query I
 SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();

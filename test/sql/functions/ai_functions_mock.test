@@ -66,12 +66,17 @@ SELECT sum(llm_calls)::BIGINT FROM ai_usage();
 ----
 10
 
-# classify list overload: labels ride in the prompt, schema is an open string -> the mock's
-# deterministic fallback answer for every row (matches the python mock 1:1)
+# classify list overload: labels ride in the prompt, schema is an open string -> the mock reads the
+# listed categories off the prompt and answers one per row by hash (stable, with diversity)
 query I
-SELECT count(DISTINCT ai_classify(d, ['a','b','c'])) FROM docs;
+SELECT count(DISTINCT ai_classify(d, ['a','b','c'])) > 1 FROM docs;
 ----
-1
+true
+
+query I
+SELECT bool_and(ai_classify(d, ['a','b','c']) IN ('a', 'b', 'c')) FROM docs;
+----
+true
 
 # classify struct overload: enum-constrained schema -> stable per-row labels with diversity
 query I

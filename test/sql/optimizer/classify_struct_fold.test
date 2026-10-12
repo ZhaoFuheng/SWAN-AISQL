@@ -1,0 +1,77 @@
+# name: test/sql/optimizer/classify_struct_fold.test
+# description: A struct-form ai_classify({label: description}) leaf folded with another AI leaf asks the
+# group: [optimizer]
+
+#              scalar's own question. The fold bakes each leaf's prompt and used the list frame for every
+#              classify, built over ListValue children: for a struct those are the DESCRIPTIONS, so the model
+#              was asked to answer with a description, the comparison against the label never held, and the
+#              predicate kept zero rows whenever it shared a filter with another AI leaf. Now the struct form
+#              bakes the "Categories (name: description):" frame with "- label: description" lines and the
+#              enum-constrained schema, byte for byte the scalar's, and the two paths agree.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE t AS SELECT 'doc' || i::VARCHAR AS d FROM range(60) r(i);
+
+# scalar references (no fold)
+statement ok
+SET ai_reorder = false;
+
+statement ok
+CREATE TABLE r_struct AS SELECT d FROM t WHERE ai_classify('topic of ' || d, {'sport': 'games and athletics', 'news': 'current events'}) = 'sport' AND ai_filter('[p=70] F ' || d);
+
+statement ok
+CREATE TABLE r_list AS SELECT d FROM t WHERE ai_classify('topic of ' || d, ['sport', 'news']) = 'sport' AND ai_filter('[p=70] F ' || d);
+
+statement ok
+CREATE TABLE r_two AS SELECT d FROM t WHERE ai_classify('topic of ' || d, {'sport': 'games and athletics', 'news': 'current events'}) = 'sport' AND ai_classify('tone of ' || d, {'calm': 'calm', 'tense': 'tense'}) = 'tense';
+
+statement ok
+SET ai_reorder = true;
+
+# the folded node carries the struct frame, labels first
+query II
+EXPLAIN SELECT d FROM t WHERE ai_classify('topic of ' || d, {'sport': 'games and athletics', 'news': 'current events'}) = 'sport' AND ai_filter('[p=70] F ' || d);
+----
+physical_plan	<REGEX>:(?s).*ai_function_with_embed.*Categories \(name: description\).*- sport: games and athletics.*- news: current events.*Select exactly one category by its name.*
+
+foreach mode off all
+
+statement ok
+SET ai_factorize = '{mode}';
+
+query I
+SELECT count(*) FROM ((SELECT d FROM t WHERE ai_classify('topic of ' || d, {'sport': 'games and athletics', 'news': 'current events'}) = 'sport' AND ai_filter('[p=70] F ' || d) EXCEPT SELECT d FROM r_struct) UNION ALL (SELECT d FROM r_struct EXCEPT SELECT d FROM t WHERE ai_classify('topic of ' || d, {'sport': 'games and athletics', 'news': 'current events'}) = 'sport' AND ai_filter('[p=70] F ' || d)));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT d FROM t WHERE ai_classify('topic of ' || d, ['sport', 'news']) = 'sport' AND ai_filter('[p=70] F ' || d) EXCEPT SELECT d FROM r_list) UNION ALL (SELECT d FROM r_list EXCEPT SELECT d FROM t WHERE ai_classify('topic of ' || d, ['sport', 'news']) = 'sport' AND ai_filter('[p=70] F ' || d)));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT d FROM t WHERE ai_classify('topic of ' || d, {'sport': 'games and athletics', 'news': 'current events'}) = 'sport' AND ai_classify('tone of ' || d, {'calm': 'calm', 'tense': 'tense'}) = 'tense' EXCEPT SELECT d FROM r_two) UNION ALL (SELECT d FROM r_two EXCEPT SELECT d FROM t WHERE ai_classify('topic of ' || d, {'sport': 'games and athletics', 'news': 'current events'}) = 'sport' AND ai_classify('tone of ' || d, {'calm': 'calm', 'tense': 'tense'}) = 'tense'));
+----
+0
+
+endloop
+
+# the references are real subsets: some rows pass, not all
+query I
+SELECT (SELECT count(*) FROM r_struct) > 0 AND (SELECT count(*) FROM r_struct) < 60 AND (SELECT count(*) FROM r_list) > 0 AND (SELECT count(*) FROM r_two) > 0;
+----
+true
+
+# a description equal to its label prints as the bare label (EXPLAIN renders the frame's newlines as ', ')
+query II
+EXPLAIN SELECT d FROM t WHERE ai_classify('tone of ' || d, {'calm': 'calm', 'tense': 'tense'}) = 'tense' AND ai_filter('[p=70] F ' || d);
+----
+physical_plan	<REGEX>:(?s).*- calm, - tense, Input:.*
+
+statement ok
+CALL ai_mock_stop();

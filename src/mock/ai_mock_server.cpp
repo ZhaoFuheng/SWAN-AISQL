@@ -16,6 +16,7 @@
 #include "ai_client.hpp"
 #include "ai_selectivity_model.hpp"
 #include "duckdb/common/crypto/md5.hpp"
+#include "duckdb/common/string_util.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "yyjson.hpp"
 
@@ -194,7 +195,28 @@ string GenFromSchema(yyjson_val *schema, const string &seed) {
 			} else if (type == "number" || type == "integer") {
 				out += std::to_string(h.Mod(100));
 			} else {
-				out += "\"x\"";
+				// ai_classify's list form carries its categories in the prompt ("Categories: a, b\n\nInput:")
+				// with a plain string schema: answer one of them by hash, as the enum branch does for the
+				// struct form, so classify leaves are deterministic and the scalar and folded paths agree.
+				static const string kCats = "Categories: ";
+				static const string kInput = "\n\nInput:\n";
+				const auto input_at = seed.find(kInput);
+				vector<string> cats;
+				if (seed.compare(0, kCats.size(), kCats) == 0 && input_at != string::npos) {
+					cats = StringUtil::Split(seed.substr(kCats.size(), input_at - kCats.size()), ", ");
+				}
+				if (!cats.empty()) {
+					string tmp;
+					yyjson_mut_doc *d = yyjson_mut_doc_new(nullptr);
+					const string &pick = cats[h.Mod(cats.size())];
+					yyjson_mut_val *v = yyjson_mut_strncpy(d, pick.c_str(), pick.size());
+					char *js = yyjson_mut_val_write(v, 0, nullptr);
+					out += js ? js : "\"\"";
+					free(js);
+					yyjson_mut_doc_free(d);
+				} else {
+					out += "\"x\"";
+				}
 			}
 		}
 	}

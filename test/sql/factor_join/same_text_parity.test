@@ -1,0 +1,242 @@
+# name: test/sql/factor_join/same_text_parity.test
+# description: Parity matrix with every side drawn from ONE text pool (self-join shapes). Prompts then coincide
+# group: [factor_join]
+
+#              across factors and across sides, which is what exposes any sharing keyed on prompt text alone
+#              (the single-flight verdict bug). Every factor feature runs here against the region reference:
+#              plain, same prompt on two edges, NOT, OR inside a factor, wrappers (score bounds, classify
+#              labels, both forms), terms, EXISTS, LIMIT, duplicates, a true self-join. The references come
+#              from the scalar functions (no fold, no region), so the fold's baked prompts are checked as
+#              well. Each query runs under both schedulers and must return the reference rows exactly.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE ta AS SELECT 't' || i::VARCHAR AS x FROM range(14) r(i);
+
+statement ok
+CREATE TABLE tb AS SELECT 't' || i::VARCHAR AS y FROM range(14) r(i);
+
+statement ok
+CREATE TABLE tc AS SELECT 't' || i::VARCHAR AS z FROM range(14) r(i);
+
+# duplicates in the pool (count products)
+statement ok
+CREATE TABLE tad AS SELECT x FROM ta UNION ALL SELECT x FROM ta WHERE x IN ('t1', 't2', 't3');
+
+# --- references from the scalar functions themselves: no fold (ai_reorder off), no region
+statement ok
+SET ai_factorize = 'off';
+
+statement ok
+SET ai_reorder = false;
+
+statement ok
+CREATE TABLE r1 AS SELECT * FROM ta, tb, tc WHERE ai_filter('[p=50] P ' || x || ' ' || y) AND ai_filter('[p=50] P ' || y || ' ' || z);
+
+statement ok
+CREATE TABLE r2 AS SELECT * FROM ta, tb, tc WHERE NOT ai_filter('[p=50] P ' || x || ' ' || y) AND ai_filter('[p=50] P ' || y || ' ' || z);
+
+statement ok
+CREATE TABLE r3 AS SELECT * FROM ta, tb, tc WHERE (ai_filter('[p=50] P ' || x || ' ' || y) OR ai_filter('[p=50] Q ' || x || ' ' || y)) AND ai_filter('[p=50] P ' || y || ' ' || z) AND NOT ai_filter('[p=50] Q ' || y || ' ' || z);
+
+statement ok
+CREATE TABLE r4 AS SELECT * FROM ta, tb, tc WHERE ai_score('[p=50] S ' || x || ' ' || y) > 30 AND ai_score('[p=50] S ' || y || ' ' || z) > 70;
+
+statement ok
+CREATE TABLE r5 AS SELECT * FROM ta, tb, tc WHERE ai_classify('C ' || x || ' ' || y, ['red', 'blue']) = 'red' AND ai_classify('C ' || y || ' ' || z, ['red', 'blue']) = 'blue';
+
+statement ok
+CREATE TABLE r6 AS SELECT * FROM ta, tb, tc WHERE (ai_filter('[p=50] P ' || x || ' ' || y) AND ai_filter('[p=40] U ' || x)) OR (NOT ai_filter('[p=50] P ' || y || ' ' || z) AND ai_filter('[p=40] U ' || z));
+
+statement ok
+CREATE TABLE r7 AS SELECT x FROM ta WHERE EXISTS (SELECT 1 FROM tb, tc WHERE NOT ai_filter('[p=30] P ' || ta.x || ' ' || y) AND ai_filter('[p=30] P ' || y || ' ' || z));
+
+statement ok
+CREATE TABLE r8 AS SELECT * FROM tad, tb WHERE NOT ai_filter('[p=50] P ' || x || ' ' || y) AND ai_filter('[p=50] P ' || y || ' ' || x);
+
+statement ok
+CREATE TABLE r9 AS SELECT a1.x AS x1, a2.x AS x2, a3.x AS x3 FROM ta a1, ta a2, ta a3 WHERE NOT ai_filter('[p=50] P ' || a1.x || ' ' || a2.x) AND ai_filter('[p=50] P ' || a2.x || ' ' || a3.x);
+
+statement ok
+CREATE TABLE r10 AS SELECT * FROM ta, tb WHERE ai_filter('[p=50] P ' || x || ' ' || y) AND coalesce(ai_filter('[p=50] P ' || y || ' ' || x), false) AND ai_filter('[p=70] U ' || x) AND NOT ai_filter('[p=70] U ' || y);
+
+statement ok
+CREATE TABLE r11 AS SELECT * FROM ta, tb, tc WHERE ai_classify('C ' || x || ' ' || y, {'red': 'the color red', 'blue': 'the color blue'}) = 'red' AND ai_classify('C ' || y || ' ' || z, {'red': 'the color red', 'blue': 'the color blue'}) = 'blue';
+
+statement ok
+SET ai_factorize = 'all';
+
+statement ok
+SET ai_reorder = true;
+
+foreach state sparse dense
+
+statement ok
+SET ai_factor_state = '{state}';
+
+# the shapes with structure must be graphs (plain conjunctions of edges are graphs already)
+query II
+EXPLAIN SELECT * FROM ta, tb, tc WHERE NOT ai_filter('[p=50] P ' || x || ' ' || y) AND ai_filter('[p=50] P ' || y || ' ' || z);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*N\(L1\).*
+
+query II
+EXPLAIN SELECT * FROM ta, tb, tc WHERE (ai_filter('[p=50] P ' || x || ' ' || y) OR ai_filter('[p=50] Q ' || x || ' ' || y)) AND ai_filter('[p=50] P ' || y || ' ' || z) AND NOT ai_filter('[p=50] Q ' || y || ' ' || z);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*O\(L.*
+
+query II
+EXPLAIN SELECT * FROM ta, tb, tc WHERE ai_classify('C ' || x || ' ' || y, ['red', 'blue']) = 'red' AND ai_classify('C ' || y || ' ' || z, ['red', 'blue']) = 'blue';
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+# the struct form of classify is a graph too (its baked frame is asserted in optimizer/classify_struct_fold)
+query II
+EXPLAIN SELECT * FROM ta, tb, tc WHERE ai_classify('C ' || x || ' ' || y, {'red': 'the color red', 'blue': 'the color blue'}) = 'red' AND ai_classify('C ' || y || ' ' || z, {'red': 'the color red', 'blue': 'the color blue'}) = 'blue';
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+query II
+EXPLAIN SELECT * FROM ta, tb, tc WHERE (ai_filter('[p=50] P ' || x || ' ' || y) AND ai_filter('[p=40] U ' || x)) OR (NOT ai_filter('[p=50] P ' || y || ' ' || z) AND ai_filter('[p=40] U ' || z));
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*Terms: 2.*
+
+query II
+EXPLAIN SELECT a1.x AS x1, a2.x AS x2, a3.x AS x3 FROM ta a1, ta a2, ta a3 WHERE NOT ai_filter('[p=50] P ' || a1.x || ' ' || a2.x) AND ai_filter('[p=50] P ' || a2.x || ' ' || a3.x);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*
+
+# 1. the same prompt on two edges (sharing is legitimate here: identical factors)
+statement ok
+CREATE OR REPLACE TABLE g1 AS SELECT * FROM ta, tb, tc WHERE ai_filter('[p=50] P ' || x || ' ' || y) AND ai_filter('[p=50] P ' || y || ' ' || z);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM g1 EXCEPT SELECT * FROM r1) UNION ALL (SELECT * FROM r1 EXCEPT SELECT * FROM g1));
+----
+0
+
+# 2. NOT on one of two edges with the same prompt
+statement ok
+CREATE OR REPLACE TABLE g2 AS SELECT * FROM ta, tb, tc WHERE NOT ai_filter('[p=50] P ' || x || ' ' || y) AND ai_filter('[p=50] P ' || y || ' ' || z);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM g2 EXCEPT SELECT * FROM r2) UNION ALL (SELECT * FROM r2 EXCEPT SELECT * FROM g2));
+----
+0
+
+# 3. an OR factor whose leaves' prompts recur as plain and negated factors on the next edge
+statement ok
+CREATE OR REPLACE TABLE g3 AS SELECT * FROM ta, tb, tc WHERE (ai_filter('[p=50] P ' || x || ' ' || y) OR ai_filter('[p=50] Q ' || x || ' ' || y)) AND ai_filter('[p=50] P ' || y || ' ' || z) AND NOT ai_filter('[p=50] Q ' || y || ' ' || z);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM g3 EXCEPT SELECT * FROM r3) UNION ALL (SELECT * FROM r3 EXCEPT SELECT * FROM g3));
+----
+0
+
+# 4. one score prompt under two bounds
+statement ok
+CREATE OR REPLACE TABLE g4 AS SELECT * FROM ta, tb, tc WHERE ai_score('[p=50] S ' || x || ' ' || y) > 30 AND ai_score('[p=50] S ' || y || ' ' || z) > 70;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM g4 EXCEPT SELECT * FROM r4) UNION ALL (SELECT * FROM r4 EXCEPT SELECT * FROM g4));
+----
+0
+
+# 5. one classify prompt (list form) compared against two labels
+statement ok
+CREATE OR REPLACE TABLE g5 AS SELECT * FROM ta, tb, tc WHERE ai_classify('C ' || x || ' ' || y, ['red', 'blue']) = 'red' AND ai_classify('C ' || y || ' ' || z, ['red', 'blue']) = 'blue';
+
+query I
+SELECT count(*) FROM ((SELECT * FROM g5 EXCEPT SELECT * FROM r5) UNION ALL (SELECT * FROM r5 EXCEPT SELECT * FROM g5));
+----
+0
+
+# 6. two terms whose edge prompts coincide, one negated; unary prompts coincide across sides too
+statement ok
+CREATE OR REPLACE TABLE g6 AS SELECT * FROM ta, tb, tc WHERE (ai_filter('[p=50] P ' || x || ' ' || y) AND ai_filter('[p=40] U ' || x)) OR (NOT ai_filter('[p=50] P ' || y || ' ' || z) AND ai_filter('[p=40] U ' || z));
+
+query I
+SELECT count(*) FROM ((SELECT * FROM g6 EXCEPT SELECT * FROM r6) UNION ALL (SELECT * FROM r6 EXCEPT SELECT * FROM g6));
+----
+0
+
+# 7. existential over the NOT shape
+statement ok
+CREATE OR REPLACE TABLE g7 AS SELECT x FROM ta WHERE EXISTS (SELECT 1 FROM tb, tc WHERE NOT ai_filter('[p=30] P ' || ta.x || ' ' || y) AND ai_filter('[p=30] P ' || y || ' ' || z));
+
+query I
+SELECT count(*) FROM ((SELECT * FROM g7 EXCEPT SELECT * FROM r7) UNION ALL (SELECT * FROM r7 EXCEPT SELECT * FROM g7));
+----
+0
+
+# 8. duplicates on one side, the pair asked both ways round (P x y, NOT P y x)
+statement ok
+CREATE OR REPLACE TABLE g8 AS SELECT * FROM tad, tb WHERE NOT ai_filter('[p=50] P ' || x || ' ' || y) AND ai_filter('[p=50] P ' || y || ' ' || x);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM g8 EXCEPT SELECT * FROM r8) UNION ALL (SELECT * FROM r8 EXCEPT SELECT * FROM g8));
+----
+0
+
+query I
+SELECT count(*) = (SELECT count(*) FROM r8) FROM g8;
+----
+true
+
+# 9. a true self-join: the same table on every side
+statement ok
+CREATE OR REPLACE TABLE g9 AS SELECT a1.x AS x1, a2.x AS x2, a3.x AS x3 FROM ta a1, ta a2, ta a3 WHERE NOT ai_filter('[p=50] P ' || a1.x || ' ' || a2.x) AND ai_filter('[p=50] P ' || a2.x || ' ' || a3.x);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM g9 EXCEPT SELECT * FROM r9) UNION ALL (SELECT * FROM r9 EXCEPT SELECT * FROM g9));
+----
+0
+
+# 10. a coalesce wrapper and a NOT on unary prompts that recur on both sides
+statement ok
+CREATE OR REPLACE TABLE g10 AS SELECT * FROM ta, tb WHERE ai_filter('[p=50] P ' || x || ' ' || y) AND coalesce(ai_filter('[p=50] P ' || y || ' ' || x), false) AND ai_filter('[p=70] U ' || x) AND NOT ai_filter('[p=70] U ' || y);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM g10 EXCEPT SELECT * FROM r10) UNION ALL (SELECT * FROM r10 EXCEPT SELECT * FROM g10));
+----
+0
+
+# 12. the struct form of classify: the fold used to list the descriptions and lose the labels (zero rows)
+statement ok
+CREATE OR REPLACE TABLE g11 AS SELECT * FROM ta, tb, tc WHERE ai_classify('C ' || x || ' ' || y, {'red': 'the color red', 'blue': 'the color blue'}) = 'red' AND ai_classify('C ' || y || ' ' || z, {'red': 'the color red', 'blue': 'the color blue'}) = 'blue';
+
+query I
+SELECT count(*) FROM ((SELECT * FROM g11 EXCEPT SELECT * FROM r11) UNION ALL (SELECT * FROM r11 EXCEPT SELECT * FROM g11));
+----
+0
+
+# 11. LIMIT over the NOT shape: exactly k rows, all of them reference rows
+query I
+SELECT count(*) FROM (SELECT * FROM ta, tb, tc WHERE NOT ai_filter('[p=50] P ' || x || ' ' || y) AND ai_filter('[p=50] P ' || y || ' ' || z) LIMIT 9);
+----
+9
+
+query I
+SELECT count(*) FROM (SELECT * FROM (SELECT * FROM ta, tb, tc WHERE NOT ai_filter('[p=50] P ' || x || ' ' || y) AND ai_filter('[p=50] P ' || y || ' ' || z) LIMIT 9) EXCEPT SELECT * FROM r2);
+----
+0
+
+endloop
+
+# every reference is non-trivial: some rows pass, not all
+query I
+SELECT bool_and(n > 0 AND n < 14 * 14 * 14) FROM (SELECT count(*) AS n FROM r1 UNION ALL SELECT count(*) FROM r2 UNION ALL SELECT count(*) FROM r3 UNION ALL SELECT count(*) FROM r4 UNION ALL SELECT count(*) FROM r5 UNION ALL SELECT count(*) FROM r6 UNION ALL SELECT count(*) FROM r9 UNION ALL SELECT count(*) FROM r11);
+----
+true
+
+query I
+SELECT (SELECT count(*) FROM r7) > 0 AND (SELECT count(*) FROM r8) > 0 AND (SELECT count(*) FROM r10) > 0;
+----
+true
+
+statement ok
+CALL ai_mock_stop();

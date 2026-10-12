@@ -1753,15 +1753,47 @@ static AIRequest AILeafRequest(const AILeafMeta &m, const string &prompt, const 
 		static const string kCats = "Categories: ";
 		static const string kInput = "\n\nInput:\n";
 		static const string kTail = "\n\nRespond with exactly one of the listed categories, verbatim.";
+		// the struct form's frame (AIClassifyStructFunction): "- label[: description]" lines, an
+		// enum-constrained schema over the labels
+		static const string kCatsStruct = "Categories (name: description):\n";
+		static const string kInputStruct = "\nInput:\n";
+		static const string kTailStruct = "\n\nSelect exactly one category by its name.";
+		auto ends_with = [&](const string &tail) {
+			return prompt.size() >= tail.size() && prompt.compare(prompt.size() - tail.size(), tail.size(), tail) == 0;
+		};
 		const auto input_at = prompt.find(kInput);
-		if (prompt.compare(0, kCats.size(), kCats) == 0 && input_at != string::npos && prompt.size() >= kTail.size() &&
-		    prompt.compare(prompt.size() - kTail.size(), kTail.size(), kTail) == 0) {
+		const auto struct_input_at = prompt.find(kInputStruct);
+		if (prompt.compare(0, kCats.size(), kCats) == 0 && input_at != string::npos && ends_with(kTail)) {
 			vector<std::pair<string, string>> options;
 			for (auto &cat : StringUtil::Split(prompt.substr(kCats.size(), input_at - kCats.size()), ", ")) {
 				options.emplace_back(cat, string());
 			}
 			const idx_t in_begin = input_at + kInput.size();
 			AIMarkClassifyQuestion(req, prompt.substr(in_begin, prompt.size() - kTail.size() - in_begin),
+			                       std::move(options), string());
+		} else if (prompt.compare(0, kCatsStruct.size(), kCatsStruct) == 0 && struct_input_at != string::npos &&
+		           ends_with(kTailStruct)) {
+			vector<std::pair<string, string>> options;
+			string enum_json = "[";
+			for (auto &line :
+			     StringUtil::Split(prompt.substr(kCatsStruct.size(), struct_input_at - kCatsStruct.size()), "\n")) {
+				if (line.compare(0, 2, "- ") != 0) {
+					continue;
+				}
+				const auto sep = line.find(": ");
+				const string label = line.substr(2, sep == string::npos ? string::npos : sep - 2);
+				const string desc = sep == string::npos ? string() : line.substr(sep + 2);
+				enum_json += (options.empty() ? "\"" : ",\"") + AIJsonEscape(label) + "\"";
+				options.emplace_back(label, desc);
+			}
+			enum_json += "]";
+			if (!options.empty()) {
+				req.json_schema =
+				    "{\"type\":\"object\",\"properties\":{\"result\":{\"type\":\"string\",\"enum\":" + enum_json +
+				    "}},\"required\":[\"result\"],\"additionalProperties\":false}";
+			}
+			const idx_t in_begin = struct_input_at + kInputStruct.size();
+			AIMarkClassifyQuestion(req, prompt.substr(in_begin, prompt.size() - kTailStruct.size() - in_begin),
 			                       std::move(options), string());
 		}
 	} else if (m.kind == 'S') {
