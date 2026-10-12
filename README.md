@@ -165,29 +165,7 @@ TYPESAFE_API_KEY=...        # only for SET ai_typesafe='filter,classify,score' (
 and the recorded answers are published on Zenodo ([10.5281/zenodo.23112764](https://doi.org/10.5281/zenodo.23112764); the DOI resolves to the latest version; the next version is a 225 MB download that unpacks to about 1.6 GB). **The version on Zenodo today is
 the first one, from 2026-10-02:** it holds the SemBench and hybrid-bench recordings and the SWAN 2.0 runs of SWAN, LOTUS
 and BlendSQL as of that date, not the SWAN 2.0 recordings behind the tables in this README (made after it) nor PLOP's,
-ThalamusDB's and Palimpzest's; the next version, which holds them all, is being prepared, and until it is published a
-SWAN 2.0 replay meets prompts the fetched cache does not have, which need a key. `serve/fetch_cache.sh` downloads
-the cache to `serve/.llm_cache.duckdb`; the stack then starts without litellm, and SemBench, the hybrid bench and
-SWAN 2.0 replay their answers, latency and cost at $0 — for SWAN and for the baselines (LOTUS on every
-benchmark, PLOP and BlendSQL where they run), so every comparison table reproduces, the SWAN 2.0 latency
-session included. Model inference at temperature 0 is treated as deterministic: the published cache is the
-single source of answers and latencies for every system, each table is a replay of it, and asking the
-provider afresh is a different experiment rather than a rerun. Replay matches requests byte for byte, so it covers
-the repository's queries with the default prompts and model; an edited query is a fresh request and needs
-a key. One caveat: which prompts the engine sends depends on run-time decisions — under a `LIMIT` it stops
-as soon as it has enough rows, and the learned ordering of the predicates follows the answers as they arrive —
-so a replay can touch a few prompts the recording never did; without a key those calls fail and the query
-answers from the rows it could decide (`ai_usage()` shows them as `failed_calls`). The published cache was
-therefore converged: SWAN-AISQL's SWAN 2.0 run was replayed eight times with the provider reachable, each
-pass recording the prompts it newly touched (675 the first time, then 82 down to 0 per pass out of 19.7k,
-with the answer to every question unchanged throughout). A replay without a key can still meet a few
-unrecorded prompts: the published SWAN 2.0 table is such a replay, which met 14 (0.07%, on 2 questions),
-returned the recorded answer to every question, and took 2,055 s against the live run's 2,072 s; the
-SemBench and hybrid-bench replays met none. ThalamusDB samples which rows
-to judge next and Palimpzest does not issue the same prompts from run to run, so their replays can meet
-more: a Palimpzest replay of SWAN 2.0 met 2,148 unrecorded prompts and a ThalamusDB replay lost five
-questions to them. Their rows are therefore their live runs, served from the cache where the prompts
-repeat, and an exact rerun of either needs a key.
+ThalamusDB's and Palimpzest's; Will update the cache later.
 
 ## 3. Python environment
 
