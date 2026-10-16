@@ -49,6 +49,7 @@ WITH orders_lineitem_customer AS (
     SELECT DISTINCT
       l_partkey
     FROM orders_lineitem_customer
+    ORDER BY l_partkey
     LIMIT 200
   ) AS k
     ON k.l_partkey = p.p_partkey
@@ -135,6 +136,7 @@ Return a single YES or NO, with no other words. If uncertain, return YES.'
     SELECT DISTINCT
       l_suppkey
     FROM joined
+    ORDER BY l_suppkey
     LIMIT 40
   ) AS k
     ON k.l_suppkey = s.s_suppkey

@@ -9,7 +9,7 @@ Calls = proxy hits+misses delta per query; tokens from PLOP's own log (its /v1/r
 header through the proxy), cost ESTIMATED at the luna list price used by the hybrid-bench runner.
 
   run:  python3 plop_movie.py [q1 q2 ...]
-  env:  PLOP_BIN (the fork's duckdb shell, built with the LLM_API_URL / LLM_MODEL patch), AI_PROXY_URL (:4001),
+  env:  PLOP_BIN (the fork's duckdb shell: ../../../Morrila, built with aisql-bench/plop_fork.patch), AI_PROXY_URL (:4001),
         AI_MODEL (gpt-5.6-luna), AI_MAX_CONCURRENCY (20), PLOP_MODE (costmodel | pullup | none)
 """
 import csv
@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from movie_common import gt, metric_fields, metric_tag, score
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-BIN = os.environ.get("PLOP_BIN", os.path.join(HERE, "..", "..", "..", "MorrilaPLOP", "PLOP", "build", "release", "duckdb"))
+BIN = os.environ.get("PLOP_BIN", os.path.join(HERE, "..", "..", "..", "Morrila", "build", "release", "duckdb"))
 PROXY = os.environ.get("AI_PROXY_URL", "http://localhost:4001")
 MODEL = os.environ.get("AI_MODEL", "gpt-5.6-luna")
 CONC = os.environ.get("AI_MAX_CONCURRENCY", "20")

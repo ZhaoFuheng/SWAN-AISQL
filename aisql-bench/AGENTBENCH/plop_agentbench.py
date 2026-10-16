@@ -9,7 +9,8 @@ ESTIMATED from tokens at luna list price (their /v1/responses path bypasses lite
 header on replay). Result rows go to results/plop/QN.csv for cross-system agreement.
 
   run:  python3 plop_agentbench.py [Q1 Q2 ...]
-  env:  PLOP_ROOT (the morrila_src checkout), AI_PROXY_URL, AI_MODEL, AI_MAX_CONCURRENCY
+  env:  PLOP_ROOT (the public Morrila clone, default ../../../Morrila), PLOP_BIN (its shell, default
+        $PLOP_ROOT/build/release/duckdb), AI_PROXY_URL, AI_MODEL, AI_MAX_CONCURRENCY
 """
 import json
 import os
@@ -20,10 +21,8 @@ import urllib.request
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.environ.get(
-    "PLOP_ROOT",
-    "/private/tmp/claude-501/-Users-owner-Desktop-research-swan-ai-sql/9711bdca-3e49-49d5-aa05-4d5b2fb63486/scratchpad/morrila_src")
-BIN = os.path.join(ROOT, "build", "reldebug", "duckdb")
+ROOT = os.environ.get("PLOP_ROOT", os.path.normpath(os.path.join(HERE, "..", "..", "..", "Morrila")))
+BIN = os.environ.get("PLOP_BIN", os.path.join(ROOT, "build", "release", "duckdb"))
 PROXY = os.environ.get("AI_PROXY_URL", "http://localhost:4001")
 MODEL = os.environ.get("AI_MODEL", "gpt-5.6-luna")
 CONC = os.environ.get("AI_MAX_CONCURRENCY", "20")

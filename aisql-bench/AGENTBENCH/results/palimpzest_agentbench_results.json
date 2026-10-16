@@ -27,16 +27,16 @@
    "ran_at": "2026-10-04 23:27:50 MDT"
   },
   "Q29": {
-   "latency_s": 4.0,
-   "wall_s": 19.1,
-   "llm_calls": 36,
-   "llm_calls_fresh": 0,
-   "tokens": 20090,
-   "cost_usd": 0.00828,
+   "latency_s": 3.5,
+   "wall_s": 53.3,
+   "llm_calls": 28,
+   "llm_calls_fresh": 16,
+   "tokens": 15912,
+   "cost_usd": 0.00705,
    "cost_is_estimate": true,
    "optimizer": "pareto",
    "policy": "MaxQuality",
-   "rows": 36,
+   "rows": 28,
    "operators": [
     [
      "filter",
@@ -48,11 +48,11 @@
       "n_name",
       "r_name"
      ],
-     36
+     28
     ]
    ],
    "error": null,
-   "ran_at": "2026-10-04 23:27:50 MDT"
+   "ran_at": "2026-10-15 22:18:56 MDT"
   },
   "Q1": {
    "latency_s": 16.7,
@@ -959,7 +959,7 @@
   },
   "Q30": {
    "latency_s": 8.1,
-   "wall_s": 20.8,
+   "wall_s": 21.7,
    "llm_calls": 12,
    "llm_calls_fresh": 0,
    "tokens": 7125,
@@ -1004,21 +1004,21 @@
     ]
    ],
    "error": null,
-   "ran_at": "2026-10-04 23:27:50 MDT"
+   "ran_at": "2026-10-15 22:18:56 MDT"
   }
  },
  "model": "gpt-5.6-luna",
  "concurrency": 20,
  "optimizer": "pareto",
  "policy": "MaxQuality",
- "updated": "2026-10-04 23:27:50 MDT",
+ "updated": "2026-10-15 22:18:56 MDT",
  "total": {
   "n_queries": 30,
-  "latency_s": 2088.4,
-  "llm_calls": 25785,
-  "cost_usd": 6.8213,
+  "latency_s": 2087.9,
+  "llm_calls": 25777,
+  "cost_usd": 6.8201,
   "cost_is_estimate": true,
-  "tokens": 14997707,
+  "tokens": 14993529,
   "errors": 0
  }
 }

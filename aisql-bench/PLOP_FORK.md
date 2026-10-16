@@ -1,10 +1,27 @@
 # Running PLOP (Morrila) as a baseline
 
-PLOP is the authors' DuckDB fork ("Morrila"); it is not publicly released, so it is not in this repository.
-With their source tree, three small edits make it run through the cache proxy with the benchmark model, and
-the runners here (`AGENTBENCH/plop_agentbench.py`, `MOVIE/plop_movie.py`) drive the resulting shell (`PLOP_BIN`, default `../../MorrilaPLOP/PLOP/build/release/duckdb`).
+PLOP is the authors' DuckDB fork, "Morrila", public at https://github.com/DMoRanSky/Morrila (MIT). The
+runners here (`AGENTBENCH/plop_agentbench.py`, `MOVIE/plop_movie.py`) and SWAN_bench's `plop` adapter drive its
+shell; the default location is a clone next to this repository, `../Morrila`, built to `build/release/duckdb`
+(`PLOP_ROOT` / `PLOP_BIN` / `--plop-bin` override it).
 
-## Edits to the fork (`src/common/llm_query.cpp`, `src/include/duckdb/common/llm_query.hpp`)
+## Setup
+
+```sh
+cd <parent of SWAN-AISQL>
+git clone https://github.com/DMoRanSky/Morrila          # measured at commit 56780d9 (2026-10-13)
+cd Morrila
+git apply ../SWAN-AISQL/aisql-bench/plop_fork.patch      # the three edits below
+rm -rf build/release                                      # the repo ships a CMake cache from another machine
+echo 'duckdb_extension_load(tpch)' > extension/extension_config_local.cmake   # Q15-Q19, Q25-Q30 LOAD tpch
+cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -S . -B build/release
+cmake --build build/release --target shell tpch_loadable_extension
+```
+
+(The Makefile's `CORE_EXTENSIONS=` path needs `.github/config/*.cmake`, which the public repo does not ship; the
+local extension config is the supported alternative.)
+
+## The three edits (`plop_fork.patch`: `src/common/llm_query.cpp`, `src/include/duckdb/common/llm_query.hpp`)
 
 1. **Endpoint from the environment** — in `LLMCallManager::LLMCallManager`:
 
@@ -38,7 +55,7 @@ the runners here (`AGENTBENCH/plop_agentbench.py`, `MOVIE/plop_movie.py`) drive 
 
    and the four `parse_to_*_()` methods call it in place of the fixed-index extraction.
 
-Build: `cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -S . -B build/release && cmake --build build/release --target shell`.
+None of the edits touches the optimizer (`src/optimizer/semantic.cpp`) or the SQL surface.
 
 ## Protocol notes
 
@@ -49,3 +66,9 @@ Build: `cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -S . -B build/release && cmake
   requests carry no provider cost header through the proxy).
 - PLOP does not support images, so SemBench ECOMM and MMQA are not run for it; on the hybrid bench its
   prompts are the originals, so SWAN replays its verdicts through the proxy's shared-verdict alias.
+- The hybrid bench's 30 queries and data ship in the fork under `test/semantic/agent_bench/`.
+- Q29 and Q30 have LIMITs inside CTEs with no ORDER BY, so the rows they ask about depended on the engine (the
+  public build draws different nations on Q29 than the pre-release tree did). Every system's copy orders those
+  LIMITs by key (`plop_queries/`, `plop_gt_queries/`, `swan_queries/`, `blendsql_queries/`, `thalamusdb_queries/`,
+  `lotus_queries/`); PLOP runs from `plop_queries/` (`PLOP_QUERY_DIR`) for those two, and the ground truth
+  (`results/plop_gt` = public build, `DUCKDB_SEMANTIC_MODE=none`, `plop_gt_queries/`) is generated the same way.

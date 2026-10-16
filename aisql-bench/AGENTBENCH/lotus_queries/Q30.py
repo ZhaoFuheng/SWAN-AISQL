@@ -28,8 +28,8 @@ def run(load, lm):
         "c_custkey", "c_name", "c_mktsegment", "c_acctbal",
     ]]
 
-    # part_base: parts among the first 200 distinct l_partkey (no ORDER BY -> current order)
-    pkeys = orders_lineitem_customer[["l_partkey"]].drop_duplicates().head(200)
+    # part_base: parts among the 200 smallest distinct l_partkey (ORDER BY l_partkey LIMIT 200)
+    pkeys = orders_lineitem_customer[["l_partkey"]].drop_duplicates().sort_values("l_partkey", kind="stable").head(200)
     pb = part.merge(pkeys, left_on="p_partkey", right_on="l_partkey").drop(columns=["l_partkey"])
     pb = pb[
         pb["p_size"].astype(int).between(5, 28)
@@ -55,8 +55,8 @@ Return a single YES or NO, with no other words. If uncertain, return YES."""
         "c_custkey", "c_name", "c_mktsegment", "c_acctbal",
     ]]
 
-    # supplier_context: DISTINCT l_suppkey LIMIT 40 (no ORDER BY -> first 40 in current order)
-    skeys = joined[["l_suppkey"]].drop_duplicates().head(40)
+    # supplier_context: the 40 smallest distinct l_suppkey (ORDER BY l_suppkey LIMIT 40)
+    skeys = joined[["l_suppkey"]].drop_duplicates().sort_values("l_suppkey", kind="stable").head(40)
     sc = supplier.merge(skeys, left_on="s_suppkey", right_on="l_suppkey").drop(columns=["l_suppkey"])
     if len(sc) > 0:
         sc = sc.sem_filter(

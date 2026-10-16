@@ -36,6 +36,7 @@ WITH partsupp_base AS (
     SELECT DISTINCT
       ps_suppkey
     FROM partsupp_base
+    ORDER BY ps_suppkey
     LIMIT 70
   ) AS k
     ON k.ps_suppkey = s.s_suppkey
@@ -68,6 +69,7 @@ WITH partsupp_base AS (
   GROUP BY
     j.s_suppkey,
     j.s_nationkey
+  ORDER BY j.s_suppkey, j.s_nationkey
   LIMIT 50
 ), nation_context AS (
   SELECT

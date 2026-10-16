@@ -44,6 +44,7 @@ part_base AS (
 	JOIN (
 		SELECT DISTINCT l_partkey
 		FROM orders_lineitem_customer
+		ORDER BY l_partkey
 		LIMIT 200
 	) k ON k.l_partkey = p.p_partkey
 	WHERE p.p_size BETWEEN 5 AND 28
@@ -99,6 +100,7 @@ supplier_context AS (
 	JOIN (
 		SELECT DISTINCT l_suppkey
 		FROM joined
+		ORDER BY l_suppkey
 		LIMIT 40
 	) k ON k.l_suppkey = s.s_suppkey
 	WHERE SEMANTIC('Does this supplier appear qualified for consumer-facing distribution partnerships?

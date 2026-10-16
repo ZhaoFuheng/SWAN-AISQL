@@ -309,7 +309,7 @@
    "ran_at": "2026-10-02 19:46:20 MDT"
   },
   "Q29": {
-   "latency_s": 1.8,
+   "latency_s": 7.0,
    "llm_calls": 7,
    "llm_calls_fresh": null,
    "tokens": 1168,
@@ -317,7 +317,7 @@
    "cost_is_estimate": true,
    "rows": 28,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-10-15 22:18:42 MDT"
   },
   "Q30": {
    "latency_s": 6.0,
@@ -328,15 +328,15 @@
    "cost_is_estimate": true,
    "rows": 0,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-10-15 22:18:42 MDT"
   }
  },
  "model": "gpt-5.6-luna",
  "concurrency": "20",
- "updated": "2026-10-02 20:21:05 MDT",
+ "updated": "2026-10-15 22:18:42 MDT",
  "total": {
   "n_queries": 30,
-  "latency_s": 1959.8,
+  "latency_s": 1965.0,
   "llm_calls": 24631,
   "cost_usd": 2.7604,
   "cost_is_estimate": true,

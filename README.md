@@ -4,8 +4,8 @@ SWAN AISQL introduce `ai_filter / ai_classify / ai_score / ai_complete / ai_agg 
 optimizer and executor built around **factorized ("two-currency") execution**: every LLM call runs once per
 *distinct* input, joins over AI predicates evaluate the distinct *pair domain* without materializing the
 cross product, and learned predicate ordering, Yannakakis semi-join reduction and LIMIT early-stop minimize
-calls. Benchmarked against LOTUS on SemBench (MOVIE / ECOMM / MMQA), against PLOP's recorded runs and LOTUS
-on the 30-query hybrid bench the PLOP authors shared with us, and against BlendSQL and LOTUS on
+calls. Benchmarked against LOTUS on SemBench (MOVIE / ECOMM / MMQA), against PLOP ([Morrila](https://github.com/DMoRanSky/Morrila),
+the authors' DuckDB fork) and LOTUS on the 30-query hybrid bench of the PLOP paper, and against BlendSQL and LOTUS on
 [SWAN 2.0](https://github.com/ZhaoFuheng/SWANBench). The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
 This repository is a DuckDB **extension** built on the
@@ -46,14 +46,14 @@ serving stack, run a query, then run SemBench MOVIE for SWAN and LOTUS and compa
 
 ## Results
 
-All three comparisons use `gpt-5.6-luna` for every system, 20 requests in flight, every call through the
-cache proxy (the recorded answers are published, see Keys). Quality is each benchmark's own metric; calls are
-chat requests; cost is the provider's price for them.
+Every system runs with `gpt-5.6-luna`, 20 requests in flight, every call through the cache proxy (the recorded
+answers are published, see Keys). Quality is each benchmark's own metric; calls are chat requests; cost is the
+provider's price for them; latency is wall-clock over the suite's queries run one after the other. The
+protocol behind each table is in [aisql-bench/README.md](aisql-bench/README.md).
 
-**SemBench MOVIE** (sf2000: text sentiment over reviews, 10 queries; quality = the suite's macro F1 / count
-accuracy / Spearman)
+**SemBench MOVIE** (text sentiment over reviews, 10 queries)
 
-| | quality | calls | cost | latency (10 q) |
+| | quality | calls | cost | latency |
 |---|---|---|---|---|
 | LOTUS 1.2.4 | 0.780 | 201k | $14.45 | 10,654 s |
 | BlendSQL 0.1.27 | 0.763 | 18.7k | $1.44 | 1,188 s |
@@ -61,44 +61,29 @@ accuracy / Spearman)
 | PLOP-DP | 0.726 | 19.1k | $1.69 | 1,665 s |
 | **SWAN-AISQL** | **0.832** | 18.8k | $2.28 | 1,686 s |
 
-Latency is wall-clock over the suite's queries run one after the other. Palimpzest runs SemBench's own
-Palimpzest programs for the suite under its Abacus optimizer; its latency is the execution time it reports
-per query, without the start-up of its own interpreter.
-SemBench's two image suites, ECOMM and MMQA, run SWAN against LOTUS (PLOP and BlendSQL do not support
-images); their tables are in section 6.
+SemBench's image suites, ECOMM and MMQA, run SWAN against LOTUS (the other systems do not support images);
+their tables are in section 6.
 
-**Hybrid bench** (the 30 agent_bench queries of the PLOP paper: relational plans with semantic operators;
-quality = row-multiset F1 against the LIMIT-free PLOP ground truth, i.e. PLOP's un-rewritten execution; SWAN and PLOP
-consume the same prompt template, and every system's prompts are answered from one recorded cache, so a verdict never
-differs between two executions of the same prompt. That is why PLOP-DP scores 1.000 here where the PLOP paper reports
-0.848 against the same reference: there the optimized and unoptimized plans sampled gpt-5-mini separately, and the gap is
-the model's run-to-run variance on borderline rows, not the rewrite)
+**Hybrid bench** (the 30 agent_bench queries of the PLOP paper, from the authors' public fork
+[Morrila](https://github.com/DMoRanSky/Morrila): relational plans with semantic operators)
 
 | | macro-F1 | calls | cost | latency |
 |---|---|---|---|---|
-| LOTUS 1.2.4 | 0.607* | 25,749 | $2.90 | 1,802 s |
-| BlendSQL 0.1.27 | 0.758* | 24,631 | $2.76 | 1,960 s |
-| Palimpzest 1.5.3 (Abacus optimizer) | 0.710* | 25,785 | $6.82 | 2,088 s |
-| ThalamusDB 0.1.15 | 0.661* | 19,512 | $2.09 | 8,542 s |
-| PLOP-DP | 1.000 | 13,602 | $0.53 | 1,080 s |
-| **SWAN-AISQL** | **1.000** | **11,172** | **$0.29** | **799 s** |
+| LOTUS 1.2.4 | 0.632* | 25,741 | $2.90 | 1,807 s |
+| BlendSQL 0.1.27 | 0.758* | 24,631 | $2.76 | 1,965 s |
+| Palimpzest 1.5.3 (Abacus optimizer) | 0.735* | 25,777 | $6.82 | 2,088 s |
+| ThalamusDB 0.1.15 | 0.661* | 19,512 | $2.09 | 8,582 s |
+| PLOP-DP | 1.000 | 13,329 | $0.50 | 1,092 s |
+| **SWAN-AISQL** | **1.000** | **11,172** | **$0.29** | **798 s** |
 
-*LOTUS's, BlendSQL's, ThalamusDB's and Palimpzest's verdicts are independent samples, so where an answer
-hinges on a few judgments any disagreement scores 0; their calls, cost and latency are comparable. Latency is
-wall-clock over the 30 queries run one after the other, 20 requests in flight. BlendSQL runs our mechanical
-translation of the SWAN queries (`aisql-bench/AGENTBENCH/translate_to_blendsql.py`). ThalamusDB runs our
-formulation of the queries
-(`aisql-bench/AGENTBENCH/thalamusdb_queries/`, rule in `make_thalamusdb_queries.py`): each semantic predicate
-becomes an `NLfilter` over a materialised column carrying the prompt's fields, as SemBench did for its own
-ThalamusDB queries, and the classification of Q1–Q3 becomes a CASE cascade of such filters, one per
-category (specific classes first, the broadest as the fallback). Palimpzest runs the LOTUS programs
-unchanged with their semantic operators served by Palimpzest (`aisql-bench/palimpzest_hybrid_exec.py`), its
-Abacus optimizer choosing each operator's plan.
+SWAN and PLOP consume the same recorded verdict per shared prompt, so both match the ground truth (PLOP's
+un-rewritten execution) by construction; *the other systems' verdicts are independent samples, so their
+quality also measures verdict variance, while their calls, cost and latency are comparable.
 
-**SWAN 2.0** (120 questions over four BIRD databases scaled to ~10k rows with duplicate entities; one AISQL
-query per question that every system plans itself; quality = relative error / F1, as in SemBench)
+**SWAN 2.0** (120 questions over four BIRD databases scaled to ~10k rows; one AISQL query per question that
+every system plans itself)
 
-| | quality | calls | cost | latency (120 q) |
+| | quality | calls | cost | latency |
 |---|---|---|---|---|
 | LOTUS 1.2.4 | 0.760 | 69,204 | $4.04 | 4,101 s |
 | BlendSQL 0.1.27 | 0.761 | 59,620 | $4.95 | 4,608 s |
@@ -106,9 +91,9 @@ query per question that every system plans itself; quality = relative error / F1
 | PLOP-DP | 0.690 | 25,604 | $1.72 | 10,431 s |
 | **SWAN-AISQL** | 0.755 | **19,695** | **$2.13** | **2,055 s** |
 
-The quality column is parity among LOTUS, BlendSQL, Palimpzest and SWAN (the model's verdicts bound it);
-the calls, cost and latency columns are the separation. Section 6 and the two benchmark sections after the settings
-say how to reproduce each table.
+Quality is at parity among LOTUS, BlendSQL, Palimpzest and SWAN (the model's verdicts bound it); calls, cost
+and latency are the separation. Section 6 and the two benchmark sections after the settings say how to
+reproduce each table.
 
 ## 1. Build
 
@@ -298,7 +283,7 @@ exact; latency then measures only the local machine).
 **PLOP and BlendSQL** on the same ten queries (`plop_queries/`, `blendsql_queries/`), scored the same way:
 
 ```sh
-python3 plop_movie.py                       # PLOP_BIN = the Morrila fork's shell (aisql-bench/PLOP_FORK.md: the three edits it needs)
+python3 plop_movie.py                       # PLOP_BIN = the Morrila fork's shell, default ../../../Morrila/build/release/duckdb (aisql-bench/PLOP_FORK.md)
 <python with blendsql> blendsql_movie.py    # e.g. ../../../SWAN_bench/.venv/bin/python
 ```
 
@@ -392,10 +377,10 @@ composition. The full list, with every default and the environment variable that
 ## Hybrid bench (agent_bench Q1–Q30): SWAN vs PLOP, LOTUS, BlendSQL, ThalamusDB and Palimpzest
 
 The 30 hybrid queries (relational plans with semantic operators over DataAgentBench and TPC-H data) are
-the benchmark introduced by the PLOP paper. PLOP itself is not publicly released, so it cannot be rerun
-here; its authors shared the queries and their execution results with us, and both are committed under
-`aisql-bench/AGENTBENCH/` (`aisql-bench/README.md` describes the ground truth). What you can run is SWAN and
-LOTUS and BlendSQL on the same queries and compare all four:
+the benchmark introduced by the PLOP paper; the queries and data ship in the authors' public fork,
+[Morrila](https://github.com/DMoRanSky/Morrila), and PLOP runs from it (`aisql-bench/PLOP_FORK.md`: clone,
+patch, build). Every system's queries and results are committed under `aisql-bench/AGENTBENCH/`
+(`aisql-bench/README.md` describes the ground truth). To rerun and compare:
 
 ```sh
 CACHE_ALIAS_CHAT=1 serve/start_stack.sh        # shared-verdict mode: SWAN's bare prompts key on the text PLOP sent, so
@@ -415,43 +400,23 @@ The SWAN translations are `swan_queries/Q*.sql` (`translate_to_swan.py` document
 tagged (`SWAN_TAG=my_run` → `results/my_run/` + `results/my_run_agentbench_results.json`) and scored by
 tag: `python3 eval_agentbench.py my_run plop`.
 
-The runner sends `ai_filter`'s prompt bare (`AI_PROMPT_VARIANT=plain`: no system message, PLOP's exact
-text), which is what lets the proxy's alias serve PLOP's recorded verdict to SWAN; without the alias, or
-with the default prompt variant, a run samples the model anew and its agreement with the ground truth also
-measures verdict variance (`aisql-bench/README.md` rule 7). Calls, cost and latency are comparable either way.
+The runner sends `ai_filter`'s prompt bare, so the proxy's alias serves PLOP's recorded verdict to SWAN; without
+it a run samples the model anew (`aisql-bench/README.md`, rule 7).
 
 ## SWAN 2.0: SWAN vs BlendSQL, LOTUS, PLOP and Palimpzest
 
-[SWAN 2.0](https://github.com/ZhaoFuheng/SWANBench) is a 120-question benchmark over four BIRD databases (scaled to
-~10k rows and duplicated): one AISQL query per question, which every system runs as written — SWAN-AISQL
-directly, BlendSQL and LOTUS through mechanical translations — so each system's planner decides the LLM
-calls. Its `scripts/run_swan_aisql.sh` clones and builds this repository, starts the serving stack and runs
-all 120 questions; the quality score follows SemBench (relative error for numbers, F1 for row sets).
-
-| system | quality (mean) | LLM calls | cost | latency (120 q) |
-|---|---|---|---|---|
-| LOTUS 1.2.4 | 0.760 | 69,204 | $4.04 | 4,101 s |
-| BlendSQL 0.1.27 | 0.761 | 59,620 | $4.95 | 4,608 s |
-| Palimpzest 1.5.3 (Abacus optimizer) | 0.766 | 70,933 | $9.85 | 2,991 s |
-| PLOP-DP (Morrila fork, our translation) | 0.690 | 25,604 | $1.72 | 10,431 s |
-| **SWAN-AISQL** | 0.755 | **19,695** | **$2.13** | **2,055 s** |
-
-gpt-5.6-luna for all five, zero-shot, 20 requests in flight, each system recorded fresh through an empty
-recording cache and replayed from the published cache with the recorded latencies, so the numbers
-reproduce. The benchmark also runs
-ThalamusDB, whose dialect expresses 69 of the 120 questions (its README has that row). The model's
-verdicts bound the quality column (the benchmark's results README gives the earlier recordings), so read
-the calls, cost and latency columns as the clear separation. Per-question answers, scores and seconds:
-`results/gpt-5.6-luna/` in that repository. The 120 queries, their oracle forms and the question list are
-also kept here under `aisql-bench/SWAN2/` (a copy of the benchmark's, refreshed by its `sync.sh`), so this
-repository holds every query behind its tables; the databases and the harness stay in the benchmark.
+[SWAN 2.0](https://github.com/ZhaoFuheng/SWANBench) is a 120-question benchmark over four BIRD databases: one AISQL
+query per question, which every system runs as written, so each system's planner decides the LLM calls. Its
+`scripts/run_swan_aisql.sh` clones and builds this repository, starts the serving stack and runs all 120
+questions; the table is in Results, and the per-question answers, scores and seconds are under
+`results/gpt-5.6-luna/` in that repository. The 120 queries are also kept here under `aisql-bench/SWAN2/`.
 
 ## Acknowledgements
 
-- The hybrid benchmark and PLOP's execution results were shared by the PLOP authors — Qiuyang Mang,
+- The hybrid benchmark and the Morrila fork are the work of the PLOP authors — Qiuyang Mang,
   Yufan Xiang, Hangrui Zhou, Runyuan He, Jiaxiang Yu, Hanchen Li, Aditya Parameswaran and Alvin Cheung,
-  *PLOP: Cost-Based Placement of Semantic Operators in Hybrid Query Plans* (arXiv:2604.09944, 2026).
-  Thank you for making the comparison possible.
+  *PLOP: Cost-Based Placement of Semantic Operators in Hybrid Query Plans* (arXiv:2604.09944, 2026),
+  who shared the queries with us before releasing them. Thank you for making the comparison possible.
 - SemBench's MOVIE / ECOMM / MMQA suites and its official LOTUS runners are used as published; the
   LOTUS baselines run on [LOTUS](https://github.com/lotus-data/lotus) unmodified.
 

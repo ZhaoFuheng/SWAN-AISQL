@@ -32,6 +32,7 @@ supplier_base AS (
 	JOIN (
 		SELECT DISTINCT ps_suppkey
 		FROM partsupp_base
+		ORDER BY ps_suppkey
 		LIMIT 70
 	) k ON k.ps_suppkey = s.s_suppkey
 	WHERE s.s_acctbal BETWEEN 2000 AND 8000
@@ -65,6 +66,7 @@ semantic_candidates AS (
 	GROUP BY
 		j.s_suppkey,
 		j.s_nationkey
+	ORDER BY j.s_suppkey, j.s_nationkey
 	LIMIT 50
 ),
 nation_context AS (

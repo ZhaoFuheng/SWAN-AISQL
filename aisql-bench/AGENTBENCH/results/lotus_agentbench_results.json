@@ -281,35 +281,35 @@
    "ran_at": "2026-10-02 18:27:35 MDT"
   },
   "Q29": {
-   "latency_s": 2.2,
-   "llm_calls": 36,
+   "latency_s": 6.4,
+   "llm_calls": 28,
    "llm_calls_fresh": 0,
-   "tokens": 7546,
-   "cost_usd": 0.00267,
-   "rows": 36,
+   "tokens": 5793,
+   "cost_usd": 0.002,
+   "rows": 28,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-10-15 22:18:26 MDT"
   },
   "Q30": {
-   "latency_s": 5.4,
+   "latency_s": 7.0,
    "llm_calls": 11,
    "llm_calls_fresh": 0,
-   "tokens": 2666,
-   "cost_usd": 0.00133,
+   "tokens": 2554,
+   "cost_usd": 0.0012,
    "rows": 3,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-10-15 22:18:26 MDT"
   }
  },
  "model": "gpt-5.6-luna",
  "concurrency": 20,
- "updated": "2026-10-02 18:27:35 MDT",
+ "updated": "2026-10-15 22:18:26 MDT",
  "total": {
   "n_queries": 30,
-  "latency_s": 1801.6,
-  "llm_calls": 25749,
-  "cost_usd": 2.8969,
-  "tokens": 6456600,
+  "latency_s": 1807.4,
+  "llm_calls": 25741,
+  "cost_usd": 2.8961,
+  "tokens": 6454735,
   "errors": 0
  }
 }

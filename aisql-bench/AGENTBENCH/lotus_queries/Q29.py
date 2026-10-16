@@ -16,8 +16,8 @@ def run(load, lm):
     ]
     partsupp_base = pb[["ps_partkey", "ps_suppkey", "ps_availqty", "ps_supplycost"]]
 
-    # DISTINCT ps_suppkey LIMIT 70 (no ORDER BY -> first 70 in current order)
-    keys = partsupp_base[["ps_suppkey"]].drop_duplicates().head(70)
+    # DISTINCT ps_suppkey ORDER BY ps_suppkey LIMIT 70
+    keys = partsupp_base[["ps_suppkey"]].drop_duplicates().sort_values("ps_suppkey", kind="stable").head(70)
     sb = supplier.merge(nation, left_on="s_nationkey", right_on="n_nationkey")
     sb = sb.merge(region, left_on="n_regionkey", right_on="r_regionkey")
     sb = sb.merge(keys, left_on="s_suppkey", right_on="ps_suppkey").drop(columns=["ps_suppkey"])
@@ -37,7 +37,7 @@ def run(load, lm):
         "ps_partkey", "ps_availqty", "ps_supplycost",
     ]]
 
-    # semantic_candidates: GROUP BY s_suppkey, s_nationkey with MIN aggregates, LIMIT 50
+    # semantic_candidates: GROUP BY s_suppkey, s_nationkey with MIN aggregates, ORDER BY s_suppkey, s_nationkey LIMIT 50
     scand = (
         joined.groupby(["s_suppkey", "s_nationkey"], sort=False, as_index=False)
         .agg(
@@ -45,11 +45,12 @@ def run(load, lm):
             ps_supplycost=("ps_supplycost", "min"),
             supplier_region_name=("supplier_region_name", "min"),
         )
+        .sort_values(["s_suppkey", "s_nationkey"], kind="stable")
         .head(50)
     )
 
-    # nation_context: nations of the first 5 distinct candidate nation keys
-    nk = scand[["s_nationkey"]].drop_duplicates().head(5)
+    # nation_context: the 5 smallest distinct candidate nation keys (ORDER BY s_nationkey LIMIT 5)
+    nk = scand[["s_nationkey"]].drop_duplicates().sort_values("s_nationkey", kind="stable").head(5)
     nc = nation.merge(region, left_on="n_regionkey", right_on="r_regionkey")
     nc = nc.merge(nk, left_on="n_nationkey", right_on="s_nationkey").drop(columns=["s_nationkey"])
     nc = nc[["n_nationkey", "n_name", "n_regionkey", "n_comment", "r_regionkey", "r_name", "r_comment"]]

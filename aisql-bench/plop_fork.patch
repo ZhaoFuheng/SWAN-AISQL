@@ -1,0 +1,87 @@
+diff --git a/src/common/llm_query.cpp b/src/common/llm_query.cpp
+index 6331c8c5..f88befc5 100644
+--- a/src/common/llm_query.cpp
++++ b/src/common/llm_query.cpp
+@@ -87,7 +87,9 @@ static std::atomic<int64_t> g_llm_cache_entries{0};
+ static std::atomic<int64_t> g_llm_cache_key_len_sum{0};
+ static std::atomic<int64_t> g_llm_cache_value_text_len_sum{0};
+ 
+-auto getLLMCallManagerInstance(const std::string &model_name = "gpt-5-mini") -> LLMCallManager& {
++auto getLLMCallManagerInstance(const std::string &requested_model = "gpt-5-mini") -> LLMCallManager& {
++    // LLM_MODEL overrides every caller's default (benchmark runs pin one model for all systems)
++    const std::string model_name = std::getenv("LLM_MODEL") ? std::string(std::getenv("LLM_MODEL")) : requested_model;
+     // Use a leaked singleton per model_name to avoid static destruction order
+     // issues where worker threads or mutexes may be accessed during teardown.
+     static unordered_map<std::string, LLMCallManager *> instances;
+@@ -111,7 +113,8 @@ LLMCallManager::LLMCallManager(const std::string &model_name) : model_name_(mode
+     logger_.set_log_path("llm_calls_" + model_name_ + ".log");
+ 
+     api_key_ = std::getenv("API_KEY") ? std::getenv("API_KEY") : "";
+-    llm_api_url_ = "https://api.openai.com/v1/responses";
++    // LLM_API_URL lets a recording/replay proxy stand in for the provider (benchmark runs)
++    llm_api_url_ = std::getenv("LLM_API_URL") ? std::getenv("LLM_API_URL") : "https://api.openai.com/v1/responses";
+     logger_.LLMLog("Initialized LLMCallManager with model: " + model_name_);
+ 
+     // Initialize token counter
+diff --git a/src/include/duckdb/common/llm_query.hpp b/src/include/duckdb/common/llm_query.hpp
+index 7c8a6815..4de1c0e5 100644
+--- a/src/include/duckdb/common/llm_query.hpp
++++ b/src/include/duckdb/common/llm_query.hpp
+@@ -129,13 +129,21 @@ struct LLMResponse {
+     
+ 
+     #define DEFAULT_BOOL_RETURN false
++    //! The Responses API puts the assistant message after a reasoning item when the model emits one
++    //! (output[1]) and first otherwise (output[0]); the answer text is wherever the message is.
++    auto extract_answer_text_() -> std::string {
++        std::string t = json_extract_string_from_keys_(text, {"output", "1", "content", "0", "text"});
++        if (t.empty()) {
++            t = json_extract_string_from_keys_(text, {"output", "0", "content", "0", "text"});
++        }
++        return t;
++    }
++
+     auto parse_to_bool_() -> bool {
+         if(!success){
+             return DEFAULT_BOOL_RETURN;
+         }
+-        std::string extracted_text = json_extract_string_from_keys_(
+-            text, {"output", "1", "content", "0", "text"}
+-        );
++        std::string extracted_text = extract_answer_text_();
+         if(extracted_text.empty()){
+             return DEFAULT_BOOL_RETURN;
+         }
+@@ -156,9 +164,7 @@ struct LLMResponse {
+         if(!success){
+             return DEFAULT_STRING_RETURN;
+         }
+-        std::string extracted_text = json_extract_string_from_keys_(
+-            text, {"output", "1", "content", "0", "text"}
+-        );
++        std::string extracted_text = extract_answer_text_();
+         if(extracted_text.empty()){
+             return DEFAULT_STRING_RETURN;
+         }
+@@ -170,9 +176,7 @@ struct LLMResponse {
+         if(!success){
+             return DEFAULT_INT_RETURN;
+         }
+-        std::string extracted_text = json_extract_string_from_keys_(
+-            text, {"output", "1", "content", "0", "text"}
+-        );
++        std::string extracted_text = extract_answer_text_();
+         if(extracted_text.empty()){
+             return DEFAULT_INT_RETURN;
+         }
+@@ -190,9 +194,7 @@ struct LLMResponse {
+         if(!success){
+             return DEFAULT_DOUBLE_RETURN;
+         }
+-        std::string extracted_text = json_extract_string_from_keys_(
+-            text, {"output", "1", "content", "0", "text"}
+-        );
++        std::string extracted_text = extract_answer_text_();
+         if(extracted_text.empty()){
+             return DEFAULT_DOUBLE_RETURN;
+         }
