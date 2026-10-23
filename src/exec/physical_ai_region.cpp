@@ -162,6 +162,7 @@ static void AIRegionEvaluateInline(const PhysicalAIRegion &op, ClientContext &co
 	auto &fn = op.eval_call->Cast<BoundFunctionExpression>();
 	AIRegionEmitUnfired(context, st, [&](DataChunk &factorized, idx_t base) {
 		vector<Value> values;
+		AIScalarPeerRowsScope peers(static_cast<double>(st.map->DistinctCount()) - 1.0);
 		AIDedupFireWaveScalarFactorized(context, fn, factorized, values);
 		for (idx_t j = 0; j < values.size(); j++) {
 			st.rep_decided[base + j] = 1;
@@ -187,7 +188,9 @@ static void AIRegionDispatch(const PhysicalAIRegion &op, ClientContext &context,
 			for (idx_t c = 0; c < factorized.ColumnCount(); c++) {
 				row.push_back(factorized.data[c].GetValue(j));
 			}
-			st.dispatcher->Submit(base + j, [&fn, &context, types, row]() {
+			// the distinct inputs known so far besides this one: the scalar call's head is shared by them
+			const double peers = static_cast<double>(st.map->DistinctCount()) - 1.0;
+			st.dispatcher->Submit(base + j, [&fn, &context, types, row, peers]() {
 				DataChunk one;
 				one.Initialize(Allocator::DefaultAllocator(), types);
 				one.SetChildCardinality(1);
@@ -195,6 +198,7 @@ static void AIRegionDispatch(const PhysicalAIRegion &op, ClientContext &context,
 					one.data[c].SetValue(0, row[c]);
 				}
 				vector<Value> values;
+				AIScalarPeerRowsScope scope(peers);
 				AIDedupFireWaveScalarFactorized(context, fn, one, values);
 				return values[0];
 			});

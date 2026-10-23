@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Palimpzest (under its Abacus optimizer) on SemBench ECOMM sf_500 -- SemBench's own Palimpzest programs
-(palimpzest_queries/qN.py, copied from the SemBench repository; q1-q13, SemBench wrote none for q14) on the
+(palimpzest_queries/qN.py, copied from the SemBench repository for q1-q13; q14 is OUR program, SemBench wrote none) on the
 same data, model, proxy and metrics (ecomm_common) as swan_ecomm.py and lotus_ecomm.py, under SemBench's
 Palimpzest settings with the optimizer on (../palimpzest_common.py). Palimpzest takes images, so this is a
 text-and-image suite.
@@ -24,7 +24,7 @@ import palimpzest_common as P  # noqa: E402
 from ecomm_common import ARI_QUERIES, gt, score  # noqa: E402
 
 TAG = os.environ.get("SWAN_TAG", "")
-QUERIES = [f"q{i}" for i in range(1, 14)]
+QUERIES = [f"q{i}" for i in range(1, 15)]
 DATA = os.path.join(HERE, "data", "sf_500")
 
 

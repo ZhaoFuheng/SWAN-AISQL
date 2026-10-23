@@ -72,6 +72,32 @@ struct ReferenceDemand {
 	unique_ptr<LogicalOperator> *neighbour = nullptr;
 };
 
+//! Whether a join needs `side`'s rows beyond those whose key the other side supplies: its unmatched rows
+//! survive (a LEFT JOIN's left, an ANTI's left, a FULL OUTER's both), or they decide the result another
+//! way -- a MARK join's right side: a NULL key there turns an unmatched left row's mark from false to NULL
+//! (`x NOT IN (SELECT key FROM c)`), so pruning the right to the matching keys changes the answer. A
+//! reference on such a side yields no demand. The other side of a one-sided join, and both sides of an
+//! inner or semi join, need only the rows whose key the neighbour supplies.
+static bool JoinKeepsUnmatched(JoinType type, idx_t side) {
+	switch (type) {
+	case JoinType::INNER:
+	case JoinType::SEMI:
+	case JoinType::RIGHT_SEMI:
+		return false;
+	case JoinType::MARK:
+		return true;
+	case JoinType::LEFT:
+	case JoinType::ANTI:
+	case JoinType::SINGLE:
+		return side == 0;
+	case JoinType::RIGHT:
+	case JoinType::RIGHT_ANTI:
+		return side == 1;
+	default:
+		return true; // FULL OUTER, anything new
+	}
+}
+
 //! Every reference must contribute, and on the same column. A reference that consumes the CTE
 //! unrestricted makes the union universal, and pruning by a universal demand is not pruning -- so
 //! the whole reduction is abandoned rather than applied to a subset of the references, which would
@@ -106,6 +132,9 @@ static bool GatherDemands(unique_ptr<LogicalOperator> &main, TableIndex cte_inde
 						continue;
 					}
 					const auto binding = sides[s]->Cast<BoundColumnRefExpression>().Binding();
+					if (JoinKeepsUnmatched(join.join_type, s)) {
+						continue; // its unmatched rows survive: the neighbour's keys are not its demand
+					}
 					for (idx_t r = 0; r < reference_tables.size(); r++) {
 						if (binding.table_index != reference_tables[r] || satisfied[r]) {
 							continue;

@@ -1,0 +1,36 @@
+# name: test/sql/functions/wrapped_ranged_score.test
+# description: A wrapped ranged ai_score leaf (coalesce / IS NULL around ai_score(x, crit, lo, hi)) keeps its range
+# group: [functions]
+
+#              in the fold: the answer is clamped and rounded before the wrapper runs, exactly as the scalar does.
+#              Folded (beside an ai_filter leaf) and native answers must agree on every row.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE t AS SELECT i AS id, 'item ' || i AS x, 'y' || i AS b FROM range(1, 13) r(i);
+
+query I
+SELECT (SELECT count(*) FROM t WHERE coalesce(ai_score(x, 'quality', 1, 5), 0) >= 3 AND ai_filter('[p=100] ' || b))
+     = (SELECT count(*) FROM t WHERE coalesce(ai_score(x, 'quality', 1, 5), 0) >= 3);
+----
+true
+
+query I
+SELECT (SELECT count(*) FROM t WHERE coalesce(ai_score(x, 'quality', 1, 5), 0) = 3 AND ai_filter('[p=100] ' || b))
+     = (SELECT count(*) FROM t WHERE coalesce(ai_score(x, 'quality', 1, 5), 0) = 3);
+----
+true
+
+# the plain ranged comparison still folds with its range
+query I
+SELECT (SELECT count(*) FROM t WHERE ai_score(x, 'quality', 1, 5) >= 3 AND ai_filter('[p=100] ' || b))
+     = (SELECT count(*) FROM t WHERE ai_score(x, 'quality', 1, 5) >= 3);
+----
+true
+
+statement ok
+CALL ai_mock_stop();

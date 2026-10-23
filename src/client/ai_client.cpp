@@ -56,12 +56,32 @@ static uint64_t &NextQueryId() {
 	static uint64_t value = 1;
 	return value;
 }
+// A query index carries the generation of the records it was taken from in its upper 32 bits:
+// ai_usage_reset() clears the records and bumps the generation, and a request that outlives the reset (a
+// hedge's loser, a detached retry) then books into a discard record instead of a cleared or reused slot.
+static uint64_t &UsageGeneration() {
+	static uint64_t value = 0;
+	return value;
+}
+static idx_t TagQueryIndex(idx_t index) {
+	return (UsageGeneration() << 32) | (index & 0xFFFFFFFFULL);
+}
+// Caller must hold UsageMutex(). The record a tagged index names, or the discard record when its
+// generation has been reset away.
+static AIQueryUsage &UsageRecord(idx_t tagged) {
+	static AIQueryUsage discard;
+	const idx_t index = tagged & 0xFFFFFFFFULL;
+	if ((tagged >> 32) != UsageGeneration() || index >= Queries().size()) {
+		return discard;
+	}
+	return Queries()[index];
+}
 
 // Caller must hold UsageMutex().
 static idx_t GetOrCreateQueryIndex(const string &query_text) {
 	auto it = QueryIndex().find(query_text);
 	if (it != QueryIndex().end()) {
-		return it->second;
+		return TagQueryIndex(it->second);
 	}
 	const idx_t index = Queries().size();
 	AIQueryUsage record;
@@ -69,7 +89,7 @@ static idx_t GetOrCreateQueryIndex(const string &query_text) {
 	record.query_text = query_text;
 	Queries().push_back(std::move(record));
 	QueryIndex().emplace(query_text, index);
-	return index;
+	return TagQueryIndex(index);
 }
 
 //===--------------------------------------------------------------------===//
@@ -86,6 +106,10 @@ static AIConfig BuildDefaultConfig() {
 		c.base_url = GetEnvOr("AI_PROXY_URL", "http://localhost:4000");
 		c.model = GetEnvOr("AI_MODEL", "gpt-5.6-luna");
 		c.reasoning_effort = GetEnvOr("AI_REASONING_EFFORT", "");
+		const string api_env = GetEnvOr("AI_API", "auto");
+		c.api = api_env == "chat" ? "chat" : api_env == "responses" ? "responses" : "auto";
+		c.price_cache_write_mult = std::atof(GetEnvOr("AI_PRICE_CACHE_WRITE_MULT", "1.25").c_str());
+		c.price_cache_read_mult = std::atof(GetEnvOr("AI_PRICE_CACHE_READ_MULT", "0.1").c_str());
 		c.hedge = GetEnvOr("AI_HEDGE", "on") != "off" && GetEnvOr("AI_HEDGE", "on") != "0";
 		c.prefix_cache = GetEnvOr("AI_PREFIX_CACHE", "on") != "off";
 		c.api_key = GetEnvOr("AI_API_KEY", "");
@@ -267,6 +291,49 @@ static bool ParseChatContent(const string &text, string &out) {
 	return ok;
 }
 
+//! Extract the assistant message text from a Responses API reply: the first output item of type
+//! "message" (a reasoning item may precede it), its first "output_text" content part.
+static bool ParseResponsesContent(const string &text, string &out) {
+	yyjson_doc *doc = yyjson_read(text.c_str(), text.size(), 0);
+	if (!doc) {
+		return false;
+	}
+	bool ok = false;
+	yyjson_val *root = yyjson_doc_get_root(doc);
+	yyjson_val *output = root && yyjson_is_obj(root) ? yyjson_obj_get(root, "output") : nullptr;
+	if (output && yyjson_is_arr(output)) {
+		size_t oidx, omax;
+		yyjson_val *item;
+		yyjson_arr_foreach(output, oidx, omax, item) {
+			yyjson_val *type = yyjson_is_obj(item) ? yyjson_obj_get(item, "type") : nullptr;
+			if (!type || !yyjson_is_str(type) || string(yyjson_get_str(type)) != "message") {
+				continue;
+			}
+			yyjson_val *content = yyjson_obj_get(item, "content");
+			if (!content || !yyjson_is_arr(content)) {
+				continue;
+			}
+			size_t cidx, cmax;
+			yyjson_val *part;
+			yyjson_arr_foreach(content, cidx, cmax, part) {
+				yyjson_val *ptype = yyjson_is_obj(part) ? yyjson_obj_get(part, "type") : nullptr;
+				yyjson_val *ptext = yyjson_is_obj(part) ? yyjson_obj_get(part, "text") : nullptr;
+				if (ptype && yyjson_is_str(ptype) && string(yyjson_get_str(ptype)) == "output_text" && ptext &&
+				    yyjson_is_str(ptext)) {
+					out.assign(yyjson_get_str(ptext), yyjson_get_len(ptext));
+					ok = true;
+					break;
+				}
+			}
+			if (ok) {
+				break;
+			}
+		}
+	}
+	yyjson_doc_free(doc);
+	return ok;
+}
+
 bool AIParseBoolField(const string &content, const char *field, bool &out) {
 	yyjson_doc *doc = yyjson_read(content.c_str(), content.size(), 0);
 	if (!doc) {
@@ -399,11 +466,142 @@ double AICalibratedBytesPerToken() {
 	return TokratioSamples() >= 20 ? TokratioEma() : 4.0;
 }
 
+//===--------------------------------------------------------------------===//
+// Image tokens: what the provider counts for one image is a property of the image's pixels and the
+// model's tiling, not of the file's bytes (an ECOMM product photo of 190 KB is ~1,885 tokens). The
+// gate needs a count, so it is learned from usage: every answered single-image request contributes
+// (input tokens - the text's share) to an EMA. Before any sample the estimate is 1,024, which lets
+// an image prefix attempt the cache (a too-short prefix costs nothing at the provider).
+//===--------------------------------------------------------------------===//
+static double &ImageTokensEma() {
+	static double value = 1024.0;
+	return value;
+}
+static idx_t &ImageTokensSamples() {
+	static idx_t value = 0;
+	return value;
+}
+
+//! Count the image blocks in a request body and the bytes their data URIs occupy.
+static void ScanImageBlocks(const string &body, idx_t &images, size_t &payload_bytes) {
+	images = 0;
+	payload_bytes = 0;
+	size_t pos = 0;
+	while ((pos = body.find("\"data:image/", pos)) != string::npos) {
+		const size_t end = body.find('"', pos + 1);
+		if (end == string::npos) {
+			break;
+		}
+		images++;
+		payload_bytes += end - pos;
+		pos = end + 1;
+	}
+}
+
+static void ObserveImageTokens(const string &body, uint64_t prompt_tokens) {
+	idx_t images;
+	size_t payload;
+	ScanImageBlocks(body, images, payload);
+	if (images != 1 || prompt_tokens < 50 || payload >= body.size()) {
+		return; // one image per request keeps the attribution exact; the mock's 8 tokens are skipped
+	}
+	const double text_tokens = static_cast<double>(body.size() - payload) / AICalibratedBytesPerToken();
+	const double image_tokens = static_cast<double>(prompt_tokens) - text_tokens;
+	if (image_tokens < 16.0 || image_tokens > 65536.0) {
+		return;
+	}
+	std::lock_guard<std::mutex> lock(TokratioMutex());
+	ImageTokensEma() = ImageTokensSamples() == 0 ? image_tokens : ImageTokensEma() * 0.875 + image_tokens * 0.125;
+	ImageTokensSamples()++;
+}
+
+double AICalibratedImageTokens() {
+	std::lock_guard<std::mutex> lock(TokratioMutex());
+	return ImageTokensEma();
+}
+
+string AIImagePrefixSpan(const string &prompt) {
+	if (prompt.empty() || prompt[0] != AI_IMAGE_OPEN) {
+		return string();
+	}
+	const size_t close = prompt.find(AI_IMAGE_CLOSE, 1);
+	if (close == string::npos) {
+		return string();
+	}
+	return prompt.substr(0, close + 1);
+}
+
+static double &AIScalarPeerRowsSlot() {
+	static thread_local double slot = -1.0;
+	return slot;
+}
+double AIScalarPeerRows() {
+	return AIScalarPeerRowsSlot();
+}
+AIScalarPeerRowsScope::AIScalarPeerRowsScope(double peers) : saved(AIScalarPeerRowsSlot()) {
+	AIScalarPeerRowsSlot() = peers;
+}
+AIScalarPeerRowsScope::~AIScalarPeerRowsScope() {
+	AIScalarPeerRowsSlot() = saved;
+}
+
+void AIDeclareLeadingSpan(AIRequest &request, const AIConfig &config, const string &span, double expected_reads) {
+	if (!request.prompt_prefix.empty() || !config.prefix_cache || config.prompt_variant_plain) {
+		return; // an operator-declared prefix (the factor graph's) stays as declared
+	}
+	if (span.empty() || span.size() >= request.prompt.size() || request.prompt.compare(0, span.size(), span) != 0) {
+		return; // no leading input, or nothing after it: no suffix to vary
+	}
+	request.prompt_prefix = span;
+	request.prompt = request.prompt.substr(span.size());
+	request.expected_reads = expected_reads;
+}
+
+//! Size gate: the provider's 1,024-visible-token minimum, biased toward attempting (a too-short span is
+//! ignored at zero cost; a skipped long one forfeits the read discount).
+static constexpr double PREFIX_MIN_TOKENS = 900.0;
+static double AIPrefixTokenEstimate(const string &span);
+
+void AIDeclareLeadingSpans(AIRequest &request, const AIConfig &config, const string &head, double head_reads,
+                           const string &span, double span_reads) {
+	// a head over the minimum is certain reuse (every row); the input span's reuse is the declarer's estimate
+	if (!head.empty() && AIPrefixTokenEstimate(head) >= PREFIX_MIN_TOKENS) {
+		AIDeclareLeadingSpan(request, config, head, head_reads);
+		return;
+	}
+	AIDeclareLeadingSpan(request, config, span, span_reads);
+}
+
+//! Provider-token estimate of a prompt span for the prefix-cache gate: its text at the calibrated
+//! bytes/token ratio plus each ai_image() reference at the calibrated per-image count.
+static double AIPrefixTokenEstimate(const string &span) {
+	double text_bytes = 0;
+	double images = 0;
+	size_t i = 0;
+	while (i < span.size()) {
+		const size_t open = span.find(AI_IMAGE_OPEN, i);
+		if (open == string::npos) {
+			text_bytes += static_cast<double>(span.size() - i);
+			break;
+		}
+		text_bytes += static_cast<double>(open - i);
+		const size_t close = span.find(AI_IMAGE_CLOSE, open + 1);
+		if (close == string::npos) {
+			break;
+		}
+		images += 1.0;
+		i = close + 1;
+	}
+	return text_bytes / AICalibratedBytesPerToken() + images * AICalibratedImageTokens();
+}
+
 //! `typesafe`: the body is a System One response (usage.input_tokens/output_tokens, priced per
 //! input token from typesafe_price_input since no proxy cost header exists for it).
 static void AccountUsage(idx_t query_index, const string &body, const string &cost_header, const AIConfig &config,
-                         bool typesafe = false) {
+                         bool typesafe = false, uint64_t *input_out = nullptr, uint64_t *cached_out = nullptr,
+                         uint64_t *written_out = nullptr) {
 	uint64_t input_tokens = 0, output_tokens = 0, cached_tokens = 0, reasoning_tokens = 0, total_tokens = 0;
+	uint64_t cache_write_tokens = 0;
 	yyjson_doc *doc = yyjson_read(body.c_str(), body.size(), 0);
 	if (doc) {
 		yyjson_val *root = yyjson_doc_get_root(doc);
@@ -415,11 +613,29 @@ static void AccountUsage(idx_t query_index, const string &body, const string &co
 					out = static_cast<uint64_t>(yyjson_get_num(v));
 				}
 			};
-			num_field(usage, typesafe ? "input_tokens" : "prompt_tokens", input_tokens);
-			num_field(usage, typesafe ? "output_tokens" : "completion_tokens", output_tokens);
+			// chat completions report prompt_/completion_tokens, the Responses API and System One
+			// input_/output_tokens; the details objects follow the same naming
+			num_field(usage, "prompt_tokens", input_tokens);
+			if (input_tokens == 0) {
+				num_field(usage, "input_tokens", input_tokens);
+			}
+			num_field(usage, "completion_tokens", output_tokens);
+			if (output_tokens == 0) {
+				num_field(usage, "output_tokens", output_tokens);
+			}
 			num_field(usage, "total_tokens", total_tokens);
 			num_field(yyjson_obj_get(usage, "prompt_tokens_details"), "cached_tokens", cached_tokens);
+			if (cached_tokens == 0) {
+				num_field(yyjson_obj_get(usage, "input_tokens_details"), "cached_tokens", cached_tokens);
+			}
 			num_field(yyjson_obj_get(usage, "completion_tokens_details"), "reasoning_tokens", reasoning_tokens);
+			if (reasoning_tokens == 0) {
+				num_field(yyjson_obj_get(usage, "output_tokens_details"), "reasoning_tokens", reasoning_tokens);
+			}
+			num_field(yyjson_obj_get(usage, "prompt_tokens_details"), "cache_write_tokens", cache_write_tokens);
+			if (cache_write_tokens == 0) {
+				num_field(yyjson_obj_get(usage, "input_tokens_details"), "cache_write_tokens", cache_write_tokens);
+			}
 		}
 		yyjson_doc_free(doc);
 	}
@@ -442,18 +658,32 @@ static void AccountUsage(idx_t query_index, const string &body, const string &co
 	    (config.price_input_per_mtok > 0 || config.price_output_per_mtok > 0 || config.price_cached_per_mtok > 0)) {
 		const double cached_price =
 		    config.price_cached_per_mtok > 0 ? config.price_cached_per_mtok : config.price_input_per_mtok;
-		const uint64_t uncached_input = input_tokens > cached_tokens ? input_tokens - cached_tokens : 0;
+		const uint64_t special = cached_tokens + cache_write_tokens;
+		const uint64_t uncached_input = input_tokens > special ? input_tokens - special : 0;
 		cost = (static_cast<double>(uncached_input) / 1e6) * config.price_input_per_mtok +
 		       (static_cast<double>(cached_tokens) / 1e6) * cached_price +
+		       (static_cast<double>(cache_write_tokens) / 1e6) * config.price_input_per_mtok *
+		           config.price_cache_write_mult +
 		       (static_cast<double>(output_tokens) / 1e6) * config.price_output_per_mtok;
 	}
 
 	ObserveTokenRatio(body, input_tokens);
+	ObserveImageTokens(body, input_tokens);
+	if (input_out) {
+		*input_out = input_tokens;
+	}
+	if (cached_out) {
+		*cached_out = cached_tokens;
+	}
+	if (written_out) {
+		*written_out = cache_write_tokens;
+	}
 	std::lock_guard<std::mutex> lock(UsageMutex());
-	auto &record = Queries()[query_index];
+	auto &record = UsageRecord(query_index);
 	record.llm_calls += 1;
 	record.input_tokens += input_tokens;
 	record.cached_tokens += cached_tokens;
+	record.cache_write_tokens += cache_write_tokens;
 	record.output_tokens += output_tokens;
 	record.reasoning_tokens += reasoning_tokens;
 	record.total_tokens += total_tokens;
@@ -565,6 +795,30 @@ static void EmitContentBlocks(string &arr, bool &first, const string &prompt) {
 }
 
 //! Set when an endpoint answered HTTP 400 to the temperature parameter: later requests leave it out.
+//! Latched when the endpoint rejects the explicit prompt-cache fields (a 400 naming prompt_cache: a server
+//! that is OpenAI-compatible in shape but not in prompt caching): the rest of the process sends plain bodies,
+//! no cache options, no breakpoints, no parking. Reset with the config (ai_mock_start).
+//! The endpoint has no /v1/responses (404/405 once): every request takes Chat Completions from then on.
+static std::atomic<bool> &ResponsesUnsupported() {
+	static std::atomic<bool> value {false};
+	return value;
+}
+
+std::atomic<bool> &AIDebugKnobsEnabled() {
+	static std::atomic<bool> value {false};
+	return value;
+}
+
+static std::atomic<bool> &CacheOptionsRejected() {
+	static std::atomic<bool> value {false};
+	return value;
+}
+//! The explicit cache fields go out only when the client manages the provider cache: not in the plain prompt
+//! variant, not with ai_prefix_cache off (the provider's own default behaviour then), not once rejected.
+static bool EmitCacheOptions(const AIConfig &config) {
+	return !config.prompt_variant_plain && config.prefix_cache && !CacheOptionsRejected().load();
+}
+
 static std::atomic<bool> &TemperatureRejected() {
 	static std::atomic<bool> value {false};
 	return value;
@@ -597,7 +851,7 @@ static string BuildRequestBody(const AIConfig &config, const AIRequest &request)
 	if (!first) {
 		body += ",";
 	}
-	if (request.emit_breakpoint && !request.prompt_prefix.empty()) {
+	if (request.emit_breakpoint && !request.prompt_prefix.empty() && EmitCacheOptions(config)) {
 		body +=
 		    "{\"role\":\"user\",\"content\":" + BuildUserContentPrefixed(request.prompt_prefix, request.prompt) + "}";
 	} else if (!request.prompt_prefix.empty()) {
@@ -606,12 +860,105 @@ static string BuildRequestBody(const AIConfig &config, const AIRequest &request)
 		body += "{\"role\":\"user\",\"content\":" + BuildUserContent(request.prompt) + "}";
 	}
 	body += "]";
-	if (request.emit_breakpoint && !request.prompt_prefix.empty()) {
+	// Explicit mode on EVERY request, breakpoint or not: under automatic caching the provider writes every
+	// prompt over its minimum at the write price (1.25x) and, for a one-off prompt, never reads it back
+	// (measured: a 1,530-token prompt sent twice with different claims wrote 1,527 tokens both times and
+	// served none). In explicit mode only the spans we mark are written.
+	if (EmitCacheOptions(config)) {
 		body += ",\"prompt_cache_options\":{\"mode\":\"explicit\"}";
 	}
 	if (!request.json_schema.empty()) {
 		const string name = request.schema_name.empty() ? "response" : request.schema_name;
 		body += ",\"response_format\":{\"type\":\"json_schema\",\"json_schema\":{\"name\":\"" + AIJsonEscape(name) +
+		        "\",\"strict\":true,\"schema\":" + request.json_schema + "}}";
+	}
+	body += "}";
+	return body;
+}
+
+//! Responses API content parts: input_text / input_image (the image url is a plain string there).
+static void EmitInputBlocks(vector<string> &blocks, const string &prompt) {
+	auto emit_text = [&](const string &t) {
+		if (!t.empty()) {
+			blocks.push_back("{\"type\":\"input_text\",\"text\":\"" + AIJsonEscape(t) + "\"}");
+		}
+	};
+	size_t i = 0;
+	while (i < prompt.size()) {
+		const size_t open = prompt.find(AI_IMAGE_OPEN, i);
+		if (open == string::npos) {
+			emit_text(prompt.substr(i));
+			break;
+		}
+		emit_text(prompt.substr(i, open - i));
+		const size_t close = prompt.find(AI_IMAGE_CLOSE, open + 1);
+		if (close == string::npos) {
+			emit_text(prompt.substr(open + 1));
+			break;
+		}
+		blocks.push_back("{\"type\":\"input_image\",\"image_url\":\"" +
+		                 AIJsonEscape(BuildImageUrl(prompt.substr(open + 1, close - open - 1))) + "\"}");
+		i = close + 1;
+	}
+}
+
+//! A user item's "content" for the Responses API: a plain string when there is no image and no
+//! breakpoint (a bare prompt stays one string, which cross-engine aliases key on), else the block
+//! array. With a breakpoint the prefix's LAST block carries it -- text or image alike, no carrier
+//! block: that is what makes an image-ending prefix cacheable on this API.
+static void MarkBreakpoint(vector<string> &blocks) {
+	if (!blocks.empty()) {
+		string &last = blocks.back();
+		last.insert(last.size() - 1, ",\"prompt_cache_breakpoint\":{\"mode\":\"explicit\"}");
+	}
+}
+
+static string BuildInputContent(const AIConfig &config, const AIRequest &request) {
+	const bool split = request.emit_breakpoint && !request.prompt_prefix.empty() && EmitCacheOptions(config);
+	const string whole = request.prompt_prefix + request.prompt;
+	if (!split && !AITextHasImage(whole)) {
+		return "\"" + AIJsonEscape(whole) + "\"";
+	}
+	// [declared span (bp)] [suffix]: one breakpoint, on the last block of the span
+	vector<string> blocks;
+	if (split) {
+		EmitInputBlocks(blocks, request.prompt_prefix);
+		MarkBreakpoint(blocks);
+		EmitInputBlocks(blocks, request.prompt);
+	} else {
+		EmitInputBlocks(blocks, whole);
+	}
+	string arr = "[";
+	for (idx_t b = 0; b < blocks.size(); b++) {
+		arr += (b ? "," : "") + blocks[b];
+	}
+	return arr + "]";
+}
+
+//! The same request as a Responses API body (POST /v1/responses): instructions = the system
+//! prompt, input = history turns + the user item, text.format = the JSON schema, store=false (the
+//! provider would otherwise keep every response for 30 days).
+static string BuildResponsesBody(const AIConfig &config, const AIRequest &request) {
+	string body = "{\"model\":\"" + AIJsonEscape(config.model) + "\",\"store\":false," +
+	              (TemperatureRejected().load() ? string() : string("\"temperature\":0,"));
+	if (!config.reasoning_effort.empty()) {
+		body += "\"reasoning\":{\"effort\":\"" + AIJsonEscape(config.reasoning_effort) + "\"},";
+	}
+	if (!request.system_prompt.empty()) {
+		body += "\"instructions\":\"" + AIJsonEscape(request.system_prompt) + "\",";
+	}
+	body += "\"input\":[";
+	for (const auto &turn : request.history) {
+		body += "{\"role\":\"user\",\"content\":\"" + AIJsonEscape(turn.first) + "\"},";
+		body += "{\"role\":\"assistant\",\"content\":\"" + AIJsonEscape(turn.second) + "\"},";
+	}
+	body += "{\"role\":\"user\",\"content\":" + BuildInputContent(config, request) + "}]";
+	if (EmitCacheOptions(config)) { // explicit mode whenever the client manages the cache: see BuildRequestBody
+		body += ",\"prompt_cache_options\":{\"mode\":\"explicit\"}";
+	}
+	if (!request.json_schema.empty()) {
+		const string name = request.schema_name.empty() ? "response" : request.schema_name;
+		body += ",\"text\":{\"format\":{\"type\":\"json_schema\",\"name\":\"" + AIJsonEscape(name) +
 		        "\",\"strict\":true,\"schema\":" + request.json_schema + "}}";
 	}
 	body += "}";
@@ -796,11 +1143,19 @@ static duckdb::unique_ptr<aisql_http::Client> NewConn(const string &url, const A
 
 //! RAII lease on a pooled connection. `reused` tells the caller whether a failed Post may just be
 //! a stale keep-alive socket (retry on a fresh one) or a real transport error.
+//! A pooled client keeps the TLS policy it was created with (verification flag, CA bundle), so the pool is
+//! keyed on the URL AND that policy: a connection that verifies never inherits a client created with
+//! verification off for the same URL, and vice versa.
+static string ConnPoolKey(const string &url, const AIConfig &config) {
+	return url + "\x1f" + config.ca_cert_file + "\x1f" + (config.tls_verify ? "1" : "0");
+}
+
 struct ConnLease {
-	ConnLease(const string &url_p, const AIConfig &config_p) : url(url_p), config(config_p) {
+	ConnLease(const string &url_p, const AIConfig &config_p)
+	    : url(url_p), config(config_p), pool_key(ConnPoolKey(url_p, config_p)) {
 		{
 			std::lock_guard<std::mutex> lock(ConnPoolMutex());
-			auto it = ConnPool().find(url);
+			auto it = ConnPool().find(pool_key);
 			if (it != ConnPool().end() && !it->second.empty()) {
 				client = std::move(it->second.back());
 				it->second.pop_back();
@@ -832,7 +1187,7 @@ struct ConnLease {
 		}
 		try {
 			std::lock_guard<std::mutex> lock(ConnPoolMutex());
-			auto &idle = ConnPool()[url];
+			auto &idle = ConnPool()[pool_key];
 			if (idle.size() < CONN_POOL_MAX_IDLE) {
 				idle.push_back(std::move(client));
 			}
@@ -842,6 +1197,7 @@ struct ConnLease {
 	}
 	string url;
 	const AIConfig &config;
+	string pool_key;
 	duckdb::unique_ptr<aisql_http::Client> client;
 	bool reused = false;
 	bool healthy = false; // set by the caller once an HTTP exchange completed on this socket
@@ -888,8 +1244,17 @@ static AIResult DoSingleRequest(const AIConfig &config, const AIRequest &request
 	    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
 	        .count();
 	headers.emplace("X-Request-Start-Ms", std::to_string(start_ms));
-	const string body = typesafe ? BuildSystemOneBody(config, request) : BuildRequestBody(config, request);
-	const char *path = typesafe ? "/v1/systemone" : "/v1/chat/completions";
+	// auto: the Responses API only for a request that writes or reads a declared span (the lifecycle set
+	// emit_breakpoint on this dispatch copy); every plain request takes the faster Chat Completions path
+	bool responses = !typesafe && !ResponsesUnsupported().load() &&
+	                 (config.api == "responses" ||
+	                  (config.api == "auto" && request.emit_breakpoint && !request.prompt_prefix.empty()));
+	// what THIS body carries decides the retries below, not a latch another thread may flip meanwhile
+	const bool carried_cache_fields = !typesafe && EmitCacheOptions(config);
+	string body = typesafe    ? BuildSystemOneBody(config, request)
+	              : responses ? BuildResponsesBody(config, request)
+	                          : BuildRequestBody(config, request);
+	const char *path = typesafe ? "/v1/systemone" : responses ? "/v1/responses" : "/v1/chat/completions";
 	auto response = lease.client->Post(path, headers, body, "application/json");
 	if (!response && lease.reused) {
 		// A pooled socket the peer closed while idle: retry once on a fresh connection so the
@@ -903,13 +1268,41 @@ static AIResult DoSingleRequest(const AIConfig &config, const AIRequest &request
 		return result;
 	}
 	lease.healthy = true; // full HTTP exchange completed: socket reusable regardless of status
+	if (responses && (response->status == 404 || response->status == 405)) {
+		// An OpenAI-compatible endpoint without the Responses API (vLLM, Ollama, an older gateway): Chat
+		// Completions for this request and every later one. The prefix lifecycle keeps declaring spans; the
+		// chat body carries the same cache fields, and the read feedback decides what the provider honours.
+		ResponsesUnsupported().store(true);
+		responses = false;
+		path = "/v1/chat/completions";
+		body = BuildRequestBody(config, request);
+		response = lease.client->Post(path, headers, body, "application/json");
+		if (!response) {
+			outcome = AICallOutcome::TRANSIENT;
+			error = "no response (" + aisql_http::to_string(response.error()) + ")";
+			return result;
+		}
+	}
 	if (response->status == 400 && !typesafe && body.find("\"temperature\"") != string::npos &&
 	    response->body.find("temperature") != string::npos) {
 		// The model takes no temperature parameter: drop it process-wide and send this request again. Every
 		// request of the first wave meets this 400 at once, so each one that carried the parameter retries
 		// (not only the one that flipped the latch).
 		TemperatureRejected().store(true);
-		const string retry_body = BuildRequestBody(config, request);
+		const string retry_body = responses ? BuildResponsesBody(config, request) : BuildRequestBody(config, request);
+		response = lease.client->Post(path, headers, retry_body, "application/json");
+		if (!response) {
+			outcome = AICallOutcome::TRANSIENT;
+			error = "no response (" + aisql_http::to_string(response.error()) + ")";
+			return result;
+		}
+	}
+	if (response->status == 400 && carried_cache_fields && response->body.find("prompt_cache") != string::npos) {
+		// The endpoint does not know the explicit prompt-cache fields: send plain bodies for the rest of the
+		// process. Every request of the first wave meets this 400 at once, so the retry is decided by what
+		// THIS request carried (its body), not by whether another thread has latched already.
+		CacheOptionsRejected().store(true);
+		const string retry_body = responses ? BuildResponsesBody(config, request) : BuildRequestBody(config, request);
 		response = lease.client->Post(path, headers, retry_body, "application/json");
 		if (!response) {
 			outcome = AICallOutcome::TRANSIENT;
@@ -936,14 +1329,16 @@ static AIResult DoSingleRequest(const AIConfig &config, const AIRequest &request
 		return result; // other 4xx: permanent, do not retry
 	}
 	string content;
-	const bool parsed = typesafe ? ParseSystemOneAnswer(response->body, config, request, content)
-	                             : ParseChatContent(response->body, content);
+	const bool parsed = typesafe    ? ParseSystemOneAnswer(response->body, config, request, content)
+	                    : responses ? ParseResponsesContent(response->body, content)
+	                                : ParseChatContent(response->body, content);
 	if (!parsed) {
 		outcome = AICallOutcome::TRANSIENT; // 2xx but unparseable (e.g. truncated under load): retry
 		error = "unparseable response body: " + response->body.substr(0, 200);
 		return result;
 	}
-	AccountUsage(query_index, response->body, response->get_header_value("x-litellm-response-cost"), config, typesafe);
+	AccountUsage(query_index, response->body, response->get_header_value("x-litellm-response-cost"), config, typesafe,
+	             &result.input_tokens, &result.cached_tokens, &result.cache_write_tokens);
 	result.content = std::move(content);
 	result.success = true;
 	outcome = AICallOutcome::OK;
@@ -1025,7 +1420,8 @@ static string CacheScopePrefix(const AIConfig &config, idx_t query_index) {
 	if (config.local_cache_cross_query) {
 		return string("g\x1f");
 	}
-	return std::to_string(query_index) + "\x1f";
+	// the record slot, not the generation tag: a query re-run after ai_usage_reset() keeps its cache scope
+	return std::to_string(query_index & 0xFFFFFFFFULL) + "\x1f";
 }
 
 static string RequestSignature(const AIConfig &config, const AIRequest &request) {
@@ -1075,7 +1471,7 @@ bool AICacheProbe(const AIRequest &request, const string &query_text, AIResult &
 	}
 	{
 		std::lock_guard<std::mutex> lock(UsageMutex());
-		Queries()[query_index].cache_hits++;
+		UsageRecord(query_index).cache_hits++;
 	}
 	return true;
 }
@@ -1217,7 +1613,7 @@ static void SleepBackoff(idx_t attempt, int32_t retry_after_ms, idx_t seed) {
 static void NoteCallFailure(const AIConfig &config, const AIRequest &request, idx_t query_index, const string &error) {
 	{
 		std::lock_guard<std::mutex> lock(UsageMutex());
-		Queries()[query_index].failed_calls++;
+		UsageRecord(query_index).failed_calls++;
 	}
 	static std::mutex reported_mutex;
 	static std::set<string> reported;
@@ -1303,7 +1699,26 @@ static void RecordCallLatency(int64_t ms) {
 	}
 }
 
-static int64_t HedgeDeadlineMs() {
+static int64_t HedgeDeadlineMs(const AIConfig &config) {
+	// test knob: ai_debug_log containing 'hedge=NNN' pins the deadline to NNN ms (the real rule below needs
+	// 50 samples and a 60 s floor, which a mock test cannot reach)
+	// (only once a mock has been started in this process, and only for 'hedge=<digits>')
+	if (AIDebugKnobsEnabled().load()) {
+		const string &dbg = config.debug_log;
+		const size_t knob = dbg.find("hedge=");
+		if (knob != string::npos) {
+			int64_t ms = 0;
+			size_t i = knob + 6;
+			bool any = false;
+			for (; i < dbg.size() && dbg[i] >= '0' && dbg[i] <= '9'; i++) {
+				ms = ms * 10 + (dbg[i] - '0');
+				any = true;
+			}
+			if (any) {
+				return ms;
+			}
+		}
+	}
 	vector<int64_t> sample;
 	{
 		std::lock_guard<std::mutex> lock(LatMutex());
@@ -1327,7 +1742,7 @@ static int64_t HedgeDeadlineMs() {
 
 //===--------------------------------------------------------------------===//
 // Prefix lifecycle: the client-side cache-write policy for explicit provider prompt caching.
-// Operators only DECLARE structure (prompt_prefix = where sameness ends, expected_reuse = known
+// Operators only DECLARE structure (prompt_prefix = where sameness ends, expected_reads = the
 // fan-out); this state machine decides whether/when a breakpoint is emitted:
 //   COLD       first sight. Hint >= 2 -> this call is the WRITE (prime). No hint -> send plain,
 //              remember (adaptive: the bet is only placed once reuse is a proven fact).
@@ -1344,7 +1759,24 @@ enum class PrefixPhase : uint8_t { SEEN_PLAIN, PRIMING, WARM, NOCACHE };
 struct PrefixState {
 	PrefixPhase phase;
 	std::chrono::steady_clock::time_point last_use;
+	//! Set once a zero-cached warm read has sent the key back for a re-prime. A batch of parked reads
+	//! all report zero together, so the FIRST zero re-primes (the entry was evicted, or the span never
+	//! cleared the minimum) and the rest of that batch is ignored; a zero read after the re-prime has
+	//! landed gives the key up (NOCACHE): the provider is not keeping it, stop spending writes and
+	//! parking on it.
+	bool reprimed = false;
+	//! When the re-prime landed: a zero read that STARTED before it was in flight alongside it (the same
+	//! released batch) and says nothing new; only a zero read started after it gives the key up.
+	std::chrono::steady_clock::time_point reprimed_at;
 };
+//! Keys given up in a row across the process. Three in a row = the provider does not cache for this
+//! deployment at all (a Chat Completions endpoint behind an image prefix, a model without caching):
+//! every later request goes plain, no more parking anywhere. A served read resets the count.
+static std::atomic<int> &PrefixGiveUps() {
+	static std::atomic<int> value {0};
+	return value;
+}
+static constexpr int PREFIX_GIVEUPS_TO_DISABLE = 3;
 static std::mutex &PrefixMutex() {
 	static std::mutex value;
 	return value;
@@ -1371,16 +1803,15 @@ static string PrefixKey(const AIConfig &config, const AIRequest &request) {
 static bool ApplyPrefixLifecycle(const AIConfig &config, AIRequest &request) {
 	// plain variant: never split the prompt into cache blocks -- a split body sends the user
 	// content as an ARRAY of parts, and a bare-prompt comparison needs it to stay a single string.
-	if (!config.prefix_cache || config.prompt_variant_plain || request.prompt_prefix.empty()) {
+	if (!config.prefix_cache || config.prompt_variant_plain || request.prompt_prefix.empty() ||
+	    PrefixGiveUps().load() >= PREFIX_GIVEUPS_TO_DISABLE || CacheOptionsRejected().load()) {
 		return false;
 	}
 	// Size gate: system + prefix must clear the provider's 1,024-visible-token minimum. Biased
 	// toward attempting (a too-short prefix is ignored at zero cost; a skipped long one forfeits
-	// the read discount); the text ratio self-calibrates from observed usage.
-	const double prefix_tokens = AITextHasImage(request.prompt_prefix)
-	                                 ? AIEstimatePromptCost(request.prompt_prefix)
-	                                 : static_cast<double>(request.prompt_prefix.size()) / AICalibratedBytesPerToken();
-	if (prefix_tokens < 900.0) {
+	// the read discount); the text ratio and the per-image count self-calibrate from observed usage.
+	const double prefix_tokens = AIPrefixTokenEstimate(request.prompt_prefix);
+	if (prefix_tokens < PREFIX_MIN_TOKENS) {
 		return false;
 	}
 	const string key = PrefixKey(config, request);
@@ -1389,26 +1820,51 @@ static bool ApplyPrefixLifecycle(const AIConfig &config, AIRequest &request) {
 	while (true) {
 		auto it = PrefixStates().find(key);
 		if (it == PrefixStates().end()) {
-			if (request.expected_reuse >= 2) {
+			// a write costs (write_mult - 1) extra and each later read saves (1 - read_mult): it pays
+			// when the expected reads exceed their ratio (0.28 at 1.25x / 0.1x; 0 when writes are free)
+			const double write_premium = MaxValue<double>(0.0, config.price_cache_write_mult - 1.0);
+			const double read_saving = MaxValue<double>(1e-9, 1.0 - config.price_cache_read_mult);
+			if (request.expected_reads > write_premium / read_saving) {
 				PrefixStates()[key] = {PrefixPhase::PRIMING, now};
 				request.emit_breakpoint = true;
 				return true; // hinted: first call is the write
 			}
 			PrefixStates()[key] = {PrefixPhase::SEEN_PLAIN, now};
-			return false; // adaptive: first arrival goes plain
+			return false; // below the threshold, or unknown: first arrival goes plain
 		}
 		switch (it->second.phase) {
-		case PrefixPhase::SEEN_PLAIN:
-			it->second = {PrefixPhase::PRIMING, now};
+		case PrefixPhase::SEEN_PLAIN: {
+			// a known expectation decides every arrival (a span whose reads are already behind it is not
+			// written now either). An unknown one (reuse in another operator the declarer cannot see) takes
+			// proven reuse as the signal only while writes are free: under a write premium a second
+			// sighting with no third behind it is a pure loss (measured: an image projection pair, 20
+			// writes, no reads, 11% dearer than no caching), and whether a third comes is exactly what
+			// nobody knows. A re-prime after a dropped span is not a bet and goes through regardless.
+			const double write_premium = MaxValue<double>(0.0, config.price_cache_write_mult - 1.0);
+			const double read_saving = MaxValue<double>(1e-9, 1.0 - config.price_cache_read_mult);
+			const bool known = request.expected_reads >= 0.0;
+			const bool pays = known ? request.expected_reads > write_premium / read_saving : write_premium <= 0.0;
+			if (!pays && !it->second.reprimed) {
+				it->second.last_use = now;
+				return false;
+			}
+			it->second.phase = PrefixPhase::PRIMING; // keeps `reprimed`: a re-prime must remember it is one
+			it->second.last_use = now;
 			request.emit_breakpoint = true;
-			return true; // adaptive: proven reuse, second arrival is the write
+			return true; // adaptive: proven reuse, second arrival is the write; or the one re-prime
+		}
 		case PrefixPhase::PRIMING:
 			PrefixCv().wait(lock); // park (no permit held) until the write lands or fails
+			if (PrefixGiveUps().load() >= PREFIX_GIVEUPS_TO_DISABLE || CacheOptionsRejected().load()) {
+				return false; // the process gave caching up while this one was parked: plain
+			}
 			continue;
 		case PrefixPhase::WARM:
 			if (std::chrono::duration_cast<std::chrono::seconds>(now - it->second.last_use).count() >
 			    PREFIX_TTL_SECONDS) {
-				it->second = {PrefixPhase::PRIMING, now};
+				it->second.phase = PrefixPhase::PRIMING;
+				it->second.last_use = now;
+				it->second.reprimed = false; // a TTL re-prime is a fresh start, not a failed read's retry
 				request.emit_breakpoint = true;
 				return true; // stale: this call re-primes
 			}
@@ -1425,23 +1881,57 @@ static void FinishPrefixPrime(const AIConfig &config, const AIRequest &request, 
 	const string key = PrefixKey(config, request);
 	{
 		std::lock_guard<std::mutex> lock(PrefixMutex());
-		PrefixStates()[key] = {success ? PrefixPhase::WARM : PrefixPhase::NOCACHE, std::chrono::steady_clock::now()};
+		auto &st = PrefixStates()[key];
+		st.phase = success ? PrefixPhase::WARM : PrefixPhase::NOCACHE;
+		st.last_use = std::chrono::steady_clock::now();
 	}
 	PrefixCv().notify_all();
 }
 
+//! What a warm read's usage says about the prefix. Cached tokens > 0: the provider served it (the clock
+//! is only a fallback). Zero cached but tokens WRITTEN: the provider had dropped the span and this read
+//! re-wrote it (at the write price) -- it is the re-prime, the key stays warm; a second such read gives
+//! the key up (NOCACHE): the provider is not keeping it. Zero cached and zero written: the span is not
+//! cacheable at all (below the minimum): give it up at once.
+static void PrefixReadFeedback(const AIConfig &config, const AIRequest &request, uint64_t cached_tokens,
+                               uint64_t written_tokens, std::chrono::steady_clock::time_point started) {
+	const string key = PrefixKey(config, request);
+	std::lock_guard<std::mutex> lock(PrefixMutex());
+	auto it = PrefixStates().find(key);
+	if (it == PrefixStates().end() || it->second.phase != PrefixPhase::WARM) {
+		return; // a key already given up
+	}
+	if (cached_tokens > 0) {
+		it->second.reprimed = false; // served: the key is healthy again
+		PrefixGiveUps().store(0);
+		return;
+	}
+	if (written_tokens > 0) {
+		if (!it->second.reprimed) {
+			it->second.reprimed = true; // this read was the re-prime; the span exists again
+			it->second.reprimed_at = std::chrono::steady_clock::now();
+			return;
+		}
+		if (started <= it->second.reprimed_at) {
+			return; // in flight alongside the re-prime: it could not have been served yet
+		}
+	}
+	it->second.phase = PrefixPhase::NOCACHE; // re-primed and still not served, or never cacheable
+	PrefixGiveUps().fetch_add(1);
+}
+
 static AIResult HedgedRequest(const AIConfig &config, const AIRequest &request, idx_t query_index, idx_t seed,
-                              AdaptiveLimiter *limiter) {
+                              const std::shared_ptr<AdaptiveLimiter> &limiter) {
 	// Prefix lifecycle first: may PARK here (before any latency clock or permit) until an
 	// in-flight cache write lands, and stamps emit_breakpoint on a local copy for this dispatch.
 	AIRequest dispatch = request;
 	// System One has no provider prefix cache: never park behind or prime one for it.
 	const bool is_prime = !AIUsesTypeSafe(request) && ApplyPrefixLifecycle(config, dispatch);
 	const auto t0 = std::chrono::steady_clock::now();
-	const int64_t deadline_ms = config.hedge ? HedgeDeadlineMs() : -1;
+	const int64_t deadline_ms = config.hedge ? HedgeDeadlineMs(config) : -1;
 	AIResult winner;
 	if (deadline_ms < 0) {
-		winner = DoRequestWithRetry(config, dispatch, query_index, seed, limiter);
+		winner = DoRequestWithRetry(config, dispatch, query_index, seed, limiter.get());
 	} else {
 		struct Shared {
 			std::mutex m;
@@ -1450,10 +1940,13 @@ static AIResult HedgedRequest(const AIConfig &config, const AIRequest &request, 
 			AIResult result;
 		};
 		auto shared = std::make_shared<Shared>();
-		const AIConfig *config_ptr = &config; // process-global singleton: safe beyond this frame
-		auto launch = [config_ptr, dispatch, query_index, limiter, shared](idx_t attempt_seed) {
-			std::thread([config_ptr, dispatch, query_index, limiter, shared, attempt_seed]() {
-				AIResult r = DoRequestWithRetry(*config_ptr, dispatch, query_index, attempt_seed, limiter);
+		// The losing attempt keeps running after this frame has returned its winner: it must OWN what it
+		// touches. `config` may be a connection's stack copy (AIBatchCompleteFor) and the limiter lives in
+		// AIBatchComplete's frame, so both go to the threads by shared ownership, never by pointer.
+		auto owned_config = std::make_shared<const AIConfig>(config);
+		auto launch = [owned_config, dispatch, query_index, limiter, shared](idx_t attempt_seed) {
+			std::thread([owned_config, dispatch, query_index, limiter, shared, attempt_seed]() {
+				AIResult r = DoRequestWithRetry(*owned_config, dispatch, query_index, attempt_seed, limiter.get());
 				std::lock_guard<std::mutex> lock(shared->m);
 				if (!shared->done) {
 					shared->done = true;
@@ -1468,7 +1961,7 @@ static AIResult HedgedRequest(const AIConfig &config, const AIRequest &request, 
 			lock.unlock();
 			{
 				std::lock_guard<std::mutex> ulock(UsageMutex());
-				Queries()[query_index].hedged_calls++;
+				UsageRecord(query_index).hedged_calls++;
 			}
 			launch(seed ^ 0x9E3779B9U);
 			lock.lock();
@@ -1478,6 +1971,8 @@ static AIResult HedgedRequest(const AIConfig &config, const AIRequest &request, 
 	}
 	if (is_prime) {
 		FinishPrefixPrime(config, dispatch, winner.success); // wake parked same-prefix readers
+	} else if (dispatch.emit_breakpoint && winner.success && winner.input_tokens > 0) {
+		PrefixReadFeedback(config, dispatch, winner.cached_tokens, winner.cache_write_tokens, t0);
 	}
 	RecordCallLatency(
 	    std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count());
@@ -1563,7 +2058,7 @@ vector<AIResult> AIBatchComplete(const vector<AIRequest> &requests, const string
 	// Every input row that did not spawn a unique network request is a cache/de-dup hit.
 	{
 		std::lock_guard<std::mutex> lock(UsageMutex());
-		Queries()[query_index].cache_hits += (n - miss_rows.size());
+		UsageRecord(query_index).cache_hits += (n - miss_rows.size());
 	}
 
 	// Execute the unique misses concurrently. Concurrency never exceeds the number of
@@ -1572,9 +2067,9 @@ vector<AIResult> AIBatchComplete(const vector<AIRequest> &requests, const string
 	vector<AIResult> miss_results(miss_rows.size());
 	if (AITurboEnabled() && !force_fixed) {
 		const idx_t turbo_max = std::min<idx_t>(config.turbo_max, miss_rows.size());
-		AdaptiveLimiter limiter(config.turbo_start, config.turbo_min, turbo_max);
+		auto limiter = std::make_shared<AdaptiveLimiter>(config.turbo_start, config.turbo_min, turbo_max);
 		RunConcurrent(miss_rows.size(), turbo_max, [&](idx_t u) {
-			miss_results[u] = HedgedRequest(config, requests[miss_rows[u]], query_index, u, &limiter);
+			miss_results[u] = HedgedRequest(config, requests[miss_rows[u]], query_index, u, limiter);
 		});
 	} else {
 		RunConcurrent(miss_rows.size(), config.max_concurrency, [&](idx_t u) {
@@ -1785,7 +2280,7 @@ static bool DoEmbedBatchRequest(const AIConfig &config, const vector<string> &in
 	yyjson_doc_free(doc);
 	if (ok) {
 		std::lock_guard<std::mutex> lock(UsageMutex());
-		auto &record = Queries()[query_index];
+		auto &record = UsageRecord(query_index);
 		record.llm_calls += 1;
 		record.embed_calls += 1; // so chat calls == llm_calls - embed_calls (process-isolated count)
 		record.input_tokens += total_tokens;
@@ -1849,7 +2344,7 @@ vector<AIEmbedResult> AIEmbedBatch(const vector<string> &texts, const string &qu
 	}
 	{
 		std::lock_guard<std::mutex> lock(UsageMutex());
-		Queries()[query_index].cache_hits += (n - miss_rows.size());
+		UsageRecord(query_index).cache_hits += (n - miss_rows.size());
 	}
 
 	// Batched requests for the unique misses, split into sub-batches (<= embed_batch_images image items,
@@ -1961,6 +2456,7 @@ uint64_t AIResetUsage() {
 	Queries().clear();
 	QueryIndex().clear();
 	NextQueryId() = 1;
+	UsageGeneration()++;
 	return cleared;
 }
 
@@ -2088,7 +2584,11 @@ void AIConfig::ResetToDefaults() {
 	{
 		std::lock_guard<std::mutex> lock(PrefixMutex());
 		PrefixStates().clear(); // a prefix primed by an earlier file must start COLD again
+		PrefixGiveUps().store(0);
+		CacheOptionsRejected().store(false);
+		ResponsesUnsupported().store(false);
 	}
+	AIDebugKnobsEnabled().store(true); // a mock-driven process: the '[sel=' / 'hedge=' test knobs are live
 	{
 		std::lock_guard<std::mutex> lock(TrainingMutex());
 		Training().clear();

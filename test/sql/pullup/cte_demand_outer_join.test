@@ -1,0 +1,91 @@
+# name: test/sql/pullup/cte_demand_outer_join.test
+# description: CTE demand reduction takes a reference's demand from a join's matching keys only where the join
+# group: [pullup]
+
+#              drops that side's unmatched rows. On a LEFT JOIN's preserved side, an ANTI JOIN's left or a FULL
+#              OUTER join the unmatched rows survive, so the neighbour's keys are not the demand and the body
+#              stays whole; the null-extended side and an inner join still reduce.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_inline_ai_ctes = false;
+
+statement ok
+CREATE TABLE docs AS SELECT i AS id, 'doc ' || i AS body FROM range(1, 3) r(i);
+
+statement ok
+CREATE TABLE hot AS SELECT 2 AS id;
+
+# the CTE on the preserved side: its unmatched row (1, NULL) must survive
+query II
+WITH c AS MATERIALIZED (SELECT id FROM docs WHERE ai_filter('[p=100] ' || body)) SELECT c.id, h.id FROM c LEFT JOIN hot h USING (id) ORDER BY 1;
+----
+1	NULL
+2	2
+
+query I
+WITH c AS MATERIALIZED (SELECT id FROM docs WHERE ai_filter('[p=100] ' || body)) SELECT c.id FROM c ANTI JOIN hot h USING (id);
+----
+1
+
+query II
+WITH c AS MATERIALIZED (SELECT id FROM docs WHERE ai_filter('[p=100] ' || body)) SELECT c.id, h.id FROM c FULL OUTER JOIN (SELECT 3 AS id) h USING (id) ORDER BY 1 NULLS LAST;
+----
+1	NULL
+2	NULL
+NULL	3
+
+# a MARK join's right side: the CTE's NULL key makes `NOT IN` NULL for every unmatched row, so pruning the body
+# to hot's keys would turn those rows' marks to false and let them through
+statement ok
+CREATE TABLE kd AS SELECT * FROM (VALUES (1, 'a'), (NULL, 'b')) v(key, body);
+
+query I
+WITH c AS MATERIALIZED (SELECT key FROM kd WHERE ai_filter('[p=100] mark ' || body)) SELECT h.id FROM hot h WHERE h.id NOT IN (SELECT key FROM c);
+----
+
+# hot's id 2 is not in c = {1, NULL}: its mark is NULL, not false
+query II
+WITH c AS MATERIALIZED (SELECT key FROM kd WHERE ai_filter('[p=100] mark2 ' || body)) SELECT h.id, h.id IN (SELECT key FROM c) FROM hot h;
+----
+2	NULL
+
+# the CTE on the null-extended side: only hot's key is needed, one call (distinct prompts: the local cache
+# would otherwise serve the earlier queries' answers; the speculative leaf node off, as it may ask a leaf row
+# before the reduction removes it)
+statement ok
+SET ai_speculative = false;
+
+statement ok
+SELECT ai_usage_reset();
+
+query II
+WITH c AS MATERIALIZED (SELECT id FROM docs WHERE ai_filter('[p=100] null-extended ' || body)) SELECT h.id, c.id FROM hot h LEFT JOIN c USING (id);
+----
+2	2
+
+query I
+SELECT sum(llm_calls) FROM ai_usage();
+----
+1
+
+# an inner join reduces as before
+statement ok
+SELECT ai_usage_reset();
+
+query I
+WITH c AS MATERIALIZED (SELECT id FROM docs WHERE ai_filter('[p=100] inner ' || body)) SELECT c.id FROM c JOIN hot h USING (id);
+----
+2
+
+query I
+SELECT sum(llm_calls) FROM ai_usage();
+----
+1
+
+statement ok
+CALL ai_mock_stop();

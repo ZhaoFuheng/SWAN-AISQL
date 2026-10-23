@@ -1,0 +1,165 @@
+# name: test/sql/functions/document_first_prefix.test
+# description: A region leaf whose prompt LEADS with a long document column declares that column's text as its
+# group: [functions]
+
+#              provider prefix, exactly as a leading image does: the leaf region materialises the leading
+#              operand next to the prompt (the baked string has no boundary), and the size gate decides. The
+#              convention is the shared input first; with the instruction first nothing is shared. The mock
+#              reports a span's first breakpoint request as a write and later ones as reads, so ai_usage()
+#              counts them exactly. A '[sel=NN]' marker pins a leaf's predicted pass rate, which the write
+#              decision is based on.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+# ~4.5 KB documents clear the provider's minimum; the short ones do not
+statement ok
+CREATE TABLE docs AS SELECT i AS id, 'doc '||i::VARCHAR||': '||repeat('lorem ipsum dolor sit amet ', 170) AS d FROM range(20) r(i);
+
+statement ok
+CREATE TABLE notes AS SELECT i AS id, 'note '||i::VARCHAR||': short text' AS d FROM range(20) r(i);
+
+# instruction first: no span, nothing written or read
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM docs WHERE ai_filter('[p=100] Is this report about taxes? ' || d) AND ai_filter('[p=100] Is this report about health? ' || d);
+----
+true
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+0	0	0
+
+# document first, two leaves, free writes: every row writes the document once and reads it once
+statement ok
+SET ai_price_cache_write_mult = 1.0;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM docs WHERE ai_filter(d || ' [p=100] Is this report about taxes?') AND ai_filter(d || ' [p=100] Is this report about health?');
+----
+true
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+40	140	140
+
+# a short document first: below the gate, never split
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM notes WHERE ai_filter(d || ' [p=100] Is this note about taxes?') AND ai_filter(d || ' [p=100] Is this note about health?');
+----
+true
+
+query II
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+40	0
+
+# the GPT-5.6 prices: the first leaf's predicted pass rate decides. Pinned at 10%, the expected later reads
+# (0.1) are under the 0.28 threshold: nothing is written, every call is plain. Pinned at 90%: write + read.
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_price_cache_write_mult = 1.25;
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM docs WHERE ai_filter(d || ' [p=100][sel=10] Is this report about rivers?') AND ai_filter(d || ' [p=100][sel=10] Is this report about roads?');
+----
+true
+
+query II
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+0	0
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM docs WHERE ai_filter(d || ' [p=100][sel=90] Is this report about ships?') AND ai_filter(d || ' [p=100][sel=90] Is this report about trains?');
+----
+true
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+40	140	140
+
+# without a pinned prediction the query's own verdicts decide: a first leaf that passes 10% of the rows
+# stops being written once a few answers are in (writes well under one per row), one that passes 90% is
+# written for (nearly) every row. 80 rows, 7 tokens per write under the mock; the first wave (20 in flight)
+# is decided before any answer lands, so it writes on the cold prediction either way.
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_price_cache_write_mult = 1.25;
+
+statement ok
+CREATE TABLE many AS SELECT i AS id, 'doc '||i::VARCHAR||': '||repeat('lorem ipsum dolor sit amet ', 170) AS d FROM range(80) r(i);
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM many WHERE ai_filter(d || ' [p=10] Is this report about rivers?') AND ai_filter(d || ' [p=100] Is this report about roads?');
+----
+true
+
+query I
+SELECT (SELECT sum(cache_write_tokens) FROM ai_usage()) < 80 * 7 / 2 FROM ai_mock_breakpoints();
+----
+true
+
+# (fresh mock state: the 10% run above already wrote some of these documents' spans, which this run would read)
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_price_cache_write_mult = 1.25;
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM many WHERE ai_filter(d || ' [p=90] Is this report about ships?') AND ai_filter(d || ' [p=100] Is this report about trains?');
+----
+true
+
+query I
+SELECT (SELECT sum(cache_write_tokens) FROM ai_usage()) > 80 * 7 * 3 / 4 FROM ai_mock_breakpoints();
+----
+true
+
+statement ok
+CALL ai_mock_stop();

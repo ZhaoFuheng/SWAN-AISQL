@@ -147,6 +147,17 @@ static unique_ptr<Expression> BuildConcat(ClientContext &context, vector<unique_
 	return function_binder.BindScalarFunction(entry, std::move(parts), error);
 }
 
+//! A framed prompt (`concat(head, input, tail)`) that is NULL when its input is: the scalar it stands for
+//! (ai_classify / ai_score) answers NULL to a NULL input, while concat ignores a NULL operand and would frame
+//! an empty input and ask the model. The guard is the shape AIUnwrapNullGuard looks past, so the structural
+//! analyses (predicate/input split, prefix-cache prefix, leading span) still see the concatenation.
+static unique_ptr<Expression> GuardNullInput(unique_ptr<Expression> input, unique_ptr<Expression> prompt) {
+	auto is_null = make_uniq<BoundOperatorExpression>(ExpressionType::OPERATOR_IS_NULL, LogicalType::BOOLEAN);
+	is_null->GetChildrenMutable().push_back(std::move(input));
+	auto null_value = make_uniq<BoundConstantExpression>(Value(LogicalType::VARCHAR));
+	return make_uniq<BoundCaseExpression>(std::move(is_null), std::move(null_value), std::move(prompt));
+}
+
 //! Recursively flatten a `||`/concat chain into its leaf operands (so `a || b || c` and any nesting
 //! yield [a, b, c]); a non-concat expression is itself a single operand.
 static void FlattenConcat(const Expression &expr, vector<const Expression *> &out) {
@@ -712,6 +723,18 @@ bool AIBuildMixedLeafArgs(ClientContext &context, const vector<AIMixedLeaf> &lea
 		}
 		// IN ('i') / NOT IN ('I'): the value is the ','-joined set of members; else the single constant.
 		const bool is_set = (leaf.op == 'i' || leaf.op == 'I');
+		// The meta string joins leaves with ';' and a set's members with ','; a literal holding either (or a
+		// backslash) is escaped with a backslash, which AIParseLeafMeta undoes ('New York, NY' stays one member).
+		auto escape = [](const string &raw) {
+			string out;
+			for (const char ch : raw) {
+				if (ch == '\\' || ch == ';' || ch == ',') {
+					out.push_back('\\');
+				}
+				out.push_back(ch);
+			}
+			return out;
+		};
 		string val;
 		if (wrapped) {
 			val = AISerializeExpression(*leaf.wrapper);
@@ -726,7 +749,7 @@ bool AIBuildMixedLeafArgs(ClientContext &context, const vector<AIMixedLeaf> &lea
 				if (k) {
 					val += ",";
 				}
-				val += v.IsNull() ? string() : StringValue::Get(v);
+				val += escape(v.IsNull() ? string() : StringValue::Get(v));
 			}
 		} else {
 			Value cst_val;
@@ -735,7 +758,8 @@ bool AIBuildMixedLeafArgs(ClientContext &context, const vector<AIMixedLeaf> &lea
 			} catch (...) {
 				return false;
 			}
-			val = leaf.kind == 'S' ? cst_val.ToString() : (cst_val.IsNull() ? string() : StringValue::Get(cst_val));
+			val =
+			    leaf.kind == 'S' ? cst_val.ToString() : escape(cst_val.IsNull() ? string() : StringValue::Get(cst_val));
 		}
 		metas[j] = string(1, leaf.kind) + ":" + (wrapped ? "wrap" : AIOpName(leaf.op)) + ":" + val;
 
@@ -787,7 +811,7 @@ bool AIBuildMixedLeafArgs(ClientContext &context, const vector<AIMixedLeaf> &lea
 			parts.push_back(make_uniq<BoundConstantExpression>(Value(head)));
 			parts.push_back(input->Copy());
 			parts.push_back(make_uniq<BoundConstantExpression>(Value(tail)));
-			call_prompts[j] = BuildConcat(context, std::move(parts));
+			call_prompts[j] = GuardNullInput(input->Copy(), BuildConcat(context, std::move(parts)));
 			feat_pred[j] = make_uniq<BoundConstantExpression>(Value(
 			    wrapped ? ("Does the classification satisfy " + wrapper_text + "? Categories: " + cats)
 			    : is_set
@@ -833,7 +857,7 @@ bool AIBuildMixedLeafArgs(ClientContext &context, const vector<AIMixedLeaf> &lea
 				vector<unique_ptr<Expression>> parts;
 				parts.push_back(make_uniq<BoundConstantExpression>(Value(prefix)));
 				parts.push_back(input->Copy());
-				call_prompts[j] = BuildConcat(context, std::move(parts));
+				call_prompts[j] = GuardNullInput(input->Copy(), BuildConcat(context, std::move(parts)));
 			}
 			if (has_range) {
 				metas[j] +=

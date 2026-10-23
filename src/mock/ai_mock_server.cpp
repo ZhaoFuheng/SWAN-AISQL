@@ -24,6 +24,7 @@
 #include <cmath>
 #include <memory>
 #include <mutex>
+#include <unordered_set>
 #include <chrono>
 #include <cstdlib>
 #include <thread>
@@ -247,6 +248,27 @@ static std::atomic<int64_t> &MockBreakpointRequests() {
 	static std::atomic<int64_t> value {0};
 	return value;
 }
+//! Requests that carried prompt_cache_options (explicit provider caching requested at all).
+static std::atomic<int64_t> &MockExplicitRequests() {
+	static std::atomic<int64_t> value {0};
+	return value;
+}
+//! Requests that came through POST /v1/responses (the rest through /v1/chat/completions).
+static std::atomic<int64_t> &MockResponsesRequests() {
+	static std::atomic<int64_t> value {0};
+	return value;
+}
+//! Spans the mock "holds": the request text up to its breakpoint (system/instructions and the prefix
+//! blocks). The first breakpoint request on a span is its write (usage reports cache_write_tokens), every
+//! later one a read (cached_tokens) -- the provider's accounting, so ai_usage() is exact under the mock.
+static std::mutex &MockSpanMutex() {
+	static std::mutex value;
+	return value;
+}
+static std::unordered_set<string> &MockSpansHeld() {
+	static std::unordered_set<string> value;
+	return value;
+}
 // Leaked on purpose: a detached listener thread may outlive main() (a failed test skips
 // ai_mock_stop), and static destruction of the server while it runs would crash the harness.
 static MockServerState &Mock() {
@@ -366,6 +388,9 @@ void HandlePost(const aisql_http::Request &req, aisql_http::Response &res) {
 		if (req.body.find("\"prompt_cache_breakpoint\"") != string::npos) {
 			MockBreakpointRequests().fetch_add(1);
 		}
+		if (req.body.find("\"prompt_cache_options\"") != string::npos) {
+			MockExplicitRequests().fetch_add(1);
+		}
 		string seed;
 		yyjson_val *msgs = root ? yyjson_obj_get(root, "messages") : nullptr;
 		if (msgs && yyjson_is_arr(msgs)) {
@@ -408,6 +433,73 @@ void HandlePost(const aisql_http::Request &req, aisql_http::Response &res) {
 				}
 			}
 		}
+		// Responses API body (POST /v1/responses): input = a string or a list of items; the last user
+		// item's content is a string or input_text / input_image blocks. Seeded EXACTLY like the chat
+		// shape (an all-text list as the concatenated text; with images, the python dump of the
+		// equivalent chat content array), so a prompt gets the same verdict on either API.
+		const bool responses = StringUtil::EndsWith(req.path, "/responses");
+		if (responses) {
+			MockResponsesRequests().fetch_add(1);
+			yyjson_val *input = root ? yyjson_obj_get(root, "input") : nullptr;
+			yyjson_val *content = nullptr;
+			if (input && yyjson_is_str(input)) {
+				seed = string(yyjson_get_str(input), yyjson_get_len(input));
+			} else if (input && yyjson_is_arr(input)) {
+				size_t n = yyjson_arr_size(input);
+				for (size_t i = n; i > 0; i--) {
+					yyjson_val *it = yyjson_arr_get(input, i - 1);
+					yyjson_val *role = it ? yyjson_obj_get(it, "role") : nullptr;
+					if (role && yyjson_is_str(role) && string(yyjson_get_str(role)) == "user") {
+						content = yyjson_obj_get(it, "content");
+						break;
+					}
+				}
+			}
+			if (content && yyjson_is_str(content)) {
+				seed = string(yyjson_get_str(content), yyjson_get_len(content));
+			} else if (content && yyjson_is_arr(content)) {
+				bool all_text = true;
+				string concat;
+				yyjson_mut_doc *chat_doc = yyjson_mut_doc_new(nullptr);
+				yyjson_mut_val *chat_arr = yyjson_mut_arr(chat_doc);
+				size_t pidx, pmax;
+				yyjson_val *part;
+				yyjson_arr_foreach(content, pidx, pmax, part) {
+					yyjson_val *ptype = yyjson_is_obj(part) ? yyjson_obj_get(part, "type") : nullptr;
+					const string type = ptype && yyjson_is_str(ptype) ? yyjson_get_str(ptype) : "";
+					yyjson_val *ptext = yyjson_is_obj(part) ? yyjson_obj_get(part, "text") : nullptr;
+					yyjson_val *purl = yyjson_is_obj(part) ? yyjson_obj_get(part, "image_url") : nullptr;
+					if (type == "input_text" && ptext && yyjson_is_str(ptext)) {
+						concat += string(yyjson_get_str(ptext), yyjson_get_len(ptext));
+						yyjson_mut_val *o = yyjson_mut_obj(chat_doc);
+						yyjson_mut_obj_add_str(chat_doc, o, "type", "text");
+						yyjson_mut_obj_add_strncpy(chat_doc, o, "text", yyjson_get_str(ptext), yyjson_get_len(ptext));
+						yyjson_mut_arr_append(chat_arr, o);
+					} else if (type == "input_image" && purl && yyjson_is_str(purl)) {
+						all_text = false;
+						yyjson_mut_val *o = yyjson_mut_obj(chat_doc);
+						yyjson_mut_obj_add_str(chat_doc, o, "type", "image_url");
+						yyjson_mut_val *u = yyjson_mut_obj(chat_doc);
+						yyjson_mut_obj_add_strncpy(chat_doc, u, "url", yyjson_get_str(purl), yyjson_get_len(purl));
+						yyjson_mut_obj_add_val(chat_doc, o, "image_url", u);
+						yyjson_mut_arr_append(chat_arr, o);
+					} else {
+						all_text = false;
+					}
+				}
+				if (all_text) {
+					seed = std::move(concat);
+				} else {
+					yyjson_mut_doc_set_root(chat_doc, chat_arr);
+					yyjson_doc *imm = yyjson_mut_doc_imut_copy(chat_doc, nullptr);
+					if (imm) {
+						PyDumps(yyjson_doc_get_root(imm), seed);
+						yyjson_doc_free(imm);
+					}
+				}
+				yyjson_mut_doc_free(chat_doc);
+			}
+		}
 		// test knob: a '[sleep=NN]' marker anywhere in the seed delays this answer by NN ms,
 		// letting scheduler tests inject realistic per-prompt latency deterministically.
 		const auto sleep_pos = seed.find("[sleep=");
@@ -419,6 +511,26 @@ void HandlePost(const aisql_http::Request &req, aisql_http::Response &res) {
 		}
 		// test knob: a '[fail]' marker anywhere in the seed makes this prompt FAIL with a permanent 4xx (no
 		// retry, never cached), so tests can mix NULL verdicts with answered ones deterministically.
+		// test knob: '[reject_cache_options]' plays a server that is OpenAI-compatible in shape but knows no
+		// prompt caching: any body carrying the explicit cache fields is a 400 naming them. The client must
+		// latch, resend plain and never carry them again.
+		if (seed.find("[reject_cache_options]") != string::npos && req.body.find("prompt_cache") != string::npos) {
+			res.status = 400;
+			res.set_content(
+			    "{\"error\":{\"message\":\"Unrecognized request argument supplied: prompt_cache_options\"}}",
+			    "application/json");
+			if (doc) {
+				yyjson_doc_free(doc);
+			}
+			return;
+		}
+		// test knob: '[no_responses]' plays an endpoint without the Responses API (vLLM, Ollama): 404 there,
+		// Chat Completions as usual
+		if (responses && seed.find("[no_responses]") != string::npos) {
+			res.status = 404;
+			res.set_content("{\"error\":{\"message\":\"mock: no /v1/responses here\"}}", "application/json");
+			return;
+		}
 		if (seed.find("[fail]") != string::npos) {
 			res.status = 422;
 			res.set_content("{\"error\":{\"message\":\"mock: [fail] knob\"}}", "application/json");
@@ -428,10 +540,21 @@ void HandlePost(const aisql_http::Request &req, aisql_http::Response &res) {
 			return;
 		}
 		yyjson_val *rf = root ? yyjson_obj_get(root, "response_format") : nullptr;
+		yyjson_val *text_fmt = nullptr; // Responses API: text.format = {type: json_schema, schema}
+		if (responses) {
+			yyjson_val *text = root ? yyjson_obj_get(root, "text") : nullptr;
+			yyjson_val *fmt = text ? yyjson_obj_get(text, "format") : nullptr;
+			yyjson_val *ftype = fmt ? yyjson_obj_get(fmt, "type") : nullptr;
+			if (ftype && yyjson_is_str(ftype) && string(yyjson_get_str(ftype)) == "json_schema") {
+				text_fmt = fmt;
+			}
+		}
 		string content;
-		if (rf) {
-			yyjson_val *js = yyjson_obj_get(rf, "json_schema");
-			yyjson_val *schema = js ? yyjson_obj_get(js, "schema") : nullptr;
+		if (rf || text_fmt) {
+			yyjson_val *js = rf ? yyjson_obj_get(rf, "json_schema") : nullptr;
+			yyjson_val *schema = text_fmt ? yyjson_obj_get(text_fmt, "schema")
+			                     : js     ? yyjson_obj_get(js, "schema")
+			                              : nullptr;
 			content = GenFromSchema(schema, seed);
 		} else if (seed.find("Return a single yes or no") != string::npos) {
 			// A bare prompt that asks for a yes/no gets a yes/no, not "ok": the plain ai_filter
@@ -458,8 +581,36 @@ void HandlePost(const aisql_http::Request &req, aisql_http::Response &res) {
 		escaped = sjson ? sjson : "\"\"";
 		free(sjson);
 		yyjson_mut_doc_free(tmp_doc);
-		body = "{\"choices\": [{\"message\": {\"content\": " + escaped +
-		       "}}], \"usage\": {\"prompt_tokens\": 8, \"completion_tokens\": 2, \"total_tokens\": 10}}";
+		// Provider-cache fidelity for the prefix lifecycle: a request that carries a breakpoint reports
+		// cached tokens (the provider holds the span). Knobs in the seed: '[nocache]' = the provider dropped
+		// the span, every read re-writes it (zero cached, tokens written); '[uncacheable]' = the span never
+		// caches (zero cached, zero written).
+		const size_t bp_at = req.body.find("\"prompt_cache_breakpoint\"");
+		const bool breakpoint = bp_at != string::npos;
+		const bool nocache = seed.find("[nocache]") != string::npos;
+		const bool uncacheable = seed.find("[uncacheable]") != string::npos;
+		bool held = false;
+		if (breakpoint && !nocache && !uncacheable) {
+			std::lock_guard<std::mutex> lock(MockSpanMutex());
+			held = !MockSpansHeld().insert(req.body.substr(0, bp_at)).second; // a span once written is held
+		}
+		const string cached = held ? "7" : "0";
+		const string written = breakpoint && !uncacheable && (nocache || !held) ? "7" : "0";
+		if (responses) {
+			// '[reasoning_item]': a reasoning item precedes the message, as reasoning models answer
+			const string reasoning =
+			    seed.find("[reasoning_item]") != string::npos ? "{\"type\": \"reasoning\", \"summary\": []}, " : "";
+			body = "{\"output\": [" + reasoning +
+			       "{\"type\": \"message\", \"role\": \"assistant\", \"content\": [{\"type\": "
+			       "\"output_text\", \"text\": " +
+			       escaped +
+			       "}]}], \"usage\": {\"input_tokens\": 8, \"input_tokens_details\": {\"cached_tokens\": " + cached +
+			       ", \"cache_write_tokens\": " + written + "}, \"output_tokens\": 2, \"total_tokens\": 10}}";
+		} else {
+			body = "{\"choices\": [{\"message\": {\"content\": " + escaped +
+			       "}}], \"usage\": {\"prompt_tokens\": 8, \"prompt_tokens_details\": {\"cached_tokens\": " + cached +
+			       ", \"cache_write_tokens\": " + written + "}, \"completion_tokens\": 2, \"total_tokens\": 10}}";
+		}
 		if (AIConfig::Get().debug_log.find("mock") != string::npos) {
 			fprintf(stderr, "[mock] seed=%s -> %s\n", seed.substr(0, 120).c_str(), content.c_str());
 		}
@@ -475,6 +626,12 @@ void HandlePost(const aisql_http::Request &req, aisql_http::Response &res) {
 
 int AIMockStart() {
 	MockBreakpointRequests().store(0);
+	MockExplicitRequests().store(0);
+	MockResponsesRequests().store(0);
+	{
+		std::lock_guard<std::mutex> lock(MockSpanMutex());
+		MockSpansHeld().clear();
+	}
 	std::lock_guard<std::mutex> lock(MockMutex());
 	// A clean slate per test file (see the header comment): reset the process-global client state, and
 	// give the file its own server -- a server left running by the previous file (most files never call
@@ -581,6 +738,10 @@ static unique_ptr<FunctionData> AIMockBreakpointsBind(ClientContext &, TableFunc
                                                       vector<LogicalType> &return_types, vector<Identifier> &names) {
 	return_types.emplace_back(LogicalType::BIGINT);
 	names.emplace_back("breakpoint_requests");
+	return_types.emplace_back(LogicalType::BIGINT);
+	names.emplace_back("explicit_requests");
+	return_types.emplace_back(LogicalType::BIGINT);
+	names.emplace_back("responses_requests");
 	return make_uniq<AIMockBindData>();
 }
 
@@ -592,6 +753,8 @@ static void AIMockBreakpointsFunction(ClientContext &, TableFunctionInput &data,
 	bind.done = true;
 	output.SetChildCardinality(1);
 	output.data[0].SetValue(0, Value::BIGINT(MockBreakpointRequests().load()));
+	output.data[1].SetValue(0, Value::BIGINT(MockExplicitRequests().load()));
+	output.data[2].SetValue(0, Value::BIGINT(MockResponsesRequests().load()));
 }
 
 void RegisterAIMockFunctions(ExtensionLoader &loader) {

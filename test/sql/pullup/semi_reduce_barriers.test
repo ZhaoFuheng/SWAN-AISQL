@@ -1,0 +1,112 @@
+# name: test/sql/pullup/semi_reduce_barriers.test
+# description: The semi-join reducer descends only through operators a key SEMI join commutes with. A LIMIT,
+# group: [pullup]
+
+#              TOP_N, window function or DISTINCT ON between the join and the AI predicate is a barrier: reducing
+#              the AI table below it changes which rows the barrier keeps. Each query's answer is checked against
+#              the same query with the reducer off.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE docs AS SELECT i AS id, 'doc ' || i AS body FROM range(1, 11) r(i);
+
+statement ok
+CREATE TABLE hot AS SELECT 2 AS id;
+
+# ORDER BY ... LIMIT 1 inside: the first passer is id 1, which has no partner -> empty (the reduction, landed
+# below the TOP_N, would make id 2 the first passer and return it)
+query I
+SELECT c.id FROM (SELECT id FROM docs WHERE ai_filter('[p=100] ' || body) ORDER BY id LIMIT 1) c JOIN hot USING (id);
+----
+
+# a plain LIMIT is a barrier too (no order: the first passer in scan order is id 1)
+query I
+SELECT c.id FROM (SELECT id FROM docs WHERE ai_filter('[p=100] ' || body) LIMIT 1) c JOIN hot USING (id);
+----
+
+# a window function sees every passer: id 2 is the second passer
+query II
+SELECT c.id, c.rn FROM (SELECT id, row_number() OVER (ORDER BY id) AS rn FROM docs WHERE ai_filter('[p=100] ' || body)) c JOIN hot USING (id);
+----
+2	2
+
+# DISTINCT ON picks a representative per group among ALL passers: group 1's representative is id 1, so id 3
+# has no row to join (reduced below the DISTINCT ON, id 3 would become the representative)
+query II
+SELECT c.grp, c.id FROM (SELECT DISTINCT ON (id % 2) id % 2 AS grp, id FROM docs WHERE ai_filter('[p=100] ' || body) ORDER BY id % 2, id) c JOIN (SELECT 3 AS id) h USING (id);
+----
+
+# a sort or a plain DISTINCT is not a barrier: the reduction still lands below the AI predicate, so the LLM
+# sees only the partnered row (1 call, not 10)
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT c.id FROM (SELECT DISTINCT id FROM docs WHERE ai_filter('[p=100] sorted ' || body) ORDER BY id) c JOIN hot USING (id);
+----
+2
+
+query I
+SELECT sum(llm_calls) FROM ai_usage();
+----
+1
+
+# --- the reducer SIDE: a neighbour's copy drops its AI predicates to stay a superset of its rows, which
+# holds only where more rows in mean more rows out. Under an anti join's excluded side or a LEFT JOIN's
+# null-extended side, stripping SHRINKS the copy: nothing in b passes ([p=0]), so the neighbour keeps every
+# row of a, but the unfiltered copy excludes b's ids -- the reduction would drop docs id 1.
+statement ok
+CREATE TABLE a AS SELECT i AS id FROM range(1, 3) r(i);
+
+statement ok
+CREATE TABLE b AS SELECT 1 AS id, 'bx' AS x;
+
+query I
+SELECT d.id FROM docs d JOIN (SELECT id FROM a WHERE id NOT IN (SELECT id FROM b WHERE ai_filter('[p=0] ' || x))) j USING (id) ORDER BY d.id;
+----
+1
+2
+
+query I
+SELECT d.id FROM docs d JOIN (SELECT a.id FROM a LEFT JOIN (SELECT id FROM b WHERE ai_filter('[p=0] ' || x)) bb USING (id) WHERE bb.id IS NULL) j USING (id) ORDER BY d.id;
+----
+1
+2
+
+# an ASOF join's right side supplies the CLOSEST match: unfiltered, the dropped row r2 (t=2) replaces r1 as
+# l's match, so the copy's key is {2} and docs would be cut to id 2 while the real neighbour yields id 1
+statement ok
+CREATE TABLE l AS SELECT 3 AS t;
+
+statement ok
+CREATE TABLE r AS SELECT * FROM (VALUES (1, 1, '[p=100] keep'), (2, 2, '[p=0] drop')) v(id, t, x);
+
+query I
+SELECT d.id FROM docs d JOIN (SELECT r.id FROM l ASOF JOIN (SELECT * FROM r WHERE ai_filter(x)) r ON l.t >= r.t) j USING (id) WHERE ai_filter('[p=100] asof ' || d.body);
+----
+1
+
+# a monotone neighbour still reduces: docs is cut to b's one id before its own predicate runs (1 call each
+# side; with the pull-up on, the lifted node above the join asks more, which hides the reduction)
+statement ok
+SET ai_pullup = false;
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT d.id FROM docs d JOIN (SELECT id FROM b WHERE ai_filter('[p=100] ' || x)) j USING (id) WHERE ai_filter('[p=100] mono ' || d.body);
+----
+1
+
+query I
+SELECT sum(llm_calls) FROM ai_usage();
+----
+2
+
+statement ok
+CALL ai_mock_stop();

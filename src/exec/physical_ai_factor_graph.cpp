@@ -341,6 +341,7 @@ struct GraphStreamPool {
 		const Expression *sub_node;
 		vector<string> prompts;
 		vector<string> prefixes; // per-leaf provider-cache prefixes; empty = plain prompts
+		vector<char> nulls;      // per-leaf: the prompt is NULL (decided by its wrapper, no call)
 		string key;
 		bool is_unary;
 		idx_t domain;
@@ -397,7 +398,7 @@ struct GraphStreamPool {
 					try {
 						value = AIFactorEvalUnit(*context, task.sub_node->Cast<BoundFunctionExpression>(), task.prompts,
 						                         query_text, valid, task.prefixes.empty() ? nullptr : &task.prefixes,
-						                         task.expected_reuse) &&
+						                         static_cast<double>(task.expected_reuse), &task.nulls) &&
 						        valid;
 					} catch (std::exception &ex) {
 						failure = ErrorData(ex);
@@ -654,7 +655,8 @@ struct GraphUnitBaker {
 		}
 	}
 
-	vector<string> Bake(bool is_unary, idx_t domain, idx_t a, idx_t b) {
+	//! `nulls[l]` = 1 when leaf l's prompt is NULL (its answer is NULL; the unit decides it without a call).
+	vector<string> Bake(bool is_unary, idx_t domain, idx_t a, idx_t b, vector<char> &nulls) {
 		auto &sub = is_unary ? side_sub[domain] : edge_sub[domain];
 		auto &fn_sub = sub->Cast<BoundFunctionExpression>();
 		const idx_t nleaf = (fn_sub.GetChildren().size() - 1) / 3; // tree + 3n (+meta)
@@ -684,8 +686,10 @@ struct GraphUnitBaker {
 		out.Initialize(BufferAllocator::Get(context), out_types);
 		exec->Execute(*row, out);
 		vector<string> prompts(nleaf);
+		nulls.assign(nleaf, 0);
 		for (idx_t l = 0; l < nleaf; l++) {
 			const Value v = out.data[l].GetValue(0);
+			nulls[l] = v.IsNull() ? 1 : 0;
 			prompts[l] = v.IsNull() ? string() : StringValue::Get(v);
 		}
 		return prompts;
@@ -697,19 +701,20 @@ struct GraphUnitBaker {
 	//! factors whose prompts coincide (sides of identical text) but differ in NOT, OR/AND or a wrapper
 	//! must not share it.
 	void Unit(bool is_unary, idx_t domain, idx_t a, idx_t b, vector<string> &prompts, vector<string> &prefixes,
-	          string &key) {
-		prompts.clear();
+	          vector<char> &nulls, string &key) {
 		prefixes.clear();
-		if (!is_unary && cache_enabled[domain]) {
+		// The full prompts decide NULL-ness (the all-columns-NULL guard lives in the prompt expression, not in
+		// its split operands); a cache-split pair prompt is then re-baked as prefix + suffix when it is not NULL.
+		prompts = Bake(is_unary, domain, a, b, nulls);
+		if (!is_unary && cache_enabled[domain] && prompts.size() == 1 && !nulls[0]) {
 			string prefix, suffix;
 			BakeSplit(domain, a, b, prefix, suffix);
-			prompts.push_back(std::move(suffix));
+			prompts[0] = std::move(suffix);
 			prefixes.push_back(std::move(prefix));
-		} else {
-			prompts = Bake(is_unary, domain, a, b);
 		}
 		key.clear();
 		for (idx_t l = 0; l < prompts.size(); l++) {
+			key += nulls[l] ? '\x00' : '\x01'; // a NULL leaf is not an empty prompt
 			if (l < prefixes.size()) {
 				key += prefixes[l];
 			}
@@ -1157,10 +1162,12 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 			// the hint is this member's remaining live pairs, this call included.
 			expected_reuse = unknown_pairs(baker.CacheGroupSide(domain), baker.CacheGroupMember(domain, a, b),
 			                               DConstants::INVALID_INDEX, domain);
+			expected_reuse = expected_reuse > 0 ? expected_reuse - 1 : 0; // the later reads: this call excluded
 		}
 		vector<string> prompts, prefixes;
+		vector<char> nulls;
 		string key;
-		baker.Unit(is_unary, domain, a, b, prompts, prefixes, key);
+		baker.Unit(is_unary, domain, a, b, prompts, prefixes, nulls, key);
 		if (is_unary) {
 			uval[domain][a] = 3; // dispatched
 		} else {
@@ -1173,8 +1180,8 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 		}
 		parked.emplace(key, vector<GraphStreamPool::Done> {});
 		pool.Submit(GraphStreamPool::Task {is_unary ? side_sub[domain].get() : edge_sub[domain].get(),
-		                                   std::move(prompts), std::move(prefixes), std::move(key), is_unary, domain, a,
-		                                   b, expected_reuse});
+		                                   std::move(prompts), std::move(prefixes), std::move(nulls), std::move(key),
+		                                   is_unary, domain, a, b, expected_reuse});
 	};
 	auto apply_value = [&](bool is_unary, idx_t domain, idx_t a, idx_t b, bool value) {
 		if (is_unary) {
@@ -1874,10 +1881,12 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 		if (!is_unary && baker.cache_enabled[domain]) {
 			const idx_t gs = baker.CacheGroupSide(domain);
 			expected_reuse = unknown(domain, axis_of(domain, gs), baker.CacheGroupMember(domain, a, b));
+			expected_reuse = expected_reuse > 0 ? expected_reuse - 1 : 0; // the later reads: this call excluded
 		}
 		vector<string> prompts, prefixes;
+		vector<char> nulls;
 		string key;
-		baker.Unit(is_unary, domain, a, b, prompts, prefixes, key);
+		baker.Unit(is_unary, domain, a, b, prompts, prefixes, nulls, key);
 		if (is_unary) {
 			uval[domain][a] = 3;
 		} else {
@@ -1891,7 +1900,7 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 		}
 		parked.emplace(key, vector<GraphStreamPool::Done> {});
 		pool.Submit(GraphStreamPool::Task {baker.SubNode(is_unary, domain), std::move(prompts), std::move(prefixes),
-		                                   std::move(key), is_unary, domain, a, b, expected_reuse});
+		                                   std::move(nulls), std::move(key), is_unary, domain, a, b, expected_reuse});
 	};
 	auto apply_value = [&](bool is_unary, idx_t domain, idx_t a, idx_t b, bool value) {
 		if (is_unary) {

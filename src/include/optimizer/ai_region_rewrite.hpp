@@ -43,8 +43,10 @@ private:
 	//! Stage-3 scan path) skips lazily-evaluated positions -- CASE beyond the first WHEN condition and
 	//! conjunction arms -- so factorization never evaluates inputs native execution would have short-circuited
 	//! away (never MORE calls). Returns true if anything was hoisted.
+	//! `sole_predicate`: `expr` is the one and only predicate of a FILTER -- the only position where a hoisted
+	//! node may take the LIMIT's early-stop (see the definition).
 	bool HoistAICalls(unique_ptr<Expression> &expr, unique_ptr<LogicalOperator> &child_slot, int64_t limit_k,
-	                  bool lazy_guard = false);
+	                  bool lazy_guard, bool sole_predicate);
 };
 
 } // namespace duckdb

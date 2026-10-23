@@ -1,0 +1,50 @@
+# name: test/sql/functions/region_limit_sole_predicate.test
+# description: A region takes a LIMIT's early-stop only as the sole predicate of a filter. Under the early stop
+# group: [functions]
+
+#              the inputs after the k-th passer stay undecided and broadcast as false; a filter above drops them,
+#              a projection would emit them as values. Every row's true value below is 1 / true, so any 0 / false
+#              among the first k rows is a wrong value.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_concurrency = 4;
+
+statement ok
+CREATE TABLE docs AS SELECT i AS id, 'doc ' || i AS body FROM range(1, 2001) r(i);
+
+statement ok
+CREATE TABLE hot AS SELECT i AS id, 'h' || i AS name FROM range(1, 2001) r(i);
+
+# CASE over a folded OR node in a projection above a join, under LIMIT
+query I
+SELECT sum(v) FROM (SELECT d.id, CASE WHEN ai_filter('[p=100] a ' || d.body || h.name) OR ai_filter('[p=0] b ' || d.body || h.name) THEN 1 ELSE 0 END AS v FROM docs d JOIN hot h USING (id) LIMIT 5);
+----
+5
+
+# the node as a projected boolean
+query I
+SELECT count(*) FILTER (WHERE v) FROM (SELECT d.id, ai_filter('[p=100] c ' || d.body || h.name) OR ai_filter('[p=0] d ' || d.body || h.name) AS v FROM docs d JOIN hot h USING (id) LIMIT 5);
+----
+5
+
+# the same node as a filter's sole predicate keeps the early stop: k rows, far fewer calls than rows
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM (SELECT d.id FROM docs d JOIN hot h USING (id) WHERE ai_filter('[p=100] e ' || d.body || h.name) OR ai_filter('[p=0] f ' || d.body || h.name) LIMIT 5);
+----
+5
+
+query I
+SELECT (SELECT sum(llm_calls) FROM ai_usage()) < 100;
+----
+true
+
+statement ok
+CALL ai_mock_stop();

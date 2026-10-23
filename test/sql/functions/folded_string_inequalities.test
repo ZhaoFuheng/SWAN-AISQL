@@ -1,0 +1,79 @@
+# name: test/sql/functions/folded_string_inequalities.test
+# description: A string comparison folded into a leaf keeps its operator. The mock answers 'ok' to ai_complete
+# group: [functions]
+
+#              and a label to ai_classify; every query is checked against its native (unfolded) answer:
+#              'ok' > 'a', 'ok' < 'z', 'ok' >= 'ok' hold, 'ok' > 'z' does not; the flipped form and the
+#              above-join (region) path fold the same way.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE t AS SELECT i AS id, 'x' || i AS a, 'y' || i AS b FROM range(1, 6) r(i);
+
+statement ok
+CREATE TABLE m AS SELECT i AS id FROM range(1, 6) r(i);
+
+query I
+SELECT count(*) FROM t WHERE ai_complete(a) > 'a' AND ai_filter('[p=100] ' || b);
+----
+5
+
+query I
+SELECT count(*) FROM t WHERE ai_complete(a) < 'z' AND ai_filter('[p=100] ' || b);
+----
+5
+
+query I
+SELECT count(*) FROM t WHERE ai_complete(a) >= 'ok' AND ai_filter('[p=100] ' || b);
+----
+5
+
+query I
+SELECT count(*) FROM t WHERE ai_complete(a) <= 'ok' AND ai_filter('[p=100] ' || b);
+----
+5
+
+query I
+SELECT count(*) FROM t WHERE ai_complete(a) > 'z' AND ai_filter('[p=100] ' || b);
+----
+0
+
+query I
+SELECT count(*) FROM t WHERE ai_complete(a) < 'a' AND ai_filter('[p=100] ' || b);
+----
+0
+
+# flipped: constant on the left
+query I
+SELECT count(*) FROM t WHERE 'a' < ai_complete(a) AND ai_filter('[p=100] ' || b);
+----
+5
+
+# the region path above a join
+query I
+SELECT count(*) FROM t JOIN m USING (id) WHERE ai_complete(a) > 'a' AND ai_filter('[p=100] ' || b);
+----
+5
+
+# ai_classify: the folded order agrees with the native one, whatever labels the mock picks
+query I
+SELECT (SELECT count(*) FROM t WHERE ai_classify(a, ['alpha', 'omega']) > 'b' AND ai_filter('[p=100] ' || b))
+     = (SELECT count(*) FROM t WHERE ai_classify(a, ['alpha', 'omega']) > 'b');
+----
+true
+
+# the native answer, for the record
+statement ok
+SET ai_reorder = false;
+
+query I
+SELECT count(*) FROM t WHERE ai_complete(a) > 'a' AND ai_filter('[p=100] ' || b);
+----
+5
+
+statement ok
+CALL ai_mock_stop();

@@ -1,0 +1,100 @@
+# name: test/sql/factor_join/prefix_cache_feedback.test
+# description: The prefix lifecycle reads the provider's answer back. A warm read whose usage reports zero
+# group: [factor_join]
+
+#              cached tokens means the provider is not holding the span: the key re-primes once, a second
+#              zero gives it up (plain from then on), and three keys given up in a row switch prefix
+#              caching off for the process. The mock reports cached tokens on every breakpoint request
+#              unless the seed carries '[nocache]'. Results never change: caching is cost, not answers.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+# no hedged duplicates: a hedge re-sends a request, breakpoint included, and would blur the counts
+statement ok
+SET ai_hedge = false;
+
+statement ok
+CREATE TABLE docs AS SELECT 'left doc '||i::VARCHAR||': '||repeat('lorem ipsum dolor sit amet ', 170) AS d FROM range(5) r(i);
+
+statement ok
+CREATE TABLE items AS SELECT 'item '||i::VARCHAR AS it FROM range(7) r(i);
+
+# reference: the held-span case (every pair call carries the breakpoint: 5 writes + 30 parked reads)
+statement ok
+CREATE TABLE r_held AS SELECT d, it FROM docs, items WHERE ai_filter('[p=40] compat? ' || d || ' :: ' || it);
+
+query I
+SELECT breakpoint_requests FROM ai_mock_breakpoints();
+----
+35
+
+# a provider that never serves the span: every key still pays its write and the parked reads that were
+# already stamped (the first wave cannot know yet); the first zero-cached read sends the key back for one
+# re-prime, a zero read after that re-prime gives the key up, and three give-ups in a row switch splitting
+# off for the process. How many of those steps fall inside one query depends on thread timing (a reader
+# that wakes after the first zero already re-primes), so the counts below are bounds; by the third run of
+# the same prompt every key has been given up and the process is plain.
+statement ok
+CREATE TABLE r_nocache AS SELECT d, it FROM docs, items WHERE ai_filter('[p=40][nocache] compat? ' || d || ' :: ' || it);
+
+# at least the first wave's five writes carry the breakpoint; how many stamped reads follow before the
+# process goes plain is timing
+query I
+SELECT breakpoint_requests > 35 FROM ai_mock_breakpoints();
+----
+true
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE r_run2 AS SELECT d, it FROM docs, items WHERE ai_filter('[p=40][nocache] compat? ' || d || ' :: ' || it);
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE r_run3 AS SELECT d, it FROM docs, items WHERE ai_filter('[p=40][nocache] compat? ' || d || ' :: ' || it);
+
+# the same prompt answered with and without splitting: identical rows (the '[nocache]' knob is part of the
+# prompt text, so only runs of the same text compare)
+query I
+SELECT count(*) FROM ((SELECT d, it FROM r_nocache EXCEPT SELECT d, it FROM r_run3) UNION ALL (SELECT d, it FROM r_run3 EXCEPT SELECT d, it FROM r_nocache));
+----
+0
+
+# from here on nothing is split any more: a new pair prompt (new keys) emits no breakpoint at all
+statement ok
+CREATE TABLE before_after AS SELECT breakpoint_requests AS n FROM ai_mock_breakpoints();
+
+statement ok
+CREATE TABLE r_after AS SELECT d, it FROM docs, items WHERE ai_filter('[p=40][nocache] still compat? ' || d || ' :: ' || it);
+
+query I
+SELECT breakpoint_requests = (SELECT n FROM before_after) FROM ai_mock_breakpoints();
+----
+true
+
+query I
+SELECT count(*) > 0 FROM r_after;
+----
+true
+
+# the mock restart resets the lifecycle (as it resets every other process-global): splitting is back
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE r_again AS SELECT d, it FROM docs, items WHERE ai_filter('[p=40] compat again? ' || d || ' :: ' || it);
+
+query I
+SELECT breakpoint_requests FROM ai_mock_breakpoints();
+----
+35
+
+
+statement ok
+CALL ai_mock_stop();

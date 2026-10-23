@@ -107,6 +107,17 @@ private:
 		int8_t verdict = -1;      //! -1 unknown, 0 false, 1 true (meaningful once state == DONE)
 		uint8_t state = 0;        //! 0 idle, 1 pending, 2 in flight, 3 done
 		vector<uint32_t> waiters; //! rows waiting on this rep's verdict
+		//! Expected later reads of the prompt's leading span (the prefix-cache write hint): the largest over
+		//! the rows that scheduled this rep, each from its own order and predictions. -1 = unknown: no other
+		//! leaf of this node shares the span, so any reuse is in another operator the node cannot see (the
+		//! client's adaptive rule then decides).
+		double reuse_hint = -1.0;
+		//! The row that scheduled this rep (its order and predictions produce the hint). The hint is
+		//! recomputed at DISPATCH time from the verdicts observed by then: a whole chunk of rows is decided
+		//! before any answer lands, so a scheduling-time hint would write every row on the cold prediction.
+		uint32_t hint_row = 0;
+		bool has_hint_row = false;
+		bool async_inflight = false; //! submitted to the async dispatcher and not yet landed
 	};
 	struct Leaf {
 		vector<idx_t> key_cols;
@@ -118,6 +129,13 @@ private:
 		vector<uint32_t> stage_reps;
 	};
 
+	//! Per leaf: the row-varying operand its prompt LEADS with (its expression text), empty for a constant-first
+	//! prompt. Leaves leading with the same operand share a provider-cached span; the write hint counts the row's
+	//! later such leaves.
+	vector<string> lead_key;
+	//! Per leaf: another leaf of the node carries the same sharing tag, so this leaf's span is read by it. Only
+	//! then do the observed pass rates feed a write decision, and only then is dispatch held to the window.
+	vector<char> has_partner;
 	bool AppendSlice(DataChunk &chunk, idx_t begin, idx_t end);
 	void FlushStage(idx_t leaf);
 	//! Re-predict a rep's P(true) if the model has trained since it was predicted: a forward pass over the
@@ -129,6 +147,9 @@ private:
 	//! the lazy per-rep refresh would have touched, without a lock, allocation and weight-matrix walk each.
 	void RefreshStalePredictions(const uint32_t *rows, idx_t count);
 	void DecideRow(uint32_t row);
+	//! The prefix-cache write hint of leaf `l` for `row`: the expected later reads of the row's other leaves on
+	//! the same leading span, on the pass rates observed so far (shrunk toward the predictions). -1 = unknown.
+	double ReuseHintFor(uint32_t row, idx_t l);
 	//! A verdict landed on (leaf, rep): record it, then re-decide every row waiting on it.
 	void ApplyVerdict(idx_t leaf, uint32_t rep_id, bool value, bool valid);
 	//! Hand pending reps to the dispatcher (round-robin over the leaves): all of them once the model is warm
@@ -167,6 +188,14 @@ private:
 	int64_t passed = 0;
 	idx_t dispatched = 0;
 	vector<idx_t> landed; //! verdicts landed per leaf (the warm gate waits for a batch on every leaf)
+	//! Per leaf: valid verdicts seen and how many were true -- this query's own pass rate, which the prefix-
+	//! cache write decision trusts over the cold model's prediction once a few answers are in (shrunk toward
+	//! the prediction with a prior of PASS_RATE_PRIOR answers). The leaf ORDER keeps the model's prediction.
+	vector<idx_t> observed_n, observed_true;
+	//! Per leaf: reps in flight on the async dispatcher. A leaf whose reps carry a write hint is held to one
+	//! concurrency-wide window in flight until it has that many verdicts, so every later submission's hint
+	//! sees real pass rates (a backlog submitted cold writes every row on the model's neutral guess).
+	vector<idx_t> async_inflight;
 	//! Owning-thread time accounting (seconds), see TimingSummary.
 	double t_embed = 0, t_refresh = 0, t_decide = 0, t_wait = 0, t_warm_gate = 0;
 	idx_t refreshes = 0, waits = 0;

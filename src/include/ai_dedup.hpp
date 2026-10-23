@@ -114,10 +114,12 @@ void AIFactorPromptOperands(const Expression &call_prompt, vector<const Expressi
 //! Evaluate ONE factor-graph unit (a member or pair) of a conjunctive sub-node from its baked
 //! leaf prompts: leaves run in order with conjunction short-circuit; each leaf call goes through
 //! the client (query cache, single-flight, hedging, the global concurrency gate). `valid` false
-//! on a failed call. Backs the streaming graph executor's worker tasks.
+//! on a failed call. `leaf_null[l]`: leaf l's prompt is NULL -- its answer is NULL and its wrapper decides
+//! over that (no call). Backs the streaming graph executor's worker tasks.
 bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub_node,
                       const vector<string> &leaf_prompts, const string &query_text, bool &valid,
-                      const vector<string> *leaf_prefixes = nullptr, idx_t expected_reuse = 0);
+                      const vector<string> *leaf_prefixes = nullptr, double expected_reads = 0.0,
+                      const vector<char> *leaf_null = nullptr);
 
 //! Clone a conjunctive folded node restricted to `leaf_ids`, remapping every column reference
 //! through `index_map` (combined layout -> evaluation-chunk layout). The clone is a plain
@@ -141,6 +143,15 @@ struct AILeafTexts {
 	vector<string> prompt, pred_text, input_text;
 	vector<double> cost;
 	vector<char> valid;
+	//! Per rep: expected later reads of the leading span (the prefix-cache write hint); empty = none.
+	vector<double> reuse_hint;
+	//! Per rep: the span a region declares as its provider prefix: the constant head (if any) followed by the
+	//! first row-varying operand (an image reference, a document column); empty when no row-varying operand
+	//! follows the head. Built with the prompt, since the baked string carries no boundary.
+	vector<string> lead_span;
+	//! The leaf's constant head: the text of the foldable operands the prompt starts with (instruction,
+	//! few-shot examples), the same for every rep; empty when the prompt starts with a row-varying operand.
+	string head;
 	idx_t Size() const {
 		return prompt.size();
 	}
@@ -186,12 +197,33 @@ public:
 	explicit AILeafUnitEvaluator(const BoundFunctionExpression &eval_call);
 	~AILeafUnitEvaluator();
 	//! BOOLEAN true/false, or a NULL Value when the call got no usable answer.
+	//! `reuse_hint`: expected later reads of the prompt's leading span (0 = none known); `lead_span`: that
+	//! span's text (nullptr = derive the leading image from the prompt, or declare nothing); `head`: the
+	//! leaf's constant head with `head_reads` the leaf's other reps (declared instead when it clears the gate).
 	Value Evaluate(ClientContext &context, idx_t leaf, const string &prompt, const string &pred_text,
-	               const vector<float> &feature, const string &query_text) const;
+	               const vector<float> &feature, const string &query_text, double reuse_hint = -1.0,
+	               const string *lead_span = nullptr, const string *head = nullptr, double head_reads = 0.0) const;
+	//! The leaf's function kind ('F' = ai_filter; classify/score/complete otherwise), from its meta.
+	char LeafKind(idx_t leaf) const;
+	//! The leaf's verdict when its prompt is NULL (the call answers NULL): its wrapper over NULL, else NULL.
+	AITriState NullOutcome(ClientContext &context, idx_t leaf) const;
 
 private:
 	struct Impl;
 	unique_ptr<Impl> impl;
 };
+
+//! The operand a leaf's prompt LEADS with when it is row-varying (not a constant): its expression text, the
+//! key under which leaves sharing a leading input group; empty for a constant-first prompt. `leading` (when
+//! given) receives the operand itself so its text can be materialised per row.
+string AILeafLeadKey(const BoundFunctionExpression &eval_call, idx_t leaf, const Expression **leading = nullptr);
+//! The text of the foldable operands a leaf's prompt starts with (its constant head), evaluated once; empty
+//! when the prompt starts with a row-varying operand.
+string AILeafHeadText(ClientContext &context, const BoundFunctionExpression &eval_call, idx_t leaf);
+
+//! Test knob: a '[sel=NN]' marker in a leaf's prompt pins its predicted P(true) to NN/100 (the mock's '[p=NN]'
+//! pins the ANSWER; this pins the prediction the order and the prefix-cache write decision are based on).
+//! Returns true when the marker was present.
+bool AIDebugSelectivityKnob(const string &prompt, double &p_true);
 
 } // namespace duckdb

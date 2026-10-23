@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <atomic>
 #include "duckdb/common/common.hpp"
 #include "duckdb/common/string.hpp"
 #include "duckdb/common/vector.hpp"
@@ -52,6 +53,13 @@ struct AIConfig {
 	//! Optional reasoning effort forwarded per request (low/medium/high; "" = omit). The
 	//! litellm proxy can also pin it per model; this field covers direct endpoints.
 	string reasoning_effort;
+	//! Request API: "auto" (default) sends a request through Chat Completions unless it writes or reads a
+	//! declared prompt-cache span, which goes through the OpenAI Responses API (POST /v1/responses: the
+	//! explicit breakpoint rides on the block itself, image blocks included, so image prefixes cache; a
+	//! span written there must be read there, the provider keys on the serialized prefix). "responses" and
+	//! "chat" force one path (chat: for endpoints without /v1/responses; images never cache there). Same
+	//! prompts, same JSON-schema output, same answers either way; chat is a little faster per call.
+	string api = "auto";
 	int32_t timeout_ms;
 	//! Fixed concurrency used when turbo mode is off.
 	idx_t max_concurrency;
@@ -134,6 +142,11 @@ struct AIConfig {
 	double price_input_per_mtok;
 	double price_output_per_mtok;
 	double price_cached_per_mtok;
+	//! Provider cache prices relative to the input rate: a written span costs write_mult x, a served
+	//! span read_mult x (GPT-5.6: 1.25 and 0.1, measured). They set the write threshold
+	//! (write - 1) / (1 - read) on expected reads and price written tokens in the fallback cost.
+	double price_cache_write_mult = 1.25;
+	double price_cache_read_mult = 0.1;
 
 	//! Cached singleton, initialized from the environment on first use.
 	static const AIConfig &Get();
@@ -148,6 +161,10 @@ struct AIConfig {
 };
 
 //! Per-query LLM usage/cost record. One entry per distinct query text.
+//! Test knobs ('[sel=' in a prompt, 'hedge=' in ai_debug_log) are read only once a mock has been started
+//! in this process: production prompts are never scanned for them.
+std::atomic<bool> &AIDebugKnobsEnabled();
+
 struct AIQueryUsage {
 	uint64_t query_id = 0;      // stable id assigned when the query is first seen
 	string query_text;          // the SQL text (from ClientContext::GetCurrentQuery)
@@ -160,8 +177,9 @@ struct AIQueryUsage {
 	                            // function returned NULL
 	uint64_t input_tokens = 0;  // prompt tokens
 	uint64_t cached_tokens = 0; // provider-cached prompt tokens (subset of input_tokens)
-	uint64_t output_tokens = 0; // completion tokens
-	uint64_t reasoning_tokens = 0; // reasoning tokens (subset of output_tokens)
+	uint64_t cache_write_tokens = 0; // prompt tokens written to the provider cache (billed at the write price)
+	uint64_t output_tokens = 0;      // completion tokens
+	uint64_t reasoning_tokens = 0;   // reasoning tokens (subset of output_tokens)
 	uint64_t total_tokens = 0;
 	double cost_usd = 0.0;
 };
@@ -201,10 +219,13 @@ struct AIRequest {
 	//! span (system + prefix) >= 1,024 visible tokens or the provider ignores it. Local-cache
 	//! identity is prefix+prompt concatenated, so splitting never changes cache hits.
 	string prompt_prefix;
-	//! Declared fan-out hint for the prefix: how many calls the operator expects to share it.
-	//! >= 2 makes the first dispatch the cache write (oracle policy); 0/1 = unknown, the client
-	//! falls back to adaptive second-arrival-write. Never affects results, only cache economics.
-	idx_t expected_reuse = 0;
+	//! Declared reuse of the prefix: the EXPECTED number of later calls that will read it (a pair
+	//! prompt: the member's live partners; a region leaf: the row's later leaves on the same input,
+	//! weighted by the chance of reaching them). Known (>= 0): every arrival writes iff the expectation
+	//! exceeds the price threshold ((write - 1) / (1 - read), 0.28 at 1.25x / 0.1x), so a span whose
+	//! reads are behind it is never written. Unknown (< 0, the scalar paths): the adaptive rule, plain on
+	//! first sight and a write on the second. Never affects results, only cache economics.
+	double expected_reads = -1.0;
 	//! Dispatch-time decision, set by the client's prefix lifecycle (never by operators): emit
 	//! the split content + breakpoint. False -> prefix is merged into the prompt (plain body).
 	bool emit_breakpoint = false;
@@ -240,6 +261,11 @@ bool AIUsesTypeSafe(const AIRequest &request);
 struct AIResult {
 	string content;
 	bool success = false;
+	//! Provider usage of the answering request (0 when served from a local cache): what the prefix
+	//! lifecycle reads back to learn whether a warm prefix was really served from the provider cache.
+	uint64_t input_tokens = 0;
+	uint64_t cached_tokens = 0;
+	uint64_t cache_write_tokens = 0;
 };
 
 //! Result of one embedding: the vector, or success=false on failure.
@@ -277,6 +303,36 @@ AIConfig AIConfigForContext(ClientContext &context);
 //! Observed bytes-per-token for this workload/model (EMA over real text responses; 4.0 until
 //! 20 samples). The prefix-cache gate divides byte lengths by this instead of assuming 4.
 double AICalibratedBytesPerToken();
+//! Provider tokens per ai_image() reference, learned from single-image requests' usage (1,024 before any sample).
+double AICalibratedImageTokens();
+//! The span a region declares as its prefix: the ai_image() reference a prompt LEADS with (the
+//! convention: the shared input first, the instruction after it). Empty when the prompt does not start
+//! with an image, since a span behind an instruction is never shared with another predicate.
+string AIImagePrefixSpan(const string &prompt);
+//! Declare `span`, the text the prompt leads with (an image reference, a document), as the request's
+//! prefix (prompt = the rest) with `expected_reads` as the reuse hint. Nothing happens when the span is
+//! empty, is not the prompt's start, or leaves no suffix; the plain prompt variant and
+//! ai_prefix_cache=false leave the request as it was. The size gate decides later whether it is long enough.
+void AIDeclareLeadingSpan(AIRequest &request, const AIConfig &config, const string &span, double expected_reads);
+//! One breakpoint per request, after the longest prefix worth sharing: `head` (the constant text the prompt
+//! starts with -- an instruction or few-shot block, shared by every row) when it clears the provider's
+//! minimum on its own, with `head_reads` (the rows the declarer sees besides this one); else `span` (the
+//! row-varying input the prompt leads with, shared by the predicates on it) with `span_reads`.
+void AIDeclareLeadingSpans(AIRequest &request, const AIConfig &config, const string &head, double head_reads,
+                           const string &span, double span_reads);
+//! The region's scalar path asks one distinct input per call, so a scalar function's chunk says nothing
+//! about how many rows share its head: the region sets, for the thread running the call, how many OTHER
+//! distinct inputs it is driving (-1 = unset: the chunk's own row count decides).
+double AIScalarPeerRows();
+struct AIScalarPeerRowsScope {
+	explicit AIScalarPeerRowsScope(double peers);
+	~AIScalarPeerRowsScope();
+	AIScalarPeerRowsScope(const AIScalarPeerRowsScope &) = delete;
+	AIScalarPeerRowsScope &operator=(const AIScalarPeerRowsScope &) = delete;
+
+private:
+	double saved;
+};
 
 //! Probe the query-local response cache for `request`; true + `out` on a hit, never issues a call.
 bool AICacheProbe(const AIRequest &request, const string &query_text, AIResult &out,

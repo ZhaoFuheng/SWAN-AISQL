@@ -11,6 +11,7 @@
 #include "ai_mock_server.hpp"
 #include "optimizer/aisql_optimizer.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/string_util.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/config.hpp"
@@ -86,6 +87,18 @@ static const vector<AIConfigSetting> &AIConfigSettings() {
 		t.push_back({"ai_reasoning_effort", "Reasoning effort per request (low/medium/high; empty = omit)",
 		             LogicalType::VARCHAR, EnvOr("AI_REASONING_EFFORT", Value("")), str(&AIConfig::reasoning_effort),
 		             true});
+		t.push_back({"ai_api",
+		             "Request API: auto (chat, except a prompt-cache write or read goes to the Responses API), "
+		             "responses, or chat",
+		             LogicalType::VARCHAR, Value(ai.api),
+		             [](AIConfig &c, const Value &v) {
+			             const auto s = StringUtil::Lower(v.ToString());
+			             if (s != "auto" && s != "responses" && s != "chat") {
+				             throw InvalidInputException("ai_api must be 'auto', 'responses' or 'chat'");
+			             }
+			             c.api = s;
+		             },
+		             true});
 		t.push_back({"ai_concurrency", "Max in-flight LLM calls", LogicalType::UBIGINT,
 		             Value::UBIGINT(ai.max_concurrency), [](AIConfig &c, const Value &v) {
 			             const auto n = v.GetValue<uint64_t>();
@@ -106,6 +119,15 @@ static const vector<AIConfigSetting> &AIConfigSettings() {
 		             Value::DOUBLE(ai.price_output_per_mtok), price(&AIConfig::price_output_per_mtok), true});
 		t.push_back({"ai_price_cached", "USD per 1M cached input tokens (see ai_price_input)", LogicalType::DOUBLE,
 		             Value::DOUBLE(ai.price_cached_per_mtok), price(&AIConfig::price_cached_per_mtok), true});
+		t.push_back(
+		    {"ai_price_cache_write_mult",
+		     "Provider cache WRITE price relative to the input rate (1.25 on GPT-5.6); sets the write threshold",
+		     LogicalType::DOUBLE, Value::DOUBLE(ai.price_cache_write_mult), price(&AIConfig::price_cache_write_mult),
+		     true});
+		t.push_back({"ai_price_cache_read_mult",
+		             "Provider cache READ price relative to the input rate (0.1 on GPT-5.6); sets the write threshold",
+		             LogicalType::DOUBLE, Value::DOUBLE(ai.price_cache_read_mult),
+		             price(&AIConfig::price_cache_read_mult), true});
 		t.push_back({"ai_ca_cert_file", "CA bundle for https endpoints (empty = the system certificate store)",
 		             LogicalType::VARCHAR, Value(ai.ca_cert_file), str(&AIConfig::ca_cert_file), true});
 		t.push_back({"ai_tls_verify", "Verify the server certificate of https endpoints", LogicalType::BOOLEAN,
@@ -207,7 +229,7 @@ AIConfig AIConfigForContext(ClientContext &context) {
 
 // DuckDB takes a plain function pointer as the SET callback (no captures), so each table entry gets its own
 // instantiation that finds its row by index.
-constexpr size_t kAIConfigSettingCount = 27;
+constexpr size_t kAIConfigSettingCount = 30;
 
 template <size_t I>
 static void AIConfigSettingCallback(ClientContext &, SetScope scope, Value &v) {

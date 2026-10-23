@@ -79,6 +79,16 @@ AITriState AIFilterTreeEval(const AIFilterTreeNode &node, const vector<AITriStat
 idx_t AIFilterTreeChooseNextLeaf(const AIFilterTreeNode &node, const vector<AITriState> &leaf_values,
                                  const vector<double> &p_true, const vector<double> &cost);
 
+//! Expected number of LATER calls that will read a span the leaf `first` is about to write, for one
+//! row: the expectation, over the answers of the leaves still to be asked (each with its predicted
+//! P(true), leaves independent), of how many of the leaves marked in `shares` the row's evaluation
+//! will still ask, following the same next-leaf choice the real order makes. An AND asks its later
+//! leaves only on the true branch, an OR only on the false branch; NOT and nesting fall out of the tree
+//! fold. Drives the prefix-cache write decision: a write pays when this exceeds the price threshold.
+double AIFilterTreeExpectedSharedReads(const AIFilterTreeNode &node, vector<AITriState> leaf_values,
+                                       const vector<double> &p_true, const vector<double> &cost, idx_t first,
+                                       const vector<char> &shares);
+
 //! Estimate P(the whole tree evaluates true) from per-leaf P(true), assuming leaf independence
 //! (AND -> product, OR -> 1 - product of complements, NOT -> complement). Used by the speculative
 //! pre-filter to decide, per row, whether the node is selective enough to be worth evaluating early.

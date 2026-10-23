@@ -1,0 +1,324 @@
+# name: test/sql/functions/constant_head_prefix.test
+# description: One breakpoint per request, after the longest prefix worth sharing. The constant text a prompt
+# group: [functions]
+
+#              starts with (instruction, few-shot examples) is shared by every row of the predicate: when it
+#              clears the provider's minimum alone it is the span, written by the first row and read by every
+#              later one. Otherwise the row-varying input the prompt leads with is the span (shared by the
+#              predicates on it, the usual per-row write decision). The mock reports a span's first
+#              breakpoint request as a write (7 tokens) and later ones as reads (7). The second half holds
+#              the patterns where a write makes NO sense -- a head nobody else reads, a document nobody else
+#              reads, a document whose second predicate is never reached, the same document under DIFFERENT
+#              functions (each has its own system prompt and schema, so the same text is another span),
+#              caching off -- and checks that nothing is written there.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+# a ~1,200-token instruction head (few-shot examples) and a short per-row input
+statement ok
+CREATE TABLE items AS SELECT i AS id, 'item ' || i::VARCHAR || ' is a widget' AS x FROM range(50) r(i);
+
+statement ok
+SELECT ai_usage_reset();
+
+# the head is written by the first row and read by the other 49; the short input gets no span of its own
+query I
+SELECT count(*) FROM items WHERE ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || '[p=100] ' || x);
+----
+50
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+50	7	343
+
+# a short head is below the minimum: no span, nothing written or read
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM items WHERE ai_filter('Is the item below popular? [p=100] ' || x);
+----
+50
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+0	0	0
+
+# the same head before a long document read by two leaves: the head alone clears the minimum, so it is the
+# span -- one write for the whole query, 39 reads; the document after it is not a span of its own
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE docs AS SELECT i AS id, 'doc '||i::VARCHAR||': '||repeat('lorem ipsum dolor sit amet ', 170) AS d FROM range(20) r(i);
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || d || ' [p=100] Is it about taxes?') AND ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || d || ' [p=100] Is it about health?');
+----
+20
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+40	7	273
+
+# different heads before the same document: two spans, one write each, read by the other 19 rows of each leaf
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || 'A: ' || d || ' [p=100] Is it about taxes?') AND ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || 'B: ' || d || ' [p=100] Is it about health?');
+----
+20
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+40	14	266
+
+# --- where a write makes no sense ---
+
+# a one-row predicate: the head is shared by nobody, so the 1.25x write is never paid
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM items WHERE id = 7 AND ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || '[p=100] ' || x);
+----
+1
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+0	0	0
+
+# two (fresh) rows: one read pays for the write
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM items WHERE id IN (8, 9) AND ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || '[p=100] ' || x);
+----
+2
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+2	7	7
+
+# a long document first with a single predicate: nothing else reads the document, nothing is written
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter(d || ' [p=100] Is it about taxes?');
+----
+20
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+0	0	0
+
+# head + document under an AND whose first predicate fails every row ([sel=0] pins its predicted pass rate,
+# [p=0] its answers): the second predicate is never reached, so the document span is never written -- only
+# the head, once; the 19 later rows read it
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || d || ' [p=0][sel=0] Is it about taxes?') AND ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || d || ' [p=100] Is it about health?');
+----
+0
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+20	7	133
+
+# caching off: the same head-first query is sent plain
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_prefix_cache = false;
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM items WHERE ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || '[p=100] ' || x);
+----
+50
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+0	0	0
+
+statement ok
+SET ai_prefix_cache = true;
+
+# the same document under different functions: ai_filter, ai_complete, ai_classify and ai_score each send
+# their own system prompt and schema, so the document under each is a different span at the provider and
+# none of them can read what another wrote -- nothing is written for any of them, even with free writes.
+# (Fresh mock state and a new question per query: a question re-asked over the same documents in a later
+# query IS proven reuse, which the free-write rule takes up.)
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_price_cache_write_mult = 1.0;
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM docs WHERE ai_filter(d || ' [p=100] Is it about taxes?') AND ai_complete(d || ' [p=100] One word: is it about health?') = 'yes';
+----
+true
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+0	0	0
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_price_cache_write_mult = 1.0;
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM docs WHERE ai_filter(d || ' [p=100] Is it about crime?') AND ai_classify(d, ['tax', 'health']) = 'tax';
+----
+true
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+0	0	0
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_price_cache_write_mult = 1.0;
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM docs WHERE ai_filter(d || ' [p=100] Is it about weather?') AND ai_score(d, 'relevance to health') > 0.5;
+----
+true
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+0	0	0
+
+# control: the same document under two ai_filter leaves IS shared (free writes: every row writes once, reads once)
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_price_cache_write_mult = 1.0;
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter(d || ' [p=100] Is it about sport?') AND ai_filter(d || ' [p=100] Is it about music?');
+----
+20
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+40	140	140
+
+# ... and a projection over those documents with the other functions (while the filters' spans are still
+# held) sends no breakpoint and reads nothing: the count stays at the control's 40
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(s || c || r::VARCHAR) FROM (SELECT ai_complete(d || ' [p=100] Summarise in one word.') AS s, ai_classify(d, ['tax', 'health']) AS c, ai_score(d, 'relevance to health') AS r FROM docs);
+----
+20
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+40	0	0
+
+statement ok
+SET ai_price_cache_write_mult = 1.25;
+
+# the chat API carries the one breakpoint too: a text head caches there as well
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_api = 'chat';
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM items WHERE ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || '[p=100] ' || x);
+----
+50
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+50	7	343
+
+statement ok
+SET ai_api = 'responses';
+
+statement ok
+CALL ai_mock_stop();

@@ -111,16 +111,16 @@ SQL = {
  "q10": """WITH pre AS (SELECT s.id, s.title, coalesce(s.description,'') AS description, i.filepath
      FROM styles_details s JOIN images i ON i.id = s.id
      WHERE s.baseColour IN ('Black','Blue','Red','White') AND s.price <= 1000),
-   footwear AS (SELECT * FROM pre WHERE ai_filter('The image depicts a (pair of) shoe(s), sandal(s), '
-     || 'flip-flop(s). If there are multiple products in the picture, always refer to the most prominent one. '
-     || ai_image(filepath))),
-   bottomwear AS (SELECT * FROM pre WHERE ai_filter('The image depicts a piece of apparel that can be worn '
-     || 'on the lower part of the body, like pants, shorts, skirts, ... If there are multiple products in the '
-     || 'picture, always refer to the most prominent one. ' || ai_image(filepath))),
-   topwear AS (SELECT * FROM pre WHERE ai_filter('The image depicts a piece of apparel that can be worn on '
-     || 'the upper part of the body, like t-shirts, shirts, pullovers, hoodies, but still require some sort '
-     || 'of clothing on the lower body, which means, e.g., not a dress. If there are multiple products in the '
-     || 'picture, always refer to the most prominent one. ' || ai_image(filepath)))
+   footwear AS (SELECT * FROM pre WHERE ai_filter(ai_image(filepath) || ' The image depicts a (pair of) '
+     || 'shoe(s), sandal(s), flip-flop(s). If there are multiple products in the picture, always refer to the '
+     || 'most prominent one.')),
+   bottomwear AS (SELECT * FROM pre WHERE ai_filter(ai_image(filepath) || ' The image depicts a piece of '
+     || 'apparel that can be worn on the lower part of the body, like pants, shorts, skirts, ... If there are '
+     || 'multiple products in the picture, always refer to the most prominent one.')),
+   topwear AS (SELECT * FROM pre WHERE ai_filter(ai_image(filepath) || ' The image depicts a piece of apparel '
+     || 'that can be worn on the upper part of the body, like t-shirts, shirts, pullovers, hoodies, but still '
+     || 'require some sort of clothing on the lower body, which means, e.g., not a dress. If there are '
+     || 'multiple products in the picture, always refer to the most prominent one.'))
    SELECT f.id || '-' || b.id || '-' || t.id AS id
    FROM footwear f, bottomwear b, topwear t
    WHERE ai_filter('The images depict products with the same primary base color, e.g., both are black, and '
@@ -136,29 +136,27 @@ SQL = {
 
  "q11": """WITH pre AS (SELECT s.id, s.title, coalesce(s.description,'') AS description, s.price, i.filepath
      FROM styles_details s JOIN images i ON i.id = s.id),
-   footwear AS (SELECT * FROM pre WHERE ai_filter('You will receive an image and a description of a product. '
+   footwear AS (SELECT * FROM pre WHERE ai_filter(ai_image(filepath) || ' ' || title || ' ' || description
+     || ' You received an image and a description of a product above. '
      || 'Determine whether the product can be worn on the feet, like shoes, sandals, flip-flops, ... '
      || 'The predominant color of the depicted product should be black. If there are multiple products in the '
-     || 'picture, always refer to the most prominent one. The description of the product is as follows: '
-     || title || ' ' || description || ' ' || ai_image(filepath))),
-   bottomwear AS (SELECT * FROM pre WHERE ai_filter('You will receive an image and a description of a '
-     || 'product. Determine whether the product can be worn on the lower part of the body, like pants, '
+     || 'picture, always refer to the most prominent one.')),
+   bottomwear AS (SELECT * FROM pre WHERE ai_filter(ai_image(filepath) || ' ' || title || ' ' || description
+     || ' You received an image and a description of a product above. '
+     || 'Determine whether the product can be worn on the lower part of the body, like pants, '
      || 'shorts, skirts, ... The predominant color of the depicted product should be black. Do not consider '
-     || 'swimwear. If there are multiple products in the picture, always refer to the most prominent one. '
-     || 'The description of the product is as follows: ' || title || ' ' || description || ' '
-     || ai_image(filepath))),
-   topwear AS (SELECT * FROM pre WHERE ai_filter('You will receive an image and a description of a product. '
+     || 'swimwear. If there are multiple products in the picture, always refer to the most prominent one.')),
+   topwear AS (SELECT * FROM pre WHERE ai_filter(ai_image(filepath) || ' ' || title || ' ' || description
+     || ' You received an image and a description of a product above. '
      || 'Determine whether the product can be worn on the upper part of the body, like t-shirts, shirts, '
      || 'pullovers, hoodies, but still require some sort of clothing on the lower body, which means, e.g., '
      || 'not a dress. The predominant color of the depicted product should be black. Do not consider '
-     || 'swimwear. If there are multiple products in the picture, always refer to the most prominent one. '
-     || 'The description of the product is as follows: ' || title || ' ' || description || ' '
-     || ai_image(filepath))),
-   accessories AS (SELECT * FROM pre WHERE price <= 500 AND ai_filter('You will receive an image and a '
-     || 'description of a product. Determine whether the product a watch or some jewellery or a bag. A bag '
+     || 'swimwear. If there are multiple products in the picture, always refer to the most prominent one.')),
+   accessories AS (SELECT * FROM pre WHERE price <= 500 AND ai_filter(ai_image(filepath) || ' ' || title || ' '
+     || description || ' You received an image and a description of a product above. '
+     || 'Determine whether the product a watch or some jewellery or a bag. A bag '
      || 'might be a handbag or a (gym) backpack or some other type of bag. If there are multiple products in '
-     || 'the picture, always refer to the most prominent one. The description of the product is as follows: '
-     || title || ' ' || description || ' ' || ai_image(filepath)))
+     || 'the picture, always refer to the most prominent one.'))
    SELECT f.id || '-' || b.id || '-' || t.id || '-' || a.id AS id
    FROM footwear f, accessories a, bottomwear b, topwear t
    WHERE ai_filter('You will receive a description and an image of two products. Determine whether they are '

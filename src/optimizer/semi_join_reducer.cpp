@@ -3,6 +3,8 @@
 #include "duckdb/planner/expression/bound_constant_expression.hpp"
 #include "duckdb/planner/operator/logical_filter.hpp"
 #include "duckdb/planner/operator/logical_projection.hpp"
+#include "duckdb/planner/operator/logical_distinct.hpp"
+#include "plan/logical_ai_region.hpp"
 
 #include "ai_client.hpp"
 #include "ai_settings.hpp"
@@ -10,6 +12,7 @@
 #include <algorithm>
 
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
+#include "duckdb/planner/operator/logical_join.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
 #include "duckdb/planner/expression/bound_cast_expression.hpp"
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
@@ -195,9 +198,59 @@ void SemiJoinReducer::GatherChild(unique_ptr<LogicalOperator> &child,
 //! so there is no extra cost, no verdict-consistency question, and no AI expression in the copy
 //! to re-bind. Returns false if an AI call sits somewhere we cannot strip (a join condition or a
 //! projection), in which case the caller skips this reduction.
-bool AIStripAIPredicates(unique_ptr<LogicalOperator> &op) {
-	for (auto &child : op->children) {
-		if (!AIStripAIPredicates(child)) {
+//! Whether MORE rows out of `op`'s child `c` can only mean more (never fewer) rows out of `op`: the
+//! position is monotone, so an AI predicate stripped beneath it keeps the copy a superset. It is not for
+//! the excluded side of an ANTI join, a MARK's or SINGLE's subquery side, the null-extended side of an
+//! outer join (a filter above may test IS NULL), EXCEPT's right side, a CTE body (its references may sit
+//! anywhere), or anything whose output depends on the row set as a whole: a LIMIT / TOP_N / SAMPLE, a
+//! window, an aggregate (HAVING, or a key computed by it), DISTINCT ON, a recursive CTE.
+static bool StripKeepsSuperset(const LogicalOperator &op, idx_t child) {
+	switch (op.type) {
+	case LogicalOperatorType::LOGICAL_ASOF_JOIN:
+		// The right side supplies the CLOSEST match: more right rows can replace a match rather than add
+		// one, so its keys are not a superset. More left rows only add output rows.
+		return child == 0 && (op.Cast<LogicalJoin>().join_type == JoinType::INNER ||
+		                      op.Cast<LogicalJoin>().join_type == JoinType::LEFT);
+	case LogicalOperatorType::LOGICAL_COMPARISON_JOIN:
+	case LogicalOperatorType::LOGICAL_ANY_JOIN:
+	case LogicalOperatorType::LOGICAL_DELIM_JOIN:
+		switch (op.Cast<LogicalJoin>().join_type) {
+		case JoinType::INNER:
+		case JoinType::SEMI:
+		case JoinType::RIGHT_SEMI:
+			return true;
+		case JoinType::LEFT:
+		case JoinType::SINGLE:
+		case JoinType::ANTI:
+		case JoinType::MARK:
+			return child == 0;
+		case JoinType::RIGHT:
+		case JoinType::RIGHT_ANTI:
+			return child == 1;
+		default:
+			return false; // FULL OUTER, anything new
+		}
+	case LogicalOperatorType::LOGICAL_EXCEPT:
+	case LogicalOperatorType::LOGICAL_MATERIALIZED_CTE:
+		return child == (op.type == LogicalOperatorType::LOGICAL_EXCEPT ? 0 : 1);
+	case LogicalOperatorType::LOGICAL_PROJECTION:
+	case LogicalOperatorType::LOGICAL_FILTER:
+	case LogicalOperatorType::LOGICAL_ORDER_BY:
+	case LogicalOperatorType::LOGICAL_UNION:
+	case LogicalOperatorType::LOGICAL_INTERSECT:
+	case LogicalOperatorType::LOGICAL_UNNEST:
+	case LogicalOperatorType::LOGICAL_CROSS_PRODUCT:
+		return true;
+	case LogicalOperatorType::LOGICAL_DISTINCT:
+		return op.Cast<LogicalDistinct>().distinct_type == DistinctType::DISTINCT;
+	default:
+		return false;
+	}
+}
+
+static bool StripAIPredicatesBelow(unique_ptr<LogicalOperator> &op, bool monotone) {
+	for (idx_t c = 0; c < op->children.size(); c++) {
+		if (!StripAIPredicatesBelow(op->children[c], monotone && StripKeepsSuperset(*op, c))) {
 			return false;
 		}
 	}
@@ -207,6 +260,10 @@ bool AIStripAIPredicates(unique_ptr<LogicalOperator> &op) {
 		for (auto &expr : filter.expressions) {
 			if (!ExpressionHasAIFunction(*expr)) {
 				keep.push_back(std::move(expr));
+			} else if (!monotone) {
+				// Stripping here could SHRINK the copy (more rows into an anti join's excluded side, a
+				// LIMIT, a HAVING ...): the reduction would drop rows that join. Skip this reducer instead.
+				return false;
 			}
 		}
 		if (keep.empty()) {
@@ -234,6 +291,10 @@ bool AIStripAIPredicates(unique_ptr<LogicalOperator> &op) {
 		}
 	}
 	return !has_ai;
+}
+
+bool AIStripAIPredicates(unique_ptr<LogicalOperator> &op) {
+	return StripAIPredicatesBelow(op, true);
 }
 
 void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<LogicalOperator>>> &leaves,
@@ -408,8 +469,33 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 		for (auto &e : lhs_exprs) {
 			target_exprs.push_back(e->Copy());
 		}
+		// The descent crosses only operators a key-equality SEMI join commutes with: a per-row operator
+		// (projection, filter, an AI region computing a column, a sort) and a plain DISTINCT (removing rows
+		// whose key no partner has, before or after deduplication, leaves the same rows). It STOPS at every
+		// other unary operator -- a LIMIT / TOP_N, a window function, DISTINCT ON, a sample, an aggregate --
+		// because those depend on the rows the reduction would remove: `(... WHERE ai_filter(x) ORDER BY id
+		// LIMIT 1) JOIN hot`, reduced below the limit, returns the first SURVIVING passer instead of the first
+		// passer (empty when that one has no partner), and a row_number() changes value. Key availability
+		// alone is not a commutation rule.
+		auto commutes_with_semi = [](const LogicalOperator &node) {
+			switch (node.type) {
+			case LogicalOperatorType::LOGICAL_PROJECTION:
+			case LogicalOperatorType::LOGICAL_FILTER:
+			case LogicalOperatorType::LOGICAL_ORDER_BY:
+				return true;
+			case LogicalOperatorType::LOGICAL_DISTINCT:
+				return node.Cast<LogicalDistinct>().distinct_type == DistinctType::DISTINCT;
+			case LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR:
+				return LogicalAIRegion::Is(node);
+			default:
+				return false;
+			}
+		};
 		for (unique_ptr<LogicalOperator> *cur = &leaves[i].get(); *cur && (*cur)->children.size() == 1;) {
 			auto &node = **cur;
+			if (!commutes_with_semi(node)) {
+				break;
+			}
 			vector<unique_ptr<Expression>> next;
 			for (auto &e : lhs_exprs) {
 				next.push_back(e->Copy());

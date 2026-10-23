@@ -105,8 +105,14 @@ static bool SubtreeHasDynamicFilterScan(const LogicalOperator &op) {
 	return false;
 }
 
+// `sole_predicate`: `expr` is the whole and only predicate of a FILTER. Only then may the region take the
+// LIMIT's early-stop: it leaves every input after the k-th passer UNDECIDED, broadcast as false, which is
+// only invisible when a filter directly above keeps exactly the decided passers. A node in a projection
+// (`CASE WHEN ai_filter(a) OR ai_filter(b) THEN 1 ELSE 0 END ... LIMIT k`), inside a wrapper or beside
+// another conjunct would emit those false verdicts as values, so it streams instead (the consumer's own
+// early stop still ends the query after k rows and drops the queued calls).
 bool AIRegionRewrite::HoistAICalls(unique_ptr<Expression> &expr, unique_ptr<LogicalOperator> &child_slot,
-                                   int64_t limit_k, bool lazy_guard) {
+                                   int64_t limit_k, bool lazy_guard, bool sole_predicate) {
 	unique_ptr<Expression> unit; // what the region evaluates once per distinct input: `expr` itself, or a node
 	bool hoist_expr = false;
 	bool is_node = false;
@@ -137,7 +143,8 @@ bool AIRegionRewrite::HoistAICalls(unique_ptr<Expression> &expr, unique_ptr<Logi
 		const auto return_type = expr->GetReturnType();
 		const auto dedup_index = optimizer.binder.GenerateTableIndex();
 		auto dedup = make_uniq<LogicalAIRegion>(dedup_index, hoist_expr ? std::move(expr) : std::move(unit));
-		dedup->limit = is_node ? limit_k : -1; // count-weighted early-stop only on the node path
+		dedup->limit =
+		    is_node && sole_predicate ? limit_k : -1; // count-weighted early-stop: node AND sole filter predicate
 		dedup->children.push_back(std::move(child_slot));
 		dedup->ResolveOperatorTypes();
 		child_slot = std::move(dedup);
@@ -159,12 +166,12 @@ bool AIRegionRewrite::HoistAICalls(unique_ptr<Expression> &expr, unique_ptr<Logi
 			if (case_checks.empty()) {
 				return false;
 			}
-			return HoistAICalls(case_checks[0].when_expr, child_slot, limit_k, true);
+			return HoistAICalls(case_checks[0].when_expr, child_slot, limit_k, true, false);
 		}
 	}
 	bool hoisted = false;
 	ExpressionIterator::EnumerateChildren(*expr, [&](unique_ptr<Expression> &child) {
-		if (HoistAICalls(child, child_slot, limit_k, lazy_guard)) {
+		if (HoistAICalls(child, child_slot, limit_k, lazy_guard, false)) {
 			hoisted = true;
 		}
 	});
@@ -245,8 +252,9 @@ void AIRegionRewrite::Rewrite(unique_ptr<LogicalOperator> &op, int64_t limit_k) 
 	// ai_function_with_embed node (which supports the count-weighted stop); a scalar AI call is left in place to
 	// stream to the limit's natural early-stop (a blocking scalar dedup would defeat it).
 	bool changed = false;
+	const bool sole_predicate = is_filter && op->expressions.size() == 1;
 	for (auto &expr : op->expressions) {
-		if (HoistAICalls(expr, op->children[0], limit_k, lazy_guard)) {
+		if (HoistAICalls(expr, op->children[0], limit_k, lazy_guard, sole_predicate)) {
 			changed = true;
 		}
 	}

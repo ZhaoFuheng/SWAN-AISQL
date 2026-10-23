@@ -1,0 +1,158 @@
+# name: test/sql/functions/api_auto.test
+# description: ai_api = 'auto' (the default) sends a plain request through Chat Completions and only a request
+# group: [functions]
+
+#              that WRITES or READS a declared prompt-cache span through the Responses API, the one API where
+#              an image-ending span can carry the breakpoint. The two forced modes send everything one way.
+#              The mock counts the requests that arrived on /v1/responses.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+CREATE TABLE docs AS SELECT i AS id, 'doc '||i::VARCHAR||': '||repeat('lorem ipsum dolor sit amet ', 170) AS d FROM range(20) r(i);
+
+# instruction first, no span: every call is plain and goes through chat (ai_usage() is process-wide: reset)
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter('[p=100] Is this report about taxes? ' || d);
+----
+20
+
+query III
+SELECT breakpoint_requests, responses_requests, (SELECT sum(llm_calls) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+0	0	20
+
+# document first, two leaves, free writes: every row's write and read carry a breakpoint, and exactly those
+# requests take the Responses API
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_price_cache_write_mult = 1.0;
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter(d || ' [p=100] Is this report about taxes?') AND ai_filter(d || ' [p=100] Is this report about health?');
+----
+20
+
+query II
+SELECT breakpoint_requests, responses_requests FROM ai_mock_breakpoints();
+----
+40	40
+
+# a single leaf over the same documents, writes dear: nothing is written, every call goes through chat
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter(d || ' [p=100] Is this report about weather?');
+----
+20
+
+query II
+SELECT breakpoint_requests, responses_requests FROM ai_mock_breakpoints();
+----
+0	0
+
+# forced: 'responses' sends everything there, 'chat' nothing (a text span still carries its breakpoint on chat)
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_api = 'responses';
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter('[p=100] Is this report about sport? ' || d);
+----
+20
+
+query II
+SELECT breakpoint_requests, responses_requests FROM ai_mock_breakpoints();
+----
+0	20
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_api = 'chat';
+
+statement ok
+SET ai_price_cache_write_mult = 1.0;
+
+query I
+SELECT count(*) FROM docs WHERE ai_filter(d || ' [p=100] Is it about music?') AND ai_filter(d || ' [p=100] Is it about art?');
+----
+20
+
+query II
+SELECT breakpoint_requests, responses_requests FROM ai_mock_breakpoints();
+----
+40	0
+
+statement error
+SET ai_api = 'grpc';
+----
+ai_api must be 'auto', 'responses' or 'chat'
+
+# an endpoint without /v1/responses: the first 404 switches the process to Chat Completions, that request
+# included, so nothing fails and no span write is lost to the envelope
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_api = 'responses';
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM range(6) r(i) WHERE ai_filter('[no_responses][p=100] fallback ' || i::VARCHAR || ' ' || repeat('document text ', 300));
+----
+6
+
+query I
+SELECT (SELECT sum(failed_calls) FROM ai_usage()) = 0;
+----
+true
+
+# the first wave met the 404 together (up to one Responses attempt per request), each retried on chat
+query I
+SELECT responses_requests BETWEEN 1 AND 6 FROM ai_mock_breakpoints();
+----
+true
+
+# from here on nothing goes to /v1/responses
+query I
+SELECT count(*) FROM range(6) r(i) WHERE ai_filter('[no_responses][p=100] later ' || i::VARCHAR || ' ' || repeat('document text ', 300));
+----
+6
+
+query I
+SELECT responses_requests BETWEEN 1 AND 6 FROM ai_mock_breakpoints();
+----
+true
+
+statement ok
+CALL ai_mock_stop();

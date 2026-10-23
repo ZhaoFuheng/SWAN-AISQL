@@ -1,0 +1,119 @@
+# name: test/sql/functions/null_prompt_wrappers.test
+# description: A NULL prompt is a NULL answer, and the wrapper around the call still decides over it, in every
+# group: [functions]
+
+#              folded path (scan region, batch, above a join): `ai_filter(a) IS NULL AND ai_filter(b)` keeps the
+#              row with a = NULL when b passes, as native evaluation does. A bare NULL leaf stays NULL: the row
+#              fails `ai_filter(a) AND ai_filter(b)` only through SQL's three-valued AND.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE n AS SELECT 1 AS id, NULL::VARCHAR AS a, 'b1' AS b UNION ALL SELECT 2, '[p=100] a2', 'b2';
+
+statement ok
+CREATE TABLE m AS SELECT 1 AS id UNION ALL SELECT 2;
+
+query I
+SELECT id FROM n WHERE ai_filter(a) IS NULL AND ai_filter('[p=100] ' || b);
+----
+1
+
+query I
+SELECT id FROM n WHERE ai_filter(a) IS NOT NULL AND ai_filter('[p=100] ' || b);
+----
+2
+
+query I
+SELECT id FROM n WHERE coalesce(ai_filter(a), true) AND ai_filter('[p=100] ' || b) ORDER BY id;
+----
+1
+2
+
+query I
+SELECT id FROM n WHERE ai_filter(a) IS NULL OR ai_filter('[p=0] ' || b);
+----
+1
+
+query I
+SELECT id FROM n WHERE ai_complete(a) IS NULL AND ai_filter('[p=100] ' || b);
+----
+1
+
+query I
+SELECT id FROM n WHERE ai_classify(a, ['x', 'y']) IS NULL AND ai_filter('[p=100] ' || b);
+----
+1
+
+# above a join: the leaf region pre-decides the NULL rep
+query I
+SELECT id FROM n JOIN m USING (id) WHERE ai_filter(a) IS NULL AND ai_filter('[p=100] ' || b);
+----
+1
+
+# a bare NULL leaf: NULL AND true is NULL (dropped), NULL AND false is false, NULL OR true is true
+query I
+SELECT count(*) FROM n WHERE ai_filter(a) AND ai_filter('[p=100] ' || b);
+----
+1
+
+query II
+SELECT id, ai_filter(a) AND ai_filter('[p=0] ' || b) FROM n ORDER BY id;
+----
+1	false
+2	false
+
+query I
+SELECT id FROM n WHERE ai_filter(a) OR ai_filter('[p=100] ' || b) ORDER BY id;
+----
+1
+2
+
+# the factor graph: a two-table predicate over a cross product (planned as the factor graph); only the
+# pair (1, 1) has nothing to judge on either side, so only its prompt is NULL
+statement ok
+CREATE TABLE ga AS SELECT i AS id, CASE WHEN i = 1 THEN NULL ELSE 'gx' || i END AS x FROM range(1, 6) r(i);
+
+statement ok
+CREATE TABLE gb AS SELECT i AS id, CASE WHEN i = 1 THEN NULL ELSE 'gy' || i END AS y FROM range(1, 6) r(i);
+
+query II
+SELECT ga.id, gb.id FROM ga, gb WHERE ai_filter('[p=100] ' || ga.x || gb.y) IS NULL;
+----
+1	1
+
+query I
+SELECT count(*) FROM ga, gb WHERE ai_filter('[p=100] ' || ga.x || gb.y) IS NOT NULL;
+----
+24
+
+query I
+SELECT count(*) FROM ga, gb WHERE coalesce(ai_filter('[p=100] ' || ga.x || gb.y), true);
+----
+25
+
+query I
+SELECT count(*) FROM ga, gb WHERE ai_filter('[p=100] ' || ga.x || gb.y);
+----
+24
+
+# the batch path (no region)
+statement ok
+SET ai_factorize = 'off';
+
+query I
+SELECT id FROM n WHERE ai_filter(a) IS NULL AND ai_filter('[p=100] ' || b);
+----
+1
+
+query I
+SELECT id FROM n WHERE coalesce(ai_filter(a), true) AND ai_filter('[p=100] ' || b) ORDER BY id;
+----
+1
+2
+
+statement ok
+CALL ai_mock_stop();

@@ -1,0 +1,109 @@
+# name: test/sql/functions/cache_token_pricing.test
+# description: Without a provider cost header, ai_usage() prices a call from its tokens: input at ai_price_input,
+# group: [functions]
+
+#              the tokens WRITTEN to the provider's prompt cache at ai_price_cache_write_mult times that, the
+#              tokens SERVED from it at ai_price_cached, output at ai_price_output. The mock bills 8 input
+#              tokens per call, of which 7 are the span (written once, served after). Prices here are $1 per
+#              input token and $0.10 per cached token, so the sums are exact.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_price_input = 1000000;
+
+statement ok
+SET ai_price_cached = 100000;
+
+statement ok
+SET ai_price_output = 0;
+
+statement ok
+CREATE TABLE items AS SELECT i AS id, 'item ' || i::VARCHAR || ' is a widget' AS x FROM range(50) r(i);
+
+statement ok
+SELECT ai_usage_reset();
+
+# a 1,200-token constant prefix: 1 write (1 x $1 + 7 x $1.25 = $9.75) + 49 reads (1 x $1 + 7 x $0.10 = $1.70)
+query I
+SELECT count(*) FROM items WHERE ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || '[p=100] ' || x);
+----
+50
+
+query IIII
+SELECT sum(llm_calls), sum(cache_write_tokens), sum(cached_tokens), round(sum(cost_usd), 2) FROM ai_usage();
+----
+50	7	343	93.05
+
+# the same calls with caching off: 50 x 8 x $1
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_price_input = 1000000;
+
+statement ok
+SET ai_price_cached = 100000;
+
+statement ok
+SET ai_price_output = 0;
+
+statement ok
+SET ai_prefix_cache = false;
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM items WHERE ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || '[p=100] ' || x);
+----
+50
+
+query IIII
+SELECT sum(llm_calls), sum(cache_write_tokens), sum(cached_tokens), round(sum(cost_usd), 2) FROM ai_usage();
+----
+50	0	0	400.00
+
+# a dearer write (2x) and free reads: 1 x (1 + 14) + 49 x (1 + 0)
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_price_input = 1000000;
+
+statement ok
+SET ai_price_cached = 0.000001;
+
+statement ok
+SET ai_price_output = 0;
+
+statement ok
+SET ai_price_cache_write_mult = 2.0;
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM items WHERE ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || '[p=100] ' || x);
+----
+50
+
+query IIII
+SELECT sum(llm_calls), sum(cache_write_tokens), sum(cached_tokens), round(sum(cost_usd), 2) FROM ai_usage();
+----
+50	7	343	64.00
+
+statement ok
+CALL ai_mock_stop();

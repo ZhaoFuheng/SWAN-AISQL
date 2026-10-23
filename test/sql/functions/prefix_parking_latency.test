@@ -1,0 +1,71 @@
+# name: test/sql/functions/prefix_parking_latency.test
+# description: A span's first call is its cache write, and every concurrent call on the same span PARKS until
+# group: [functions]
+
+#              that write has landed (a read sent before it would miss and re-write). For a constant prefix
+#              shared by every row this is one call of latency paid once per predicate: the first row's call
+#              at full length, then the rest at full concurrency. The mock's '[sleep=NN]' knob delays each
+#              answer by NN ms, so with 20 rows and 500 ms per answer the cached run takes two rounds
+#              (>= 1,000 ms) and the plain run one.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_concurrency = 20;
+
+statement ok
+CREATE TABLE items AS SELECT i AS id, 'item ' || i::VARCHAR || ' is a widget' AS x FROM range(20) r(i);
+
+statement ok
+CREATE TABLE t0 AS SELECT epoch_ms(now()::TIMESTAMP) AS ms;
+
+query I
+SELECT count(*) FROM items WHERE ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || '[p=100][sleep=500] ' || x);
+----
+20
+
+# two rounds: the write, then the 19 parked reads together
+query I
+SELECT epoch_ms(now()::TIMESTAMP) - (SELECT ms FROM t0) >= 1000;
+----
+true
+
+query III
+SELECT breakpoint_requests, (SELECT sum(cache_write_tokens) FROM ai_usage()), (SELECT sum(cached_tokens) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+20	7	133
+
+# caching off: one round, nothing parks
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_concurrency = 20;
+
+statement ok
+SET ai_prefix_cache = false;
+
+statement ok
+CREATE OR REPLACE TABLE t0 AS SELECT epoch_ms(now()::TIMESTAMP) AS ms;
+
+query I
+SELECT count(*) FROM items WHERE ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || '[p=100][sleep=500] ' || x);
+----
+20
+
+query I
+SELECT epoch_ms(now()::TIMESTAMP) - (SELECT ms FROM t0) < 950;
+----
+true
+
+statement ok
+CALL ai_mock_stop();

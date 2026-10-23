@@ -31,6 +31,7 @@
 #include "ai_dedup.hpp"
 #include "optimizer/ai_filter_tree_build.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -228,8 +229,8 @@ static const char *const AI_AGG_NODE_SYSTEM_PROMPT =
 // become the history keys. History is only active when ai_history_mode(true).
 //===--------------------------------------------------------------------===//
 struct AIKeyBindData : public FunctionData {
-	AIKeyBindData(idx_t key_start, idx_t key_count, string pred_text = string())
-	    : key_start(key_start), key_count(key_count), pred_text(std::move(pred_text)) {
+	AIKeyBindData(idx_t key_start, idx_t key_count, string pred_text = string(), string head = string())
+	    : key_start(key_start), key_count(key_count), pred_text(std::move(pred_text)), head(std::move(head)) {
 	}
 	idx_t key_start; // first appended key column (== the original user arg count)
 	idx_t key_count; // number of appended key columns
@@ -237,15 +238,43 @@ struct AIKeyBindData : public FunctionData {
 	//! AISplitPrompt split the reorder node carries per leaf, so the scalar path asks the TypeSafe
 	//! backend the byte-identical question. Empty when the prompt has no constant/varying split.
 	string pred_text;
+	//! ai_filter / ai_complete: the constant text the prompt STARTS with (instruction, few-shot examples),
+	//! bound-time evaluated: the scalar path sees only the baked string, and this is the span every row
+	//! shares (AIDeclareLeadingSpans). Empty when the prompt leads with a row-varying operand.
+	string head;
 
 	unique_ptr<FunctionData> Copy() const override {
-		return make_uniq<AIKeyBindData>(key_start, key_count, pred_text);
+		return make_uniq<AIKeyBindData>(key_start, key_count, pred_text, head);
 	}
 	bool Equals(const FunctionData &other_p) const override {
 		auto &other = other_p.Cast<AIKeyBindData>();
-		return key_start == other.key_start && key_count == other.key_count && pred_text == other.pred_text;
+		return key_start == other.key_start && key_count == other.key_count && pred_text == other.pred_text &&
+		       head == other.head;
 	}
 };
+
+//! The text of the foldable operands a prompt expression starts with (its constant head), evaluated once;
+//! empty when the prompt starts with a row-varying operand (or a head operand is NULL).
+static string AIPromptHeadText(ClientContext &context, const Expression &prompt) {
+	vector<const Expression *> ops;
+	AIFactorPromptOperands(AIUnwrapNullGuard(prompt), ops);
+	string head;
+	for (const auto *op : ops) {
+		if (!op->IsFoldable()) {
+			break;
+		}
+		try {
+			const Value v = ExpressionExecutor::EvaluateScalar(context, *op);
+			if (v.IsNull()) {
+				return string();
+			}
+			head += v.DefaultCastAs(LogicalType::VARCHAR).ToString();
+		} catch (...) {
+			return string();
+		}
+	}
+	return head;
+}
 
 //! Bound-time predicate text of an ai_filter prompt expression (see AIKeyBindData::pred_text).
 static string AIBindPredText(ClientContext &context, const Expression &prompt) {
@@ -364,11 +393,13 @@ static unique_ptr<FunctionData> AIKeyBind(BindScalarFunctionInput &input) {
 	}
 	// IDEMPOTENCE: a re-bind returns the keys already in place (see AIKeysAlreadyAppended).
 	const idx_t n = key_exprs.size();
+	const bool head_fn = bound_function.GetName() == "ai_filter" || bound_function.GetName() == "ai_complete";
 	if (AIKeysAlreadyAppended(arguments, key_exprs, 1)) {
 		return make_uniq<AIKeyBindData>(arguments.size() - n, n,
 		                                bound_function.GetName() == "ai_filter"
 		                                    ? AIBindPredText(input.GetClientContext(), *arguments[0])
-		                                    : string());
+		                                    : string(),
+		                                head_fn ? AIPromptHeadText(input.GetClientContext(), *arguments[0]) : string());
 	}
 	// ai_filter takes exactly one argument, the prompt. Its varargs signature exists only so this bind can
 	// append the key columns; a re-bind (keys already in place) returned above, so any other extra argument
@@ -418,11 +449,14 @@ static unique_ptr<FunctionData> AIKeyBind(BindScalarFunctionInput &input) {
 	const string pred_text = bound_function.GetName() == "ai_filter" && !arguments.empty() && arguments[0]
 	                             ? AIBindPredText(input.GetClientContext(), *arguments[0])
 	                             : string();
+	const string head = head_fn && !arguments.empty() && arguments[0]
+	                        ? AIPromptHeadText(input.GetClientContext(), *arguments[0])
+	                        : string();
 	for (auto &key_expr : key_exprs) {
 		bound_function.GetArguments().push_back(key_expr->GetReturnType());
 		arguments.push_back(std::move(key_expr));
 	}
-	return make_uniq<AIKeyBindData>(key_start, key_exprs.size(), pred_text);
+	return make_uniq<AIKeyBindData>(key_start, key_exprs.size(), pred_text, head);
 }
 
 // Read the appended key-column values for one row into `keys`.
@@ -451,6 +485,7 @@ static void AIFilterFunction(DataChunk &args, ExpressionState &state, Vector &re
 	vector<AIRequest> requests(count);
 	vector<bool> valid(count, false);
 	vector<vector<string>> row_keys(count);
+	const AIConfig scalar_config = AIConfigForContext(state.GetContext()); // once per chunk, not per row
 	for (idx_t i = 0; i < count; i++) {
 		auto idx = prompt_format.sel->get_index(i);
 		if (!prompt_format.validity.RowIsValid(idx)) {
@@ -460,6 +495,11 @@ static void AIFilterFunction(DataChunk &args, ExpressionState &state, Vector &re
 		requests[i].prompt = prompts[idx].GetString();
 		requests[i].system_prompt = AIFilterSystemPrompt();
 		requests[i].json_schema = AIFilterSchema();
+		// the head is shared by the other distinct inputs the region drives (one per call), else the chunk's;
+		// a leading image has no node to count its reads: the adaptive rule
+		AIDeclareLeadingSpans(requests[i], scalar_config, bind_data.head,
+		                      AIScalarPeerRows() >= 0 ? AIScalarPeerRows() : static_cast<double>(count) - 1.0,
+		                      AIImagePrefixSpan(requests[i].prompt), -1.0);
 		requests[i].schema_name = "ai_filter";
 		AIMarkFilterQuestion(requests[i], bind_data.pred_text);
 		if (history_on) {
@@ -1042,6 +1082,7 @@ static void AIPromptFunction(DataChunk &args, ExpressionState &state, Vector &re
 	vector<AIRequest> requests(count);
 	vector<bool> valid(count, false);
 	vector<vector<string>> row_keys(count);
+	const AIConfig scalar_config = AIConfigForContext(state.GetContext()); // once per chunk, not per row
 	for (idx_t i = 0; i < count; i++) {
 		auto prompt_idx = prompt_format.sel->get_index(i);
 		if (!prompt_format.validity.RowIsValid(prompt_idx)) {
@@ -1051,6 +1092,9 @@ static void AIPromptFunction(DataChunk &args, ExpressionState &state, Vector &re
 		requests[i].prompt = prompts[prompt_idx].GetString();
 		requests[i].system_prompt = AI_COMPLETE_SYSTEM_PROMPT;
 		requests[i].schema_name = "ai_complete";
+		AIDeclareLeadingSpans(requests[i], scalar_config, bind_data.head,
+		                      AIScalarPeerRows() >= 0 ? AIScalarPeerRows() : static_cast<double>(count) - 1.0,
+		                      AIImagePrefixSpan(requests[i].prompt), -1.0);
 		if (has_schema) {
 			auto schema_idx = schema_format.sel->get_index(i);
 			if (schema_format.validity.RowIsValid(schema_idx)) {
@@ -1094,11 +1138,11 @@ static unique_ptr<FunctionData> AIUsageBind(ClientContext &context, TableFunctio
                                             vector<LogicalType> &return_types, vector<Identifier> &names) {
 	names = {"query_id",      "query_text",    "llm_calls",        "cache_hits",   "input_tokens",
 	         "cached_tokens", "output_tokens", "reasoning_tokens", "total_tokens", "cost_usd",
-	         "embed_calls",   "embed_tokens",  "hedged_calls",     "failed_calls"};
+	         "embed_calls",   "embed_tokens",  "hedged_calls",     "failed_calls", "cache_write_tokens"};
 	return_types = {LogicalType::UBIGINT, LogicalType::VARCHAR, LogicalType::UBIGINT, LogicalType::UBIGINT,
 	                LogicalType::UBIGINT, LogicalType::UBIGINT, LogicalType::UBIGINT, LogicalType::UBIGINT,
 	                LogicalType::UBIGINT, LogicalType::DOUBLE,  LogicalType::UBIGINT, LogicalType::UBIGINT,
-	                LogicalType::UBIGINT, LogicalType::UBIGINT};
+	                LogicalType::UBIGINT, LogicalType::UBIGINT, LogicalType::UBIGINT};
 	return nullptr;
 }
 
@@ -1132,6 +1176,7 @@ static void AIUsageFunction(ClientContext &context, TableFunctionInput &data_p, 
 		output.data[11].SetValue(row, Value::UBIGINT(u.embed_tokens));
 		output.data[12].SetValue(row, Value::UBIGINT(u.hedged_calls));
 		output.data[13].SetValue(row, Value::UBIGINT(u.failed_calls));
+		output.data[14].SetValue(row, Value::UBIGINT(u.cache_write_tokens));
 	}
 	data.offset += this_count;
 }
@@ -1397,33 +1442,57 @@ struct AIFilterWithEmbedBindData : public FunctionData {
 	}
 };
 
-// Split a meta_str into its per-leaf tokens (';'-separated; "" -> no tokens).
-static vector<string> AIMetaTokens(const string &meta) {
-	vector<string> tokens;
-	if (meta.empty()) {
-		return tokens;
-	}
-	string cur;
-	for (const char c : meta) {
-		if (c == ';') {
-			tokens.push_back(cur);
-			cur.clear();
+//! Split `text` at every unescaped `delim` (a backslash escapes the next character). With `unescape` the
+//! pieces lose their backslashes; without it they keep them, for a second split on another delimiter.
+static vector<string> AISplitEscaped(const string &text, char delim, bool unescape) {
+	vector<string> out(1);
+	for (size_t i = 0; i < text.size(); i++) {
+		if (text[i] == '\\' && i + 1 < text.size()) {
+			if (!unescape) {
+				out.back().push_back('\\');
+			}
+			out.back().push_back(text[++i]);
+		} else if (text[i] == delim) {
+			out.emplace_back();
 		} else {
-			cur += c;
+			out.back().push_back(text[i]);
 		}
 	}
-	tokens.push_back(cur);
-	return tokens;
+	return out;
+}
+//! Drop the backslashes an escaped literal carries (the inverse of AIBuildMixedLeafArgs' escape); no delimiter
+//! is involved, so a literal may hold any byte, a NUL included.
+static string AIUnescape(const string &text) {
+	string out;
+	for (size_t i = 0; i < text.size(); i++) {
+		if (text[i] == '\\' && i + 1 < text.size()) {
+			i++;
+		}
+		out.push_back(text[i]);
+	}
+	return out;
+}
+
+// Split a meta_str into its per-leaf tokens: ';'-separated, a backslash escaping a literal's own ';' / ','
+// (AIBuildMixedLeafArgs); the tokens keep their escapes, so they re-join and re-parse unchanged. "" -> none.
+// THE one tokenizer: every consumer of a meta string goes through it (or AIParseLeafMeta).
+static vector<string> AIMetaTokens(const string &meta) {
+	if (meta.empty()) {
+		return {};
+	}
+	return AISplitEscaped(meta, ';', false);
 }
 
 // The base64 wrapper of a `<K>:wrap:<b64>[@range]` token, or "" for any other token.
 static string AIMetaWrapperText(const string &tok) {
-	static const string kWrap = ":wrap:";
-	const auto at = tok.find(kWrap);
-	if (at == string::npos) {
+	// `<K>:<op>:<value>`: only the OPERATOR field says wrap -- a literal may itself contain ":wrap:"
+	// (`ai_complete(a) = 'x:wrap:y'` is `M:eq:x:wrap:y`), and decoding it as base64 would throw.
+	const size_t c1 = tok.find(':');
+	const size_t c2 = c1 == string::npos ? string::npos : tok.find(':', c1 + 1);
+	if (c2 == string::npos || tok.substr(c1 + 1, c2 - c1 - 1) != "wrap") {
 		return string();
 	}
-	const auto begin = at + kWrap.size();
+	const auto begin = c2 + 1;
 	const auto end = tok.find('@', begin);
 	return tok.substr(begin, end == string::npos ? string::npos : end - begin);
 }
@@ -1597,9 +1666,102 @@ static double AIImageLeafCost(const string &prompt) {
 // input_0..n-1]) onto the growing per-(row, leaf) text/cost vectors. Rows with any NULL leaf prompt are
 // marked invalid. Append semantics let the streaming operator accumulate a whole buffered join output
 // across many chunks before one AIFilterEvaluateBatch call; the scalar path appends a single chunk.
+string AILeafLeadKey(const BoundFunctionExpression &eval_call, idx_t leaf, const Expression **leading) {
+	if (leading) {
+		*leading = nullptr;
+	}
+	auto &children = eval_call.GetChildren();
+	if (1 + leaf >= children.size()) {
+		return string();
+	}
+	vector<const Expression *> ops;
+	AIFactorPromptOperands(AIUnwrapNullGuard(*children[1 + leaf]), ops);
+	// past the constant head (if any): the first row-varying operand is the shared input. The key carries
+	// the head too: two leaves share the span only when the same head precedes the same input.
+	string key;
+	idx_t k = 0;
+	while (k < ops.size() && ops[k]->IsFoldable()) {
+		key += ops[k]->ToString();
+		k++;
+	}
+	if (k >= ops.size()) {
+		return string(); // all constant: nothing row-varying to share
+	}
+	if (leading) {
+		*leading = ops[k];
+	}
+	return key + ops[k]->ToString();
+}
+
+string AILeafHeadText(ClientContext &context, const BoundFunctionExpression &eval_call, idx_t leaf) {
+	auto &children = eval_call.GetChildren();
+	if (1 + leaf >= children.size()) {
+		return string();
+	}
+	return AIPromptHeadText(context, *children[1 + leaf]);
+}
+
+bool AIDebugSelectivityKnob(const string &prompt, double &p_true) {
+	if (!AIDebugKnobsEnabled().load()) {
+		return false; // production: prompts are never scanned for the knob
+	}
+	const auto pos = prompt.find("[sel=");
+	if (pos == string::npos) {
+		return false;
+	}
+	const int pct = std::atoi(prompt.c_str() + pos + 5);
+	p_true = MinValue<double>(1.0, MaxValue<double>(0.0, static_cast<double>(pct) / 100.0));
+	return true;
+}
+
+//! For every leaf whose prompt leads with a row-varying operand, that operand's text per row of `rows`,
+//! appended to `lead` (one row of n strings per input row; empty strings where no span leads).
+static void AIFilterAppendLeadSpans(ClientContext &context, const BoundFunctionExpression &eval_call, DataChunk &rows,
+                                    vector<vector<string>> &lead) {
+	const idx_t n = AILeafCount(eval_call);
+	vector<const Expression *> leading(n, nullptr);
+	vector<idx_t> slot(n, DConstants::INVALID_INDEX);
+	ExpressionExecutor executor(context);
+	vector<LogicalType> types;
+	for (idx_t l = 0; l < n; l++) {
+		AILeafLeadKey(eval_call, l, &leading[l]);
+		if (leading[l]) {
+			slot[l] = types.size();
+			executor.AddExpression(*leading[l]);
+			types.push_back(leading[l]->GetReturnType());
+		}
+	}
+	const idx_t base = lead.size();
+	lead.resize(base + rows.size(), vector<string>(n));
+	if (types.empty()) {
+		return;
+	}
+	vector<string> head(n);
+	for (idx_t l = 0; l < n; l++) {
+		if (slot[l] != DConstants::INVALID_INDEX) {
+			head[l] = AILeafHeadText(context, eval_call, l);
+		}
+	}
+	DataChunk out;
+	out.Initialize(BufferAllocator::Get(context), types);
+	executor.Execute(rows, out);
+	for (idx_t i = 0; i < out.size(); i++) {
+		for (idx_t l = 0; l < n; l++) {
+			if (slot[l] == DConstants::INVALID_INDEX) {
+				continue;
+			}
+			const Value v = out.data[slot[l]].GetValue(i);
+			lead[base + i][l] = v.IsNull() ? string() : head[l] + v.DefaultCastAs(LogicalType::VARCHAR).ToString();
+		}
+	}
+}
+
+// `leaf_valid[row][l]` = 0 marks a NULL prompt in leaf l. The row stays valid: that leaf's answer is NULL (its
+// wrapper may still decide it -- `ai_filter(a) IS NULL`, coalesce) and the tree folds with the rest.
 static void AIFilterAppendArgs(DataChunk &args, idx_t n, vector<vector<string>> &prompt,
                                vector<vector<string>> &pred_text, vector<vector<string>> &input_text,
-                               vector<vector<double>> &cost, vector<char> &row_valid) {
+                               vector<vector<double>> &cost, vector<char> &row_valid,
+                               vector<vector<char>> &leaf_valid) {
 	const idx_t count = args.size();
 	const idx_t prompt_base = 1;
 	const idx_t pred_text_base = 1 + n;      // predicate text (constant question part) per leaf
@@ -1610,6 +1772,7 @@ static void AIFilterAppendArgs(DataChunk &args, idx_t n, vector<vector<string>> 
 	input_text.resize(base + count, vector<string>(n));
 	cost.resize(base + count, vector<double>(n, 1.0));
 	row_valid.resize(base + count, 1);
+	leaf_valid.resize(base + count, vector<char>(n, 1));
 	for (idx_t l = 0; l < n; l++) {
 		auto &pcol = args.data[prompt_base + l];
 		auto &ptcol = args.data[pred_text_base + l];
@@ -1618,7 +1781,7 @@ static void AIFilterAppendArgs(DataChunk &args, idx_t n, vector<vector<string>> 
 			const idx_t r = base + row;
 			Value pv = pcol.GetValue(row);
 			if (pv.IsNull()) {
-				row_valid[r] = 0;
+				leaf_valid[r][l] = 0;
 			} else {
 				prompt[r][l] = StringValue::Get(pv);
 				cost[r][l] =
@@ -1652,6 +1815,7 @@ struct AILeafMeta {
 	//! the node's bind data.
 	const Expression *wrapper = nullptr;
 	LogicalType wrapper_type;
+	vector<string> set; //! the members of an IN / NOT IN set (op 'i' / 'I'), unescaped
 };
 
 // The type the wrapper reads its answer as: its column-0 reference's type.
@@ -1676,58 +1840,65 @@ static vector<AILeafMeta> AIParseLeafMeta(const string &meta, idx_t n, const vec
 	if (meta.empty()) {
 		return out;
 	}
-	idx_t leaf = 0;
-	size_t i = 0;
-	while (leaf < n && i <= meta.size()) {
-		const size_t semi = meta.find(';', i);
-		const string tok = meta.substr(i, (semi == string::npos ? meta.size() : semi) - i);
-		if (!tok.empty() && tok != "F") {
-			const size_t c1 = tok.find(':');
-			const size_t c2 = (c1 == string::npos) ? string::npos : tok.find(':', c1 + 1);
-			out[leaf].kind = tok[0];
-			if (c1 != string::npos && c2 != string::npos) {
-				const string op = tok.substr(c1 + 1, c2 - c1 - 1);
-				out[leaf].val = tok.substr(c2 + 1);
-				out[leaf].op = op == "ne"     ? 'n'
-				               : op == "gt"   ? 'g'
-				               : op == "lt"   ? 'l'
-				               : op == "ge"   ? 'G'
-				               : op == "le"   ? 'L'
-				               : op == "in"   ? 'i'
-				               : op == "ni"   ? 'I'
-				               : op == "wrap" ? 'w'
-				                              : 'e';
-				if (out[leaf].op == 'w') {
-					if (leaf >= wrappers.size() || !wrappers[leaf] ||
-					    !AIWrapperRefType(*wrappers[leaf], out[leaf].wrapper_type)) {
-						throw InternalException("ai_function_with_embed: wrapped leaf " + std::to_string(leaf) +
-						                        " has no bound wrapper");
-					}
-					out[leaf].wrapper = wrappers[leaf].get();
-				}
-				// Ranged ai_score encodes "cmpval@lo,hi,i|d"; split off the range for clamp/round.
-				if (out[leaf].kind == 'S') {
-					const size_t at = out[leaf].val.find('@');
-					if (at != string::npos) {
-						const string range = out[leaf].val.substr(at + 1);
-						out[leaf].val = out[leaf].val.substr(0, at);
-						const size_t k1 = range.find(',');
-						const size_t k2 = (k1 == string::npos) ? string::npos : range.find(',', k1 + 1);
-						if (k1 != string::npos && k2 != string::npos) {
-							out[leaf].lo = std::atof(range.substr(0, k1).c_str());
-							out[leaf].hi = std::atof(range.substr(k1 + 1, k2 - k1 - 1).c_str());
-							out[leaf].is_int = range[k2 + 1] == 'i';
-							out[leaf].has_range = true;
-						}
-					}
+	// Leaves are ';'-separated and a set's members ','-separated, both backslash-escaped inside a literal
+	// (see AIBuildMixedLeafArgs): the leaf split keeps the escapes so a member's ',' survives to the member
+	// split, and every literal is unescaped exactly once.
+	const vector<string> tokens = AIMetaTokens(meta);
+	for (idx_t leaf = 0; leaf < n && leaf < tokens.size(); leaf++) {
+		const string &tok = tokens[leaf];
+		if (tok.empty() || tok == "F") {
+			continue;
+		}
+		const size_t c1 = tok.find(':');
+		const size_t c2 = (c1 == string::npos) ? string::npos : tok.find(':', c1 + 1);
+		out[leaf].kind = tok[0];
+		if (c1 == string::npos || c2 == string::npos) {
+			continue;
+		}
+		const string op = tok.substr(c1 + 1, c2 - c1 - 1);
+		const string raw = tok.substr(c2 + 1);
+		out[leaf].op = op == "ne"     ? 'n'
+		               : op == "gt"   ? 'g'
+		               : op == "lt"   ? 'l'
+		               : op == "ge"   ? 'G'
+		               : op == "le"   ? 'L'
+		               : op == "in"   ? 'i'
+		               : op == "ni"   ? 'I'
+		               : op == "wrap" ? 'w'
+		                              : 'e';
+		string body = raw;
+		if (out[leaf].kind == 'S') {
+			// Numeric: never escaped. Ranged ai_score encodes "<cmpval|b64>@lo,hi,i|d" whatever the operator;
+			// split off the range for clamp/round.
+			const size_t at = raw.find('@');
+			if (at != string::npos) {
+				const string range = raw.substr(at + 1);
+				body = raw.substr(0, at);
+				const size_t k1 = range.find(',');
+				const size_t k2 = (k1 == string::npos) ? string::npos : range.find(',', k1 + 1);
+				if (k1 != string::npos && k2 != string::npos) {
+					out[leaf].lo = std::atof(range.substr(0, k1).c_str());
+					out[leaf].hi = std::atof(range.substr(k1 + 1, k2 - k1 - 1).c_str());
+					out[leaf].is_int = range[k2 + 1] == 'i';
+					out[leaf].has_range = true;
 				}
 			}
 		}
-		leaf++;
-		if (semi == string::npos) {
-			break;
+		if (out[leaf].op == 'w') {
+			out[leaf].val = body; // base64: no delimiter can occur
+			if (leaf >= wrappers.size() || !wrappers[leaf] ||
+			    !AIWrapperRefType(*wrappers[leaf], out[leaf].wrapper_type)) {
+				throw InternalException("ai_function_with_embed: wrapped leaf " + std::to_string(leaf) +
+				                        " has no bound wrapper");
+			}
+			out[leaf].wrapper = wrappers[leaf].get();
+		} else if (out[leaf].op == 'i' || out[leaf].op == 'I') {
+			out[leaf].set = AISplitEscaped(raw, ',', true);
+		} else if (out[leaf].kind == 'S') {
+			out[leaf].val = body;
+		} else {
+			out[leaf].val = AIUnescape(raw);
 		}
-		i = semi + 1;
 	}
 	return out;
 }
@@ -1840,6 +2011,19 @@ static bool AIWrappedVerdict(ClientContext &context, const AILeafMeta &m, const 
 	return ok && BooleanValue::Get(w);
 }
 
+//! A leaf whose prompt is NULL: its call answers NULL, so a wrapper decides over NULL (IS NULL -> true,
+//! coalesce(x, true) -> true, lower(x) = 'a' -> NULL) and a bare call or comparison is NULL.
+static AITriState AILeafNullOutcome(ClientContext &context, const AILeafMeta &m) {
+	if (!m.wrapper) {
+		return AITriState::TRI_NULL;
+	}
+	const Value w = AIApplyWrapper(context, m, Value(m.wrapper_type));
+	if (w.IsNull()) {
+		return AITriState::TRI_NULL;
+	}
+	return BooleanValue::Get(w) ? AITriState::TRI_TRUE : AITriState::TRI_FALSE;
+}
+
 //! Fold a leaf's raw response content into the leaf's boolean outcome (comparison or wrapper applied).
 static bool AILeafOutcome(ClientContext &context, const AILeafMeta &m, const string &content, bool &ok) {
 	if (m.kind == 'F') {
@@ -1896,31 +2080,35 @@ static bool AILeafOutcome(ClientContext &context, const AILeafMeta &m, const str
 		return false;
 	}
 	if (m.op == 'i' || m.op == 'I') {
-		// Set membership (IN / NOT IN): m.val is the ','-joined set; evaluate classify/complete ONCE, then
-		// test the result against the set (vs the desugared OR-of-equalities that would re-run the call).
-		bool in_set = false;
-		size_t start = 0;
-		while (true) {
-			const size_t comma = m.val.find(',', start);
-			const string member = m.val.substr(start, (comma == string::npos ? m.val.size() : comma) - start);
-			if (s == member) {
-				in_set = true;
-				break;
-			}
-			if (comma == string::npos) {
-				break;
-			}
-			start = comma + 1;
-		}
+		// Set membership (IN / NOT IN): evaluate classify/complete ONCE, then test the result against the parsed
+		// set (vs the desugared OR-of-equalities that would re-run the call).
+		const bool in_set = std::find(m.set.begin(), m.set.end(), s) != m.set.end();
 		return m.op == 'i' ? in_set : !in_set;
 	}
-	const bool eq = (s == m.val);
-	return m.op == 'n' ? !eq : eq;
+	// The comparison the leaf folded: DuckDB's default VARCHAR order is bytewise, which std::string::compare
+	// (char_traits<char>, unsigned bytes) reproduces. A collated comparison never folds (the binder wraps
+	// the operands in the collation function, so the call is no longer a bare comparison operand).
+	const int c = s.compare(m.val);
+	switch (m.op) {
+	case 'n':
+		return c != 0;
+	case 'g':
+		return c > 0;
+	case 'l':
+		return c < 0;
+	case 'G':
+		return c >= 0;
+	case 'L':
+		return c <= 0;
+	default:
+		return c == 0;
+	}
 }
 
 static bool AIEvalLeaf(ClientContext &context, const AILeafMeta &m, const string &prompt, const string &query_text,
-                       bool &ok, const string *prefix = nullptr, idx_t expected_reuse = 0,
-                       const string *pred_text = nullptr, const AIConfig *config = nullptr) {
+                       bool &ok, const string *prefix = nullptr, double expected_reads = 0.0,
+                       const string *pred_text = nullptr, const AIConfig *config = nullptr,
+                       const string *lead_span = nullptr, const string *head = nullptr, double head_reads = 0.0) {
 	vector<AIRequest> one;
 	if (prefix && !prefix->empty()) {
 		// Build from the full text (a Choice leaf recovers its options from the baked frame), then
@@ -1928,9 +2116,14 @@ static bool AIEvalLeaf(ClientContext &context, const AILeafMeta &m, const string
 		one.push_back(AILeafRequest(m, *prefix + prompt, pred_text));
 		one[0].prompt = prompt;
 		one[0].prompt_prefix = *prefix;
-		one[0].expected_reuse = expected_reuse; // fan-out hint for the client's write policy
+		one[0].expected_reads = expected_reads; // reuse hint for the client's write policy
 	} else {
 		one.push_back(AILeafRequest(m, prompt, pred_text));
+		// A region leaf's prompt: its constant head (shared by the leaf's reps) when that alone clears the
+		// gate, else the row-varying input it leads with (its span materialised by the caller, or a leading
+		// image found in the string) with the expected-reads hint.
+		AIDeclareLeadingSpans(one[0], config ? *config : AIConfig::Get(), head ? *head : string(), head_reads,
+		                      lead_span ? *lead_span : AIImagePrefixSpan(prompt), expected_reads);
 	}
 	auto r = AIBatchComplete(one, query_text, /*force_fixed=*/true, config);
 	ok = !r.empty() && r[0].success;
@@ -2012,9 +2205,30 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
                                   const vector<vector<string>> &prompt, const vector<vector<string>> &pred_text,
                                   const vector<vector<string>> &input_text, const vector<vector<double>> &cost,
                                   const vector<char> &row_valid, const string &query_text, vector<char> &out_result,
-                                  int64_t limit_override = -2, const vector<idx_t> *out_weights = nullptr) {
+                                  int64_t limit_override = -2, const vector<idx_t> *out_weights = nullptr,
+                                  const vector<vector<double>> *reuse_hint = nullptr,
+                                  const vector<vector<string>> *lead_span = nullptr,
+                                  const BoundFunctionExpression *eval_call_for_heads = nullptr,
+                                  const string *single_head = nullptr,
+                                  const vector<vector<char>> *leaf_valid = nullptr) {
 	const AIConfig batch_config = AIConfigForContext(context); // this connection's endpoint/model/key for the batch
 	const auto &tree = *bind_data.tree;
+	// each leaf's constant head (instruction / few-shot text before the row's input), declared as its own span
+	vector<string> leaf_head(bind_data.leaf_count);
+	if (eval_call_for_heads) {
+		for (idx_t l = 0; l < bind_data.leaf_count; l++) {
+			leaf_head[l] = AILeafHeadText(context, *eval_call_for_heads, l);
+		}
+	} else if (single_head && bind_data.leaf_count == 1) {
+		leaf_head[0] = *single_head;
+	}
+	// observed verdicts per leaf in this batch: the pass rate the prefix-cache write decision trusts over
+	// the cold prediction once answers are in (vector<atomic> cannot resize: sized once here)
+	vector<std::atomic<idx_t>> obs_n(bind_data.leaf_count), obs_true(bind_data.leaf_count);
+	for (idx_t l = 0; l < bind_data.leaf_count; l++) {
+		obs_n[l].store(0);
+		obs_true[l].store(0);
+	}
 	const idx_t n = bind_data.leaf_count;
 	// LIMIT push-down: stop once this many rows PASS (-1 = no limit). limit_override != -2 substitutes an
 	// external k (the AI-dedup operator passes k here); out_weights[r] (when set) is row r's fan-out count, so
@@ -2024,10 +2238,15 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 	const vector<AILeafMeta> leaf_meta = AIParseLeafMeta(bind_data.meta, n, bind_data.wrappers);
 	// Cache/single-flight key = prompt + this per-leaf comparison, so two leaves that share a prompt but
 	// differ in comparison (e.g. ai_classify(x)='a' AND ai_classify(x)='b') never collide on one boolean.
+	// The leaf's whole predicate identity -- kind, operator, literal / set / range / wrapper -- as its meta
+	// token: `ai_classify(x) IN ('a')` and `IN ('b')` over one prompt must never share a verdict.
 	vector<string> leaf_key(n);
-	for (idx_t l = 0; l < n; l++) {
-		if (leaf_meta[l].kind != 'F') {
-			leaf_key[l] = string("\x1f") + leaf_meta[l].op + leaf_meta[l].val;
+	{
+		const vector<string> tokens = AIMetaTokens(bind_data.meta);
+		for (idx_t l = 0; l < n; l++) {
+			if (l < tokens.size() && tokens[l] != "F") {
+				leaf_key[l] = string("\x1f") + tokens[l];
+			}
 		}
 	}
 
@@ -2061,6 +2280,21 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 	// so the model keeps improving the predictions of rows scheduled later. Order-independent -> the
 	// boolean result is unchanged; only which calls happen (cost) and their scheduling (latency) differ.
 	vector<vector<AITriState>> leaf_values(count, vector<AITriState>(n, AITriState::TRI_UNKNOWN));
+	if (leaf_valid) {
+		// A NULL-prompt leaf is known before any call: its wrapper's verdict over NULL, or NULL. The tree folds
+		// it with the leaves that are asked (`ai_filter(NULL) IS NULL AND ai_filter(b)` passes when b does).
+		vector<AITriState> null_outcome(n, AITriState::TRI_UNKNOWN);
+		for (idx_t row = 0; row < count; row++) {
+			for (idx_t l = 0; l < n; l++) {
+				if (!(*leaf_valid)[row][l]) {
+					if (null_outcome[l] == AITriState::TRI_UNKNOWN) {
+						null_outcome[l] = AILeafNullOutcome(context, leaf_meta[l]);
+					}
+					leaf_values[row][l] = null_outcome[l];
+				}
+			}
+		}
+	}
 	vector<char> row_result(count, 0); // 0 false, 1 true, 2 NULL (the tree folded to a failed call's NULL)
 	auto tri_result = [](AITriState t) -> char {
 		return static_cast<char>(t == AITriState::TRI_TRUE ? 1 : (t == AITriState::TRI_NULL ? 2 : 0));
@@ -2082,6 +2316,7 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 			}
 			string key;
 			for (idx_t l = 0; l < n; l++) {
+				key.push_back(leaf_valid && !(*leaf_valid)[row][l] ? '\x00' : '\x01'); // a NULL leaf is not ''
 				key += prompt[row][l];
 				key.push_back('\x1f');
 			}
@@ -2418,6 +2653,9 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 					}
 				}
 			}
+			for (idx_t l = 0; l < n; l++) {
+				AIDebugSelectivityKnob(prompt[row][l], p_row[l]); // test knob: a pinned prediction
+			}
 			// Speculative pre-filter gate: on a row's first scheduling (every leaf still unknown), roll up
 			// the node's P(pass) under leaf independence and pass likely-to-pass rows (P >= threshold)
 			// through with NO LLM call -- the pulled-up filter above the join re-checks them (a cache
@@ -2554,11 +2792,55 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 			// plain ai_filter leaf (meta kind F) is the original path.
 			bool value_ok = false;
 			const auto llm_t0 = std::chrono::steady_clock::now();
-			const bool value = AIEvalLeaf(context, leaf_meta[leaf], prompt[row][leaf], query_text, value_ok, nullptr, 0,
-			                              &pred_text[row][leaf], &batch_config);
+			// reuse hint for a leading image span: the caller's per-rep hint (the leaf region's), else the
+			// expected later reads of this row's leaves that lead with the same image, along the all-true
+			// path of the row's order (a false ends an AND), weighted by the predicted pass rates
+			auto lead_of = [&](idx_t l) {
+				if (lead_span && row < lead_span->size() && l < (*lead_span)[row].size()) {
+					return (*lead_span)[row][l];
+				}
+				return AIImagePrefixSpan(prompt[row][l]);
+			};
+			const string mine = lead_of(leaf);
+			double image_reads = -1.0; // unknown: reuse beyond this node is the adaptive rule's business
+			if (reuse_hint && row < reuse_hint->size() && leaf < (*reuse_hint)[row].size()) {
+				image_reads = (*reuse_hint)[row][leaf];
+			} else if (n > 1 && !mine.empty()) {
+				vector<char> shares(n, 0);
+				bool sibling = false;
+				for (idx_t other = 0; other < n; other++) {
+					// the same input under another FUNCTION is another span (its own system prompt and
+					// schema): only ai_filter leaves read each other's
+					const bool same = other != leaf && lead_of(other) == mine && leaf_meta[other].kind == 'F' &&
+					                  leaf_meta[leaf].kind == 'F';
+					sibling |= same;
+					shares[other] = same ? 1 : 0;
+				}
+				if (sibling) {
+					// this batch's observed pass rates (shrunk toward the prediction) drive the expectation
+					vector<double> p_hint(n);
+					for (idx_t l = 0; l < n; l++) {
+						double pinned = 0.0;
+						const idx_t seen = obs_n[l].load();
+						p_hint[l] = AIDebugSelectivityKnob(prompt[row][l], pinned)
+						                ? pinned
+						                : (static_cast<double>(obs_true[l].load()) + 4.0 * p_row[l]) /
+						                      (static_cast<double>(seen) + 4.0);
+					}
+					image_reads =
+					    AIFilterTreeExpectedSharedReads(tree, leaf_values[row], p_hint, eff_cost, leaf, shares);
+				}
+			}
+			const bool value = AIEvalLeaf(context, leaf_meta[leaf], prompt[row][leaf], query_text, value_ok, nullptr,
+			                              image_reads, &pred_text[row][leaf], &batch_config, &mine, &leaf_head[leaf],
+			                              static_cast<double>(count) - 1.0);
 			ema_update(llm_lat_us,
 			           std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - llm_t0)
 			               .count());
+			if (value_ok) {
+				obs_n[leaf].fetch_add(1); // this batch's pass rate per leaf, for the write decision
+				obs_true[leaf].fetch_add(value ? 1 : 0);
+			}
 			if (value_ok && !feats[leaf].empty()) {
 				// The real (function + comparison) outcome is the ground-truth label for the selectivity MLP.
 				// Skip leaves with no embedding (image leaves, or a failed embed): a pseudo-random selectivity
@@ -2762,11 +3044,13 @@ static void AIFilterWithEmbedFunction(DataChunk &args, ExpressionState &state, V
 	vector<vector<string>> prompt, pred_text, input_text;
 	vector<vector<double>> cost;
 	vector<char> row_valid;
-	AIFilterAppendArgs(args, n, prompt, pred_text, input_text, cost, row_valid);
+	vector<vector<char>> leaf_valid;
+	AIFilterAppendArgs(args, n, prompt, pred_text, input_text, cost, row_valid, leaf_valid);
 
 	vector<char> out_result;
 	AIFilterEvaluateBatch(state.GetContext(), bind_data, count, prompt, pred_text, input_text, cost, row_valid,
-	                      state.GetContext().GetCurrentQuery(), out_result);
+	                      state.GetContext().GetCurrentQuery(), out_result, -2, nullptr, nullptr, nullptr, nullptr,
+	                      nullptr, &leaf_valid);
 
 	result.SetVectorType(VectorType::FLAT_VECTOR);
 	auto out = FlatVector::GetDataMutable<bool>(result);
@@ -2835,6 +3119,15 @@ void AILeafBuildTexts(ClientContext &context, const BoundFunctionExpression &eva
 		executor.AddExpression(*children[pos]);
 		types.push_back(children[pos]->GetReturnType());
 	}
+	// the operand the prompt leads with, when row-varying: its text is the span a region declares as its
+	// provider prefix (the convention: the shared input first), materialised alongside the prompt
+	const Expression *leading = nullptr;
+	AILeafLeadKey(eval_call, leaf, &leading);
+	if (leading) {
+		executor.AddExpression(*leading);
+		types.push_back(leading->GetReturnType());
+	}
+	out.head = AILeafHeadText(context, eval_call, leaf);
 	DataChunk texts;
 	texts.Initialize(BufferAllocator::Get(context), types);
 	executor.Execute(rows, texts);
@@ -2846,6 +3139,13 @@ void AILeafBuildTexts(ClientContext &context, const BoundFunctionExpression &eva
 		out.prompt.push_back(pv.IsNull() ? string() : StringValue::Get(pv));
 		out.pred_text.push_back(ptv.IsNull() ? string() : StringValue::Get(ptv));
 		out.input_text.push_back(itv.IsNull() ? string() : StringValue::Get(itv));
+		if (leading) {
+			const Value lv = texts.data[3].GetValue(i);
+			out.lead_span.push_back(
+			    lv.IsNull() || pv.IsNull() ? string() : out.head + lv.DefaultCastAs(LogicalType::VARCHAR).ToString());
+		} else {
+			out.lead_span.push_back(string());
+		}
 		const auto &prompt = out.prompt.back();
 		out.cost.push_back(
 		    pv.IsNull() ? 1.0 : (AITextHasImage(prompt) ? AIImageLeafCost(prompt) : AIEstimatePromptCost(prompt)));
@@ -2984,18 +3284,10 @@ void AILeafEvaluate(ClientContext &context, const BoundFunctionExpression &eval_
 	auto &node = eval_call.BindInfo()->Cast<AIFilterWithEmbedBindData>();
 	// The leaf's own meta segment (';'-separated, one per leaf; empty = plain ai_filter everywhere).
 	string meta;
-	if (!node.meta.empty()) {
-		idx_t seg = 0;
-		size_t start = 0;
-		for (size_t i = 0; i <= node.meta.size(); i++) {
-			if (i == node.meta.size() || node.meta[i] == ';') {
-				if (seg == leaf) {
-					meta = node.meta.substr(start, i - start);
-					break;
-				}
-				seg++;
-				start = i + 1;
-			}
+	{
+		const auto tokens = AIMetaTokens(node.meta);
+		if (leaf < tokens.size()) {
+			meta = tokens[leaf];
 		}
 	}
 	// A one-leaf tree over this leaf: the batch evaluator then runs exactly the per-leaf slice of its
@@ -3011,6 +3303,8 @@ void AILeafEvaluate(ClientContext &context, const BoundFunctionExpression &eval_
 	vector<vector<string>> prompt(count, vector<string>(1)), pred(count, vector<string>(1)),
 	    input(count, vector<string>(1));
 	vector<vector<double>> cost(count, vector<double>(1, 1.0));
+	vector<vector<double>> hint(count, vector<double>(1, -1.0));
+	vector<vector<string>> lead(count, vector<string>(1));
 	vector<char> valid(count, 1);
 	for (idx_t i = 0; i < count; i++) {
 		prompt[i][0] = texts.prompt[i];
@@ -3018,8 +3312,11 @@ void AILeafEvaluate(ClientContext &context, const BoundFunctionExpression &eval_
 		input[i][0] = texts.input_text[i];
 		cost[i][0] = texts.cost[i];
 		valid[i] = texts.valid[i];
+		hint[i][0] = i < texts.reuse_hint.size() ? texts.reuse_hint[i] : -1.0;
+		lead[i][0] = i < texts.lead_span.size() ? texts.lead_span[i] : string();
 	}
-	AIFilterEvaluateBatch(context, one, count, prompt, pred, input, cost, valid, query_text, out_result, -1, nullptr);
+	AIFilterEvaluateBatch(context, one, count, prompt, pred, input, cost, valid, query_text, out_result, -1, nullptr,
+	                      &hint, &lead, nullptr, &texts.head);
 	out_valid = valid;
 	AINullResultsInvalid(out_result, out_valid);
 }
@@ -3056,8 +3353,20 @@ AILeafUnitEvaluator::AILeafUnitEvaluator(const BoundFunctionExpression &eval_cal
 
 AILeafUnitEvaluator::~AILeafUnitEvaluator() = default;
 
+char AILeafUnitEvaluator::LeafKind(idx_t leaf) const {
+	return leaf < impl->metas.size() ? impl->metas[leaf].kind : 'F';
+}
+
+AITriState AILeafUnitEvaluator::NullOutcome(ClientContext &context, idx_t leaf) const {
+	if (leaf >= impl->metas.size()) {
+		return AITriState::TRI_NULL;
+	}
+	return AILeafNullOutcome(context, impl->metas[leaf]);
+}
+
 Value AILeafUnitEvaluator::Evaluate(ClientContext &context, idx_t leaf, const string &prompt, const string &pred_text,
-                                    const vector<float> &feature, const string &query_text) const {
+                                    const vector<float> &feature, const string &query_text, double reuse_hint,
+                                    const string *lead_span, const string *head, double head_reads) const {
 	const auto &meta = impl->metas[leaf];
 	if (impl->speculative) {
 		// A speculative leaf only prunes what is already known false; an unknown input passes through.
@@ -3066,8 +3375,9 @@ Value AILeafUnitEvaluator::Evaluate(ClientContext &context, idx_t leaf, const st
 		    !AIEvalLeafCached(context, meta, prompt, query_text, v, &pred_text, &impl->Config(context)) || v);
 	}
 	bool ok = false;
-	const bool value =
-	    AIEvalLeaf(context, meta, prompt, query_text, ok, nullptr, 0, &pred_text, &impl->Config(context));
+	const AIConfig &config = impl->Config(context);
+	const bool value = AIEvalLeaf(context, meta, prompt, query_text, ok, nullptr, reuse_hint, &pred_text, &config,
+	                              lead_span, head, head_reads);
 	if (ok && !feature.empty()) {
 		AIRecordTrainingExample(prompt, feature, value);
 		AISelectivityModel::Global().AddExample(feature, value);
@@ -3104,19 +3414,22 @@ void AIDedupFireWave(ClientContext &context, const BoundFunctionExpression &eval
 	vector<vector<string>> prompt, pred_text, input_text;
 	vector<vector<double>> cost;
 	out_valid.clear();
+	vector<vector<char>> leaf_valid;
 	DataChunk rep_chunk, arg_chunk;
 	rep_chunk.Initialize(BufferAllocator::Get(context), wave_reps.Types());
 	arg_chunk.Initialize(BufferAllocator::Get(context), arg_types);
+	vector<vector<string>> lead;
 	ColumnDataScanState scan;
 	wave_reps.InitializeScan(scan);
 	while (wave_reps.Scan(scan, rep_chunk)) {
 		arg_chunk.Reset();
 		executor.Execute(rep_chunk, arg_chunk);
-		AIFilterAppendArgs(arg_chunk, n, prompt, pred_text, input_text, cost, out_valid);
+		AIFilterAppendArgs(arg_chunk, n, prompt, pred_text, input_text, cost, out_valid, leaf_valid);
+		AIFilterAppendLeadSpans(context, eval_call, rep_chunk, lead);
 		rep_chunk.Reset();
 	}
 	AIFilterEvaluateBatch(context, bind_data, prompt.size(), prompt, pred_text, input_text, cost, out_valid, query_text,
-	                      out_result, remaining_limit, &wave_weights);
+	                      out_result, remaining_limit, &wave_weights, nullptr, &lead, &eval_call, nullptr, &leaf_valid);
 	AINullResultsInvalid(out_result, out_valid);
 }
 
@@ -3168,9 +3481,12 @@ void AIDedupFireWaveFactorized(ClientContext &context, const BoundFunctionExpres
 	vector<vector<string>> prompt, pred_text, input_text;
 	vector<vector<double>> cost;
 	out_valid.clear();
-	AIFilterAppendArgs(arg_chunk, n, prompt, pred_text, input_text, cost, out_valid);
+	vector<vector<char>> leaf_valid;
+	AIFilterAppendArgs(arg_chunk, n, prompt, pred_text, input_text, cost, out_valid, leaf_valid);
+	vector<vector<string>> lead;
+	AIFilterAppendLeadSpans(context, eval_call, factorized, lead);
 	AIFilterEvaluateBatch(context, bind_data, prompt.size(), prompt, pred_text, input_text, cost, out_valid, query_text,
-	                      out_result, remaining_limit, &weights);
+	                      out_result, remaining_limit, &weights, nullptr, &lead, &eval_call, nullptr, &leaf_valid);
 	AINullResultsInvalid(out_result, out_valid);
 }
 
@@ -3477,7 +3793,7 @@ static bool AIConstantConcatText(const Expression &expr, string &out) {
 
 bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub_node,
                       const vector<string> &leaf_prompts, const string &query_text, bool &valid,
-                      const vector<string> *leaf_prefixes, idx_t expected_reuse) {
+                      const vector<string> *leaf_prefixes, double expected_reads, const vector<char> *leaf_null) {
 	const AIConfig unit_config = AIConfigForContext(context);
 	auto &bind_data = sub_node.BindInfo()->Cast<AIFilterWithEmbedBindData>();
 	const auto metas = AIParseLeafMeta(bind_data.meta, bind_data.leaf_count, bind_data.wrappers);
@@ -3494,6 +3810,10 @@ bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub
 	vector<double> p(n, 0.5), cost(n, 1.0);
 	for (idx_t l = 0; l < n; l++) {
 		cost[l] = 1.0 + static_cast<double>(leaf_prompts[l].size()) / 256.0;
+		if (leaf_null && l < leaf_null->size() && (*leaf_null)[l]) {
+			// A NULL prompt is a NULL answer, decided without a call: its wrapper over NULL, else NULL
+			values[l] = AILeafNullOutcome(context, metas[l]);
+		}
 	}
 	valid = true;
 	for (;;) {
@@ -3532,7 +3852,7 @@ bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub
 		}
 		// A wrapper that raises on the answer propagates: the graph's pool hands the error to its driver.
 		const bool value =
-		    AIEvalLeaf(context, metas[l], leaf_prompts[l], query_text, ok, prefix, expected_reuse, &pred, &unit_config);
+		    AIEvalLeaf(context, metas[l], leaf_prompts[l], query_text, ok, prefix, expected_reads, &pred, &unit_config);
 		values[l] = !ok ? AITriState::TRI_NULL : value ? AITriState::TRI_TRUE : AITriState::TRI_FALSE;
 	}
 }
@@ -3708,17 +4028,7 @@ unique_ptr<Expression> AIFactorSubNode(const BoundFunctionExpression &node, cons
 	// meta subset (';'-joined per-leaf tokens; empty = all plain ai_filter)
 	string meta;
 	if (!bind_data.meta.empty()) {
-		vector<string> tokens;
-		string cur;
-		for (const char c : bind_data.meta) {
-			if (c == ';') {
-				tokens.push_back(cur);
-				cur.clear();
-			} else {
-				cur += c;
-			}
-		}
-		tokens.push_back(cur);
+		const vector<string> tokens = AIMetaTokens(bind_data.meta);
 		for (idx_t i = 0; i < m; i++) {
 			if (i) {
 				meta += ';';

@@ -1,0 +1,98 @@
+# name: test/sql/functions/folded_literal_delimiters.test
+# description: A folded comparison's literal may hold the meta string's own delimiters (';' between leaves,
+# group: [functions]
+
+#              ',' between a set's members): 'New York, NY' stays one member and 'x;y' one literal. Each folded
+#              query (classify leaves beside an ai_filter leaf) is checked against its native answer; the mock
+#              answers the same label to the same prompt, folded or not.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE t AS SELECT i AS id, 'x' || i AS a, 'y' || i AS b FROM range(1, 9) r(i);
+
+query I
+SELECT (SELECT count(*) FROM t WHERE ai_classify(a, ['New York, NY', 'x;y', 'plain']) IN ('New York, NY', 'x;y') AND ai_filter('[p=100] ' || b))
+     = (SELECT count(*) FROM t WHERE ai_classify(a, ['New York, NY', 'x;y', 'plain']) IN ('New York, NY', 'x;y'));
+----
+true
+
+query I
+SELECT (SELECT count(*) FROM t WHERE ai_classify(a, ['New York, NY', 'x;y', 'plain']) NOT IN ('New York, NY') AND ai_filter('[p=100] ' || b))
+     = (SELECT count(*) FROM t WHERE ai_classify(a, ['New York, NY', 'x;y', 'plain']) NOT IN ('New York, NY'));
+----
+true
+
+# a ';' literal in one leaf must not swallow the next leaf's meta
+query I
+SELECT (SELECT count(*) FROM t WHERE ai_classify(a, ['a;b', 'c,d']) = 'a;b' AND ai_classify(b, ['p', 'q']) = 'q' AND ai_filter('[p=100] ' || b))
+     = (SELECT count(*) FROM t WHERE ai_classify(a, ['a;b', 'c,d']) = 'a;b' AND ai_classify(b, ['p', 'q']) = 'q');
+----
+true
+
+query I
+SELECT (SELECT count(*) FROM t WHERE ai_classify(a, ['a;b', 'c,d']) != 'c,d' AND ai_filter('[p=100] ' || b))
+     = (SELECT count(*) FROM t WHERE ai_classify(a, ['a;b', 'c,d']) != 'c,d');
+----
+true
+
+# a backslash in a literal
+query I
+SELECT (SELECT count(*) FROM t WHERE ai_classify(a, ['a\\b', 'c']) = 'a\\b' AND ai_filter('[p=100] ' || b))
+     = (SELECT count(*) FROM t WHERE ai_classify(a, ['a\\b', 'c']) = 'a\\b');
+----
+true
+
+# a ';' literal before a WRAPPED leaf: every meta consumer must tokenize escape-aware, or the wrapper lands
+# on the wrong leaf (an internal error, or a wrong verdict)
+query I
+SELECT (SELECT count(*) FROM t WHERE (ai_complete(a) = 'x;y' OR ai_complete(b) IS NULL) AND ai_filter('[p=100] ' || b))
+     = (SELECT count(*) FROM t WHERE ai_complete(a) = 'x;y' OR ai_complete(b) IS NULL);
+----
+true
+
+query I
+SELECT count(*) FROM t WHERE (ai_complete(a) = 'ok' OR ai_complete(b) IS NULL) AND ai_filter('[p=100] ' || b);
+----
+8
+
+# two IN predicates over ONE prompt with different sets must not share a verdict: a label is never in both
+query I
+SELECT count(*) FROM t WHERE ai_classify(a, ['p', 'q']) IN ('p') AND ai_classify(a, ['p', 'q']) IN ('q') AND ai_filter('[p=100] ' || b);
+----
+0
+
+query I
+SELECT count(*) FROM t WHERE (ai_classify(a, ['p', 'q']) IN ('p') OR ai_classify(a, ['p', 'q']) IN ('q')) AND ai_filter('[p=100] ' || b);
+----
+8
+
+# a literal that looks like the wrapper marker, and one with an embedded NUL, are plain literals
+query I
+SELECT (SELECT count(*) FROM t WHERE ai_complete(a) = 'x:wrap:y' AND ai_filter('[p=100] ' || b))
+     = (SELECT count(*) FROM t WHERE ai_complete(a) = 'x:wrap:y');
+----
+true
+
+query I
+SELECT count(*) FROM t WHERE ai_complete(a) != 'x:wrap:y' AND ai_filter('[p=100] ' || b);
+----
+8
+
+query I
+SELECT (SELECT count(*) FROM t WHERE ai_classify(a, ['n' || chr(0) || 'ul', 'z']) = 'n' || chr(0) || 'ul' AND ai_filter('[p=100] ' || b))
+     = (SELECT count(*) FROM t WHERE ai_classify(a, ['n' || chr(0) || 'ul', 'z']) = 'n' || chr(0) || 'ul');
+----
+true
+
+# the sets are not degenerate: some rows do fall in each
+query I
+SELECT (SELECT count(*) FROM t WHERE ai_classify(a, ['New York, NY', 'x;y', 'plain']) IN ('New York, NY', 'x;y')) BETWEEN 1 AND 7;
+----
+true
+
+statement ok
+CALL ai_mock_stop();

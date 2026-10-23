@@ -64,6 +64,11 @@ _con.execute("""CREATE TABLE IF NOT EXISTS cache(
 # comparison is only fair between entries recorded under similar conditions -- this column is what
 # makes that checkable. Stores that predate it are migrated in place; their rows keep NULL (unknown).
 _con.execute("ALTER TABLE cache ADD COLUMN IF NOT EXISTS recorded_at TIMESTAMP")
+# The cross-API key: one request keyed the same whether Chat Completions or the Responses API carried it, so a
+# recording made through one envelope serves the other (the engine picks the API per request under
+# ai_api = auto). Filled on store; serve/migrate_canon_key.py fills it for rows recorded before the column.
+_con.execute("ALTER TABLE cache ADD COLUMN IF NOT EXISTS canon_key VARCHAR")
+_con.execute("CREATE INDEX IF NOT EXISTS cache_canon_idx ON cache(canon_key)")
 _db_lock = threading.Lock()
 atexit.register(lambda: _con.close())
 _stats = {"hits": 0, "misses": 0, "errors": 0, "prompt_tokens": 0, "completion_tokens": 0}
@@ -74,8 +79,8 @@ def _accumulate_tokens(body_str):
     # Embeddings never reach this proxy (routed straight to the embed server), so this is chat-only.
     try:
         u = (json.loads(body_str) or {}).get("usage") or {}
-        pt = int(u.get("prompt_tokens", 0) or 0)
-        ct = int(u.get("completion_tokens", 0) or 0)
+        pt = int(u.get("prompt_tokens", u.get("input_tokens", 0)) or 0)
+        ct = int(u.get("completion_tokens", u.get("output_tokens", 0)) or 0)
     except (ValueError, AttributeError, TypeError):
         return
     with _db_lock:
@@ -83,15 +88,191 @@ def _accumulate_tokens(body_str):
         _stats["completion_tokens"] += ct
 
 
-def redact_images(body_obj):
+def _hash_data_url(url):
+    if isinstance(url, str) and url.startswith("data:") and ";base64," in url:
+        head, b64 = url.split(";base64,", 1)
+        return f"{head};base64,sha256:{hashlib.sha256(b64.encode()).hexdigest()}", True
+    return url, False
+
+
+def _merge_text_parts(parts, text_type, text_key="text"):
+    """Merge consecutive text parts into one. A request split for provider prompt caching cuts a text run
+    where the declared span ends (e.g. '... fits the description: ' | '<title>'), and after the breakpoint
+    fields are dropped that cut is the only difference from the unsplit body the cache recorded -- so it
+    must not reach the key."""
+    out = []
+    for part in parts:
+        if (out and isinstance(part, dict) and isinstance(out[-1], dict) and part.get("type") == text_type
+                and out[-1].get("type") == text_type and set(part) <= {"type", text_key}
+                and set(out[-1]) <= {"type", text_key}):
+            out[-1] = {**out[-1], text_key: out[-1].get(text_key, "") + part.get(text_key, "")}
+        else:
+            out.append(part)
+    return out
+
+
+def _carries_cache_fields(body_obj):
+    """True when the request asked for explicit prompt caching (options or a breakpoint part): only such a
+    request was SPLIT by the engine, so only for it may adjacent text parts be merged back for the key. A body
+    without them keeps its exact part structure: the recordings of the other systems (LOTUS's
+    [text, text, image, text] bodies) are keyed on it, and merging would re-key every one of them."""
+    if not isinstance(body_obj, dict):
+        return False
+    if "prompt_cache_options" in body_obj:
+        return True
+    # a breakpoint rides on a content part: walk the parts structurally (no serialisation of the body, and
+    # no size cap a large image block could push the breakpoint past)
+    for item in (body_obj.get("messages") or body_obj.get("input") or []):
+        if not isinstance(item, dict):
+            continue
+        if "prompt_cache_breakpoint" in item:
+            return True
+        content = item.get("content")
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and "prompt_cache_breakpoint" in part:
+                    return True
+    return False
+
+
+def redact_responses(body_obj, merge=None):
+    """The Responses API shape (input = a string or a list of items whose content is a string or a list of
+    input_text / input_image blocks): the same redaction and cache-key canonicalization as chat below --
+    image data-URIs hashed, prompt_cache_breakpoint and prompt_cache_options dropped, an all-text block
+    list folded to a plain string -- so a prefixed request keys like its plain form and no image bytes are
+    stored."""
+    items = body_obj.get("input")
+    changed = False
+    if merge is None:
+        merge = _carries_cache_fields(body_obj)
+    if isinstance(items, list):
+        new_items = []
+        for it in items:
+            c = it.get("content") if isinstance(it, dict) else None
+            if isinstance(c, list):
+                parts = []
+                for part in c:
+                    if isinstance(part, dict):
+                        part = {k: v for k, v in part.items() if k != "prompt_cache_breakpoint"}
+                        url, h = _hash_data_url(part.get("image_url"))
+                        if h:
+                            part = {**part, "image_url": url}
+                    parts.append(part)
+                if merge:
+                    parts = _merge_text_parts(parts, "input_text")
+                if parts and all(isinstance(x, dict) and x.get("type") == "input_text" for x in parts):
+                    it = {**it, "content": "".join(x.get("text", "") for x in parts)}
+                else:
+                    it = {**it, "content": parts}
+                changed = True
+            new_items.append(it)
+        if changed:
+            body_obj = {**body_obj, "input": new_items}
+    if "prompt_cache_options" in body_obj:
+        body_obj = {k: v for k, v in body_obj.items() if k != "prompt_cache_options"}
+    return body_obj
+
+
+def _canon_user(content, text_type, image_key):
+    """A user content in either envelope as one list of parts: text runs merged, images as their (hashed) url."""
+    if isinstance(content, str):
+        return [{"t": content}]
+    out = []
+    for part in content if isinstance(content, list) else []:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") == text_type:
+            if out and "t" in out[-1]:
+                out[-1] = {"t": out[-1]["t"] + part.get("text", "")}
+            else:
+                out.append({"t": part.get("text", "")})
+        elif part.get("type") in ("image_url", "input_image"):
+            url = part.get("image_url")
+            url = url.get("url") if isinstance(url, dict) else url
+            out.append({"img": _hash_data_url(url)[0] if isinstance(url, str) else None})
+    while out and "t" in out[-1] and out[-1]["t"] == "\n":
+        out.pop()  # the chat carrier block of an image-ending breakpoint
+    return out
+
+
+def canon_for(body_obj):
+    """The envelope-independent identity of a chat or Responses request (on its REDACTED body): model, system
+    text, history turns, the user content as merged parts, the response schema and its name. Sampling fields
+    (temperature, store, reasoning effort, cache options) are left out: they do not change what was asked.
+    None for anything else (embeddings, System One)."""
+    if not isinstance(body_obj, dict):
+        return None
+    if "messages" in body_obj and isinstance(body_obj["messages"], list):
+        msgs = body_obj["messages"]
+        system = next((m.get("content") for m in msgs if isinstance(m, dict) and m.get("role") == "system"), "")
+        turns = [m for m in msgs if isinstance(m, dict) and m.get("role") in ("user", "assistant")]
+        if not turns or turns[-1].get("role") != "user":
+            return None
+        history = [[m["role"], m.get("content") if isinstance(m.get("content"), str) else json.dumps(m.get("content"))] for m in turns[:-1]]
+        user = _canon_user(turns[-1].get("content"), "text", "image_url")
+        fmt = (body_obj.get("response_format") or {}).get("json_schema") or {}
+        schema, name = fmt.get("schema"), fmt.get("name")
+    elif "input" in body_obj:
+        system = body_obj.get("instructions", "")
+        inp = body_obj["input"]
+        if isinstance(inp, str):
+            history, user = [], [{"t": inp}]
+        elif isinstance(inp, list) and inp and isinstance(inp[-1], dict) and inp[-1].get("role") == "user":
+            history = [[m.get("role"), m.get("content") if isinstance(m.get("content"), str) else json.dumps(m.get("content"))] for m in inp[:-1] if isinstance(m, dict)]
+            user = _canon_user(inp[-1].get("content"), "input_text", "input_image")
+        else:
+            return None
+        fmt = ((body_obj.get("text") or {}).get("format") or {})
+        schema, name = fmt.get("schema"), fmt.get("name")
+    else:
+        return None
+    canon = {"model": body_obj.get("model"), "system": system or "", "history": history, "user": user,
+             "schema": schema, "name": name}
+    return hashlib.sha256(json.dumps(canon, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def responses_to_chat(body_text, model=None):
+    """A recorded Responses body as the chat completion the same request would have received."""
+    resp = json.loads(body_text)
+    text = next((it.get("content", [{}])[0].get("text", "") for it in resp.get("output", [])
+                 if isinstance(it, dict) and it.get("type") == "message"), "")
+    u = resp.get("usage", {}) or {}
+    det = u.get("input_tokens_details") or {}
+    return json.dumps({"id": "chatcmpl-canon", "object": "chat.completion", "model": resp.get("model") or model,
+                       "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": text}}],
+                       "usage": {"prompt_tokens": u.get("input_tokens", 0), "completion_tokens": u.get("output_tokens", 0),
+                                 "total_tokens": u.get("total_tokens", 0),
+                                 "prompt_tokens_details": {"cached_tokens": det.get("cached_tokens", 0),
+                                                           "cache_write_tokens": det.get("cache_write_tokens", 0)}}})
+
+
+def chat_to_responses(body_text, model=None):
+    """A recorded chat completion as the Responses body the same request would have received."""
+    chat = json.loads(body_text)
+    text = ((chat.get("choices") or [{}])[0].get("message") or {}).get("content", "")
+    u = chat.get("usage", {}) or {}
+    det = u.get("prompt_tokens_details") or {}
+    return json.dumps({"id": "resp-canon", "object": "response", "model": chat.get("model") or model,
+                       "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]}],
+                       "usage": {"input_tokens": u.get("prompt_tokens", 0), "output_tokens": u.get("completion_tokens", 0),
+                                 "total_tokens": u.get("total_tokens", 0),
+                                 "input_tokens_details": {"cached_tokens": det.get("cached_tokens", 0),
+                                                          "cache_write_tokens": det.get("cache_write_tokens", 0)}}})
+
+
+def redact_images(body_obj, merge=None):
     # Never persist raw image bytes. Replace each base64 image data-URI with its content hash: the hash still
     # uniquely identifies the image, so identical image+prompt requests collide on the same cache key -- but
     # the keyed/stored body is tiny instead of hundreds of KB (a 2.9 GB DB of base64 blobs is what corrupted
     # the store under concurrent writes). The ORIGINAL body (real base64) is still forwarded to the upstream
     # model; only the cache key + the stored `request` column use this compact form.
+    if isinstance(body_obj, dict) and "input" in body_obj and "messages" not in body_obj:
+        return redact_responses(body_obj, merge)
     msgs = body_obj.get("messages") if isinstance(body_obj, dict) else None
     if not isinstance(msgs, list):
         return body_obj
+    if merge is None:
+        merge = _carries_cache_fields(body_obj)
     out, changed = [], False
     for m in msgs:
         c = m.get("content") if isinstance(m, dict) else None
@@ -117,7 +298,9 @@ def redact_images(body_obj):
                         changed = True
                         continue  # the image-prefix breakpoint carrier: semantically empty
                 cleaned.append(part)
-            new_c = cleaned
+            new_c = _merge_text_parts(cleaned, "text") if merge else cleaned
+            if new_c != c:
+                changed = True
             if new_c and all(isinstance(x, dict) and x.get("type") == "text" for x in new_c):
                 m = {**m, "content": "".join(x.get("text", "") for x in new_c)}
                 changed = True
@@ -153,6 +336,27 @@ def typesafe_cost(output):
         return None
 
 
+def load_canon(canon, want_responses, model=None):
+    """The newest recording of the same request through EITHER envelope, converted to the one asked for."""
+    if not canon:
+        return None
+    with _db_lock:
+        row = _con.execute("SELECT status, output, headers, latency, request FROM cache WHERE canon_key = ? "
+                           "AND status BETWEEN 200 AND 299 ORDER BY recorded_at DESC NULLS LAST LIMIT 1", [canon]).fetchone()
+    if not row:
+        return None
+    body = row[1]
+    try:
+        stored_responses = '"input"' in row[4] and '"messages"' not in row[4]
+        if want_responses and not stored_responses:
+            body = chat_to_responses(body, model)
+        elif not want_responses and stored_responses:
+            body = responses_to_chat(body, model)
+    except Exception:
+        return None
+    return {"status": row[0], "body": body, "headers": json.loads(row[2]) if row[2] else {}, "latency": row[3]}
+
+
 def store(k, request_obj, status, output, headers, latency, systemone=False):
     try:
         cost = float(headers["x-litellm-response-cost"]) if headers.get("x-litellm-response-cost") else None
@@ -161,13 +365,43 @@ def store(k, request_obj, status, output, headers, latency, systemone=False):
     if systemone:
         cost = typesafe_cost(output)
     with _db_lock:
-        _con.execute("INSERT INTO cache (key, request, output, status, headers, latency, cost, recorded_at) "
-                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO NOTHING",
+        _con.execute("INSERT INTO cache (key, request, output, status, headers, latency, cost, recorded_at, canon_key) "
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key) DO NOTHING",
                      [k, json.dumps(request_obj), output, status, json.dumps(headers), latency, cost,
-                      datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)])
+                      datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
+                      canon_for(request_obj) if not systemone else None])
 
 
 ALIAS_CHAT = os.environ.get("CACHE_ALIAS_CHAT", "") == "1"
+# CACHE_CROSS_API=1: serve a request from a recording of the same request made through the OTHER envelope
+# (chat <-> Responses, see canon_for). OFF by default: the recorded latency belongs to the envelope that
+# carried the call (the Responses API is measurably slower per call), so a replay that reports latency must
+# only serve a recording made through the request's own envelope -- the exact key already keeps them apart.
+# Turn it on for quality / cost / call-count replays, where the answer is what matters.
+CROSS_API = os.environ.get("CACHE_CROSS_API", "") == "1"
+
+
+def responses_alias_hit(body_obj):
+    """CACHE_ALIAS_CHAT=1 for a Responses-API request whose last user content is one text (SWAN's bare
+    prompt): serve the entry recorded for {input: <that text>, model} -- the other engine's exact body --
+    so both consume the same sample. The stored output is already a Responses body."""
+    if not ALIAS_CHAT or not isinstance(body_obj, dict):
+        return None
+    items = body_obj.get("input")
+    user = items if isinstance(items, str) else None
+    if isinstance(items, list):
+        for it in reversed(items):
+            if isinstance(it, dict) and it.get("role") == "user":
+                c = it.get("content")
+                if isinstance(c, str):
+                    user = c
+                elif isinstance(c, list) and len(c) == 1 and isinstance(c[0], dict) and c[0].get("type") == "input_text":
+                    user = c[0].get("text")
+                break
+    if not isinstance(user, str):
+        return None
+    hit = load(key_for({"input": user, "model": body_obj.get("model")}))
+    return hit
 
 
 def chat_alias_hit(body_obj):
@@ -291,14 +525,30 @@ class Handler(BaseHTTPRequestHandler):
             hit = None
             if self.path.endswith("/chat/completions"):
                 hit = chat_alias_hit(body_obj)
+            elif self.path.endswith("/responses"):
+                hit = responses_alias_hit(body_obj)
             if hit is None:
                 hit = load(cache_key)
+            if hit is None and not _carries_cache_fields(body_obj):
+                # a body recorded while the proxy merged adjacent text parts unconditionally (2026-10-21,
+                # before this rule) sits under the merged key: second lookup, never the primary key
+                alt_obj = redact_images(body_obj, merge=True)
+                if alt_obj != key_obj:
+                    hit = load(key_for(alt_obj))
+            if hit is None and CROSS_API and (self.path.endswith("/chat/completions") or self.path.endswith("/responses")):
+                # CACHE_CROSS_API=1 only: the same request recorded through the other envelope (ai_api = auto
+                # moves a request between chat and the Responses API as it writes or reads a span); its
+                # latency is the other envelope's, so never for a latency-bearing replay
+                hit = load_canon(canon_for(key_obj), self.path.endswith("/responses"), body_obj.get("model"))
+                if hit is not None:
+                    with _db_lock:
+                        _stats["canon_hits"] = _stats.get("canon_hits", 0) + 1
             if hit is not None:
                 if SIMULATE and hit.get("latency", 0) > 0:
                     self._sleep_until_replay(hit["latency"])
                 with _db_lock:
                     _stats["hits"] += 1
-                if self.path.endswith("/chat/completions"):
+                if self.path.endswith("/chat/completions") or self.path.endswith("/responses"):
                     _accumulate_tokens(hit["body"])
                 self._send(hit["status"], hit["body"].encode(), hit.get("headers", {}))
                 return
@@ -311,7 +561,7 @@ class Handler(BaseHTTPRequestHandler):
             store(cache_key, key_obj, status, body, keep, latency, systemone=self.path.endswith("/systemone"))
             with _db_lock:
                 _stats["misses"] += 1
-            if self.path.endswith("/chat/completions"):
+            if self.path.endswith("/chat/completions") or self.path.endswith("/responses"):
                 _accumulate_tokens(body)
         elif cacheable:
             with _db_lock:

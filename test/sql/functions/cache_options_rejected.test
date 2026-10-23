@@ -1,0 +1,99 @@
+# name: test/sql/functions/cache_options_rejected.test
+# description: The explicit prompt-cache fields (prompt_cache_options, breakpoints) go out only when the client
+# group: [functions]
+
+#              manages the provider cache. An endpoint that is OpenAI-compatible in shape but knows no prompt
+#              caching answers them with a 400 naming the field: the client latches, resends that request plain
+#              and never carries the fields again -- no failed calls, no parking. With ai_prefix_cache off the
+#              fields are not sent at all (the provider's own default behaviour, e.g. its automatic caching).
+#              The mock's '[reject_cache_options]' knob plays such an endpoint; ai_mock_breakpoints() counts
+#              the requests that carried the fields.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+CREATE TABLE items AS SELECT i AS id, 'item ' || i::VARCHAR || ' is a widget' AS x FROM range(50) r(i);
+
+# the first request carries the fields and is rejected; its retry goes plain and succeeds
+query I
+SELECT count(*) FROM items WHERE id = 0 AND ai_filter('[reject_cache_options][p=100] popular? ' || x);
+----
+1
+
+query III
+SELECT breakpoint_requests, explicit_requests, (SELECT sum(failed_calls) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+0	1	0
+
+# latched: a prompt that would otherwise write a 1,200-token constant prefix carries nothing, and nothing parks
+query I
+SELECT count(*) FROM items WHERE ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || '[reject_cache_options][p=100] ' || x);
+----
+50
+
+query III
+SELECT breakpoint_requests, explicit_requests, (SELECT sum(failed_calls) FROM ai_usage()) FROM ai_mock_breakpoints();
+----
+0	1	0
+
+# a fresh mock (fresh client state) on the same endpoint: the latch is per process state, reset with it
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+query I
+SELECT count(*) FROM items WHERE ai_filter('[p=100] popular? ' || x);
+----
+50
+
+query II
+SELECT breakpoint_requests, explicit_requests FROM ai_mock_breakpoints();
+----
+0	50
+
+# ai_prefix_cache off: no explicit fields at all; on again: every request carries the mode
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_prefix_cache = false;
+
+query I
+SELECT count(*) FROM items WHERE ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || '[p=100] ' || x);
+----
+50
+
+query II
+SELECT breakpoint_requests, explicit_requests FROM ai_mock_breakpoints();
+----
+0	0
+
+statement ok
+SET ai_prefix_cache = true;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM items WHERE ai_filter(repeat('Example: a widget that sells well is popular. ', 110) || 'Is the item below popular? ' || '[p=100] ' || x || ' again');
+----
+50
+
+query II
+SELECT breakpoint_requests, explicit_requests FROM ai_mock_breakpoints();
+----
+50	50
+
+statement ok
+CALL ai_mock_stop();

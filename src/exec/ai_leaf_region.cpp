@@ -7,11 +7,15 @@
 #include "filter_tree_order.hpp"
 #include "ai_client.hpp"
 #include "duckdb/planner/expression_iterator.hpp"
+#include "optimizer/ai_filter_tree_build.hpp"
 
 #include <algorithm>
 #include <chrono>
 
 namespace duckdb {
+
+//! Weight of the model's prediction against observed verdicts in the prefix-cache write decision (answers).
+static constexpr double PASS_RATE_PRIOR = 4.0;
 
 AILeafRegionState::AILeafRegionState(ClientContext &context, const BoundFunctionExpression &eval_call,
                                      const vector<LogicalType> &child_types_p, int64_t limit,
@@ -21,10 +25,24 @@ AILeafRegionState::AILeafRegionState(ClientContext &context, const BoundFunction
                    ? MaxValue<idx_t>(MaxValue<idx_t>(AIConfig::Get().max_concurrency, 1), NumericCast<idx_t>(limit))
                    : STANDARD_VECTOR_SIZE),
       distinct_cols(std::move(limit_distinct_cols)), query_text(context.GetCurrentQuery()), child_types(child_types_p),
-      leaves(n), landed(n, 0), evaluator(make_uniq<AILeafUnitEvaluator>(eval_call)) {
+      leaves(n), landed(n, 0), observed_n(n, 0), observed_true(n, 0), async_inflight(n, 0),
+      evaluator(make_uniq<AILeafUnitEvaluator>(eval_call)) {
 	for (idx_t l = 0; l < n; l++) {
 		leaves[l].key_cols = AILeafKeyCols(eval_call, l);
 		leaves[l].stage.Initialize(Allocator::Get(context), child_types);
+	}
+	// the operand each leaf's prompt leads with (the convention: the shared input first). Only ai_filter
+	// leaves share a span: another function's request has its own system prompt and schema, so the same
+	// input under it is another span, and its reads must not be counted on.
+	lead_key.assign(n, string());
+	for (idx_t l = 0; l < n; l++) {
+		lead_key[l] = evaluator->LeafKind(l) == 'F' ? AILeafLeadKey(eval_call, l) : string();
+	}
+	has_partner.assign(n, 0);
+	for (idx_t l = 0; l < n; l++) {
+		for (idx_t k = 0; k < n && !has_partner[l]; k++) {
+			has_partner[l] = k != l && !lead_key[l].empty() && lead_key[l] == lead_key[k] ? 1 : 0;
+		}
 	}
 }
 
@@ -79,12 +97,25 @@ void AILeafRegionState::FlushStage(idx_t l) {
 		rep.p_step = step;
 		rep.cost = fresh.cost[i];
 		rep.valid = fresh.valid[i] != 0;
+		if (!rep.valid) {
+			// A NULL prompt is decided without a call: the leaf's answer is NULL, and its wrapper may turn that
+			// into a verdict (`ai_filter(a) IS NULL`, coalesce); a bare call stays a NULL (unknown) leaf.
+			const AITriState v = evaluator->NullOutcome(context, l);
+			rep.state = 3;
+			if (v != AITriState::TRI_NULL) {
+				rep.valid = true;
+				rep.verdict = v == AITriState::TRI_TRUE ? 1 : 0;
+			}
+		}
 		D_ASSERT(leaf.texts.Size() == leaf.stage_reps[i]);
 		leaf.texts.prompt.push_back(std::move(fresh.prompt[i]));
 		leaf.texts.pred_text.push_back(std::move(fresh.pred_text[i]));
 		leaf.texts.input_text.push_back(std::move(fresh.input_text[i]));
 		leaf.texts.cost.push_back(fresh.cost[i]);
 		leaf.texts.valid.push_back(fresh.valid[i]);
+		leaf.texts.lead_span.push_back(i < fresh.lead_span.size() ? std::move(fresh.lead_span[i]) : string());
+		leaf.texts.head = fresh.head;
+		AIDebugSelectivityKnob(leaf.texts.prompt.back(), rep.p); // test knob: a pinned prediction
 	}
 	leaf.stage.Reset();
 	leaf.stage_reps.clear();
@@ -191,6 +222,40 @@ bool AILeafRegionState::AppendSlice(DataChunk &chunk, idx_t begin, idx_t end) {
 	return false;
 }
 
+double AILeafRegionState::ReuseHintFor(uint32_t row, idx_t next) {
+	if (lead_key[next].empty()) {
+		return -1.0;
+	}
+	bool sibling = false;
+	vector<char> shares(n, 0);
+	vector<AITriState> values(n, AITriState::TRI_UNKNOWN);
+	vector<double> p_hint(n), cost(n);
+	for (idx_t l = 0; l < n; l++) {
+		auto &leaf_l = leaves[l];
+		const uint32_t rid = row_reps[row * n + l];
+		auto &rep = leaf_l.reps[rid];
+		if (rep.state == 3 && rep.valid) {
+			values[l] = rep.verdict ? AITriState::TRI_TRUE : AITriState::TRI_FALSE;
+		}
+		cost[l] = (rep.state == 3 || !rep.valid || l == next) ? 1e30 : rep.cost;
+		sibling |= l != next && lead_key[l] == lead_key[next];
+		shares[l] = l != next && lead_key[l] == lead_key[next] && values[l] == AITriState::TRI_UNKNOWN ? 1 : 0;
+		// this query's observed pass rate, shrunk toward the prediction; a test knob pins it
+		double pinned = 0.0;
+		const bool knob = rid < leaf_l.texts.prompt.size() && AIDebugSelectivityKnob(leaf_l.texts.prompt[rid], pinned);
+		p_hint[l] = knob ? pinned
+		                 : (static_cast<double>(observed_true[l]) + PASS_RATE_PRIOR * rep.p) /
+		                       (static_cast<double>(observed_n[l]) + PASS_RATE_PRIOR);
+	}
+	if (!sibling) {
+		return -1.0; // no other leaf of this node leads with the span: the reuse, if any, is elsewhere
+	}
+	if (values[next] != AITriState::TRI_UNKNOWN) {
+		return 0.0;
+	}
+	return AIFilterTreeExpectedSharedReads(*tree, values, p_hint, cost, next, shares);
+}
+
 void AILeafRegionState::RefreshPrediction(Leaf &leaf, uint32_t rep_id) {
 	auto &rep = leaf.reps[rep_id];
 	const uint64_t step = AISelectivityTrainSteps();
@@ -199,6 +264,7 @@ void AILeafRegionState::RefreshPrediction(Leaf &leaf, uint32_t rep_id) {
 	}
 	const auto t0 = std::chrono::steady_clock::now();
 	rep.p = AILeafPredictFeature(rep.feat);
+	AIDebugSelectivityKnob(leaf.texts.prompt[rep_id], rep.p); // test knob: a pinned prediction
 	t_refresh += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 	refreshes++;
 	rep.p_step = step;
@@ -315,6 +381,11 @@ void AILeafRegionState::DecideRow(uint32_t row) {
 	const uint32_t rep_id = row_reps[row * n + next];
 	auto &rep = leaf.reps[rep_id];
 	rep.waiters.push_back(row);
+	// prefix-cache write hint: remembered by row, computed at dispatch (see ReuseHintFor)
+	if (has_partner[next] && rep.state == 0 && !rep.has_hint_row) {
+		rep.hint_row = row;
+		rep.has_hint_row = true;
+	}
 	if (rep.state == 0) {
 		rep.state = 1;
 		leaf.pending.push_back(rep_id);
@@ -322,14 +393,18 @@ void AILeafRegionState::DecideRow(uint32_t row) {
 }
 
 uint32_t AILeafRegionState::DistinctKeyOf(DataChunk &chunk, idx_t row) {
+	// The tuple's identity under SQL equality, as the DISTINCT above will see it: each column's DuckDB hash
+	// (equal values hash equal: -0.0 and 0.0, '30 days' and '1 month'), not its text, which told them apart
+	// and over-counted the distinct passers -- the early stop then left the DISTINCT short of k rows. A hash
+	// collision can only merge two tuples, which under-counts and asks more: never fewer rows out.
 	string key;
 	for (const idx_t c : distinct_cols) {
 		const Value v = chunk.data[c].GetValue(row);
 		key.push_back(v.IsNull() ? '\x00' : '\x01');
 		if (!v.IsNull()) {
-			key += v.ToString();
+			const hash_t h = v.Hash();
+			key.append(const_char_ptr_cast(&h), sizeof(h));
 		}
-		key.push_back('\x1f');
 	}
 	auto it = dkey_dict.find(key);
 	if (it != dkey_dict.end()) {
@@ -353,6 +428,14 @@ void AILeafRegionState::ApplyVerdict(idx_t l, uint32_t rep_id, bool value, bool 
 	rep.valid = rep.valid && valid;
 	rep.verdict = value ? 1 : 0;
 	landed[l]++;
+	if (rep.async_inflight) {
+		rep.async_inflight = false;
+		async_inflight[l]--;
+	}
+	if (valid) {
+		observed_n[l]++;
+		observed_true[l] += value ? 1 : 0;
+	}
 }
 
 bool AILeafRegionState::Warm() const {
@@ -388,12 +471,23 @@ void AILeafRegionState::DispatchPending(bool flush) {
 			        (unsigned long long)(dispatcher ? dispatcher->Outstanding() : 0));
 		}
 	}
+	// A leaf whose reps carry a prefix-cache write hint goes out one concurrency-wide batch per pass until
+	// it has that many verdicts: the hint is computed at submission from the pass rate observed so far, and
+	// a whole backlog submitted cold would write every row on the model's neutral guess (measured: 80 rows,
+	// a 10% leaf, 80 writes). The pool is that wide anyway, so the first batches lose nothing.
+	const idx_t hint_batch = MaxValue<idx_t>(AIConfig::Get().max_concurrency, 1);
+	vector<idx_t> cap(n, DConstants::INVALID_INDEX);
+	for (idx_t l = 0; l < n; l++) {
+		if (ready[l] && has_partner[l] && observed_n[l] < hint_batch) {
+			cap[l] = hint_batch > async_inflight[l] ? hint_batch - async_inflight[l] : 0; // the window left
+		}
+	}
 	// Round-robin over the leaves, so a long backlog on one leaf does not queue another leaf's calls behind it.
 	for (idx_t i = 0;; i++) {
 		bool any = false;
 		for (idx_t l = 0; l < n; l++) {
 			auto &leaf = leaves[l];
-			if (!ready[l] || i >= leaf.pending.size()) {
+			if (!ready[l] || i >= leaf.pending.size() || i >= cap[l]) {
 				continue;
 			}
 			any = true;
@@ -408,21 +502,35 @@ void AILeafRegionState::DispatchPending(bool flush) {
 				rows_at_first_call = row_result.size();
 			}
 			dispatched++;
+			rep.async_inflight = true;
+			async_inflight[l]++;
+			if (rep.has_hint_row) {
+				rep.reuse_hint = ReuseHintFor(rep.hint_row, l); // on the verdicts observed by now
+			}
 			const AILeafUnitEvaluator &eval = *evaluator;
 			ClientContext &ctx = context;
 			const string &qt = query_text;
 			dispatcher->Submit((static_cast<idx_t>(l) << 32) | rep_id,
 			                   [&eval, &ctx, &qt, l, prompt = leaf.texts.prompt[rep_id],
-			                    pred = leaf.texts.pred_text[rep_id],
-			                    feat = rep.feat]() { return eval.Evaluate(ctx, l, prompt, pred, feat, qt); });
+			                    pred = leaf.texts.pred_text[rep_id], feat = rep.feat, hint = rep.reuse_hint,
+			                    lead = leaf.texts.lead_span[rep_id], head = leaf.texts.head,
+			                    head_reads = static_cast<double>(leaf.reps.size()) - 1.0]() {
+				                   return eval.Evaluate(ctx, l, prompt, pred, feat, qt, hint, &lead, &head, head_reads);
+			                   });
 		}
 		if (!any) {
 			break;
 		}
 	}
 	for (idx_t l = 0; l < n; l++) {
-		if (ready[l]) {
-			leaves[l].pending.clear();
+		if (!ready[l]) {
+			continue;
+		}
+		auto &pending = leaves[l].pending;
+		if (cap[l] < pending.size()) {
+			pending.erase(pending.begin(), pending.begin() + NumericCast<int64_t>(cap[l])); // the rest waits
+		} else {
+			pending.clear();
 		}
 	}
 }
@@ -475,6 +583,9 @@ void AILeafRegionState::RunInlineWave(idx_t l) {
 	const idx_t take = MinValue<idx_t>(leaf.pending.size(), wave_cap);
 	for (idx_t i = 0; i < take; i++) {
 		const uint32_t rep_id = leaf.pending[i];
+		if (leaf.reps[rep_id].has_hint_row) {
+			leaf.reps[rep_id].reuse_hint = ReuseHintFor(leaf.reps[rep_id].hint_row, l);
+		}
 		leaf.reps[rep_id].state = 2;
 		wave.reps.push_back(rep_id);
 		wave.texts.prompt.push_back(leaf.texts.prompt[rep_id]);
@@ -482,6 +593,9 @@ void AILeafRegionState::RunInlineWave(idx_t l) {
 		wave.texts.input_text.push_back(leaf.texts.input_text[rep_id]);
 		wave.texts.cost.push_back(leaf.texts.cost[rep_id]);
 		wave.texts.valid.push_back(leaf.texts.valid[rep_id]);
+		wave.texts.reuse_hint.push_back(leaf.reps[rep_id].reuse_hint);
+		wave.texts.lead_span.push_back(leaf.texts.lead_span[rep_id]);
+		wave.texts.head = leaf.texts.head;
 	}
 	leaf.pending.erase(leaf.pending.begin(), leaf.pending.begin() + NumericCast<int64_t>(take));
 	if (dispatched == 0) {

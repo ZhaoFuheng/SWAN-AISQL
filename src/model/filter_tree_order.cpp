@@ -759,4 +759,64 @@ double AIFilterTreeEstimateSelectivity(const AIFilterTreeNode &node, const vecto
 	return ComputeStats(node, p_true, cost).p_true;
 }
 
+//! The expectation over the row's remaining evaluation: at every state the chooser the real order uses
+//! picks the next leaf; that leaf is a read if it shares the span; then the state branches on its answer
+//! with its predicted P(true), and the expectation is the P-weighted sum of both branches. Exact for any
+//! AND/OR/NOT shape under leaf independence (an OR's second leaf is asked only on the first's false
+//! branch, an AND's only on the true branch). Exponential in the undecided leaves, so past a cap the
+//! branch of the likelier answer alone is followed (the order policy's own greedy horizon).
+static double ExpectedSharedReadsRec(const AIFilterTreeNode &node, vector<AITriState> &leaf_values,
+                                     const vector<double> &p_true, vector<double> &open_cost,
+                                     const vector<char> &shares, idx_t depth) {
+	if (AIFilterTreeEval(node, leaf_values) != AITriState::TRI_UNKNOWN) {
+		return 0.0;
+	}
+	idx_t next = AIFilterTreeChooseNextLeaf(node, leaf_values, p_true, open_cost);
+	if (next >= leaf_values.size() || open_cost[next] >= 1e29) {
+		next = leaf_values.size();
+		for (idx_t l = 0; l < leaf_values.size(); l++) {
+			if (leaf_values[l] == AITriState::TRI_UNKNOWN && open_cost[l] < 1e29 &&
+			    (next == leaf_values.size() || open_cost[l] < open_cost[next])) {
+				next = l;
+			}
+		}
+		if (next == leaf_values.size()) {
+			return 0.0;
+		}
+	}
+	const double p = p_true[next] < 0.0 ? 0.0 : (p_true[next] > 1.0 ? 1.0 : p_true[next]);
+	double expected = next < shares.size() && shares[next] ? 1.0 : 0.0;
+	const double saved_cost = open_cost[next];
+	open_cost[next] = 1e30;
+	if (depth < 10) {
+		leaf_values[next] = AITriState::TRI_TRUE;
+		expected += p * ExpectedSharedReadsRec(node, leaf_values, p_true, open_cost, shares, depth + 1);
+		leaf_values[next] = AITriState::TRI_FALSE;
+		expected += (1.0 - p) * ExpectedSharedReadsRec(node, leaf_values, p_true, open_cost, shares, depth + 1);
+	} else {
+		leaf_values[next] = p >= 0.5 ? AITriState::TRI_TRUE : AITriState::TRI_FALSE;
+		expected += ExpectedSharedReadsRec(node, leaf_values, p_true, open_cost, shares, depth + 1);
+	}
+	leaf_values[next] = AITriState::TRI_UNKNOWN;
+	open_cost[next] = saved_cost;
+	return expected;
+}
+
+double AIFilterTreeExpectedSharedReads(const AIFilterTreeNode &node, vector<AITriState> leaf_values,
+                                       const vector<double> &p_true, const vector<double> &cost, idx_t first,
+                                       const vector<char> &shares) {
+	if (first >= leaf_values.size()) {
+		return 0.0;
+	}
+	// `first` is being asked now (the would-be write): branch on its answer, count the shared reads after it
+	vector<double> open_cost = cost;
+	open_cost[first] = 1e30;
+	const double p = p_true[first] < 0.0 ? 0.0 : (p_true[first] > 1.0 ? 1.0 : p_true[first]);
+	leaf_values[first] = AITriState::TRI_TRUE;
+	double expected = p * ExpectedSharedReadsRec(node, leaf_values, p_true, open_cost, shares, 0);
+	leaf_values[first] = AITriState::TRI_FALSE;
+	expected += (1.0 - p) * ExpectedSharedReadsRec(node, leaf_values, p_true, open_cost, shares, 0);
+	return expected;
+}
+
 } // namespace duckdb

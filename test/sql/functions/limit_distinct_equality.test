@@ -1,0 +1,47 @@
+# name: test/sql/functions/limit_distinct_equality.test
+# description: A LIMIT pushed through DISTINCT counts distinct passers under SQL equality, not text identity:
+# group: [functions]
+
+#              -0.0 and 0.0 are one key (as are '30 days' and '1 month'), so the region does not stop early on
+#              two texts of one value and leave the DISTINCT above with fewer than k rows.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_concurrency = 1;
+
+statement ok
+CREATE TABLE t AS SELECT * FROM (VALUES (1, 0.0::DOUBLE), (2, -0.0::DOUBLE), (3, 1.0::DOUBLE), (4, 2.0::DOUBLE)) v(id, x);
+
+query I
+SELECT count(*) FROM (SELECT DISTINCT x FROM t WHERE ai_filter('[p=100] row ' || id::VARCHAR) LIMIT 2);
+----
+2
+
+query I
+SELECT count(*) FROM (SELECT DISTINCT x FROM t WHERE ai_filter('[p=100] again ' || id::VARCHAR) LIMIT 3);
+----
+3
+
+statement ok
+CREATE TABLE iv AS SELECT * FROM (VALUES (1, INTERVAL '30 days'), (2, INTERVAL '1 month'), (3, INTERVAL '2 days')) v(id, d);
+
+query I
+SELECT count(*) FROM (SELECT DISTINCT d FROM iv WHERE ai_filter('[p=100] interval ' || id::VARCHAR) LIMIT 2);
+----
+2
+
+# NULLs are one key too
+statement ok
+CREATE TABLE n AS SELECT * FROM (VALUES (1, NULL::INT), (2, NULL::INT), (3, 7)) v(id, x);
+
+query I
+SELECT count(*) FROM (SELECT DISTINCT x FROM n WHERE ai_filter('[p=100] null ' || id::VARCHAR) LIMIT 2);
+----
+2
+
+statement ok
+CALL ai_mock_stop();

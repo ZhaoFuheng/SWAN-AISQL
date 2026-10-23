@@ -1,0 +1,152 @@
+# name: test/sql/functions/image_first_prefix.test
+# description: A region leaf whose prompt LEADS with an image declares that span as its provider prefix, with
+# group: [functions]
+
+#              the expected later reads of the row's other leaves on the same image as the write hint. The
+#              engine never reorders a prompt: the convention is the shared input first, the instruction
+#              after it. As written with the instruction first, each leaf's span is its own text plus the
+#              image, nothing is shared, no breakpoint is emitted. Image first, the row's first call writes
+#              and its later calls read. The write is spent only when the expected reads clear the price
+#              threshold (write - 1) / (1 - read): with free writes any expected read pays; at the GPT-5.6
+#              prices (1.25x / 0.1x) a lone leaf never writes.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+CREATE TABLE pics AS SELECT 'pic' || i::VARCHAR AS name, 'http://example.invalid/' || i::VARCHAR || '.png' AS url FROM range(20) r(i);
+
+# instruction first: no shared span, no breakpoints
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM pics WHERE ai_filter('[p=100] The image shows shoes. ' || ai_image(url)) AND ai_filter('[p=100] The image shows a black product. ' || ai_image(url));
+----
+true
+
+query I
+SELECT breakpoint_requests FROM ai_mock_breakpoints();
+----
+0
+
+query I
+SELECT sum(llm_calls - embed_calls) FROM ai_usage();
+----
+40
+
+# image first, free writes: the first leaf's call writes the span (any expected read pays), the second reads
+statement ok
+SET ai_price_cache_write_mult = 1.0;
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM pics WHERE ai_filter(ai_image(url) || ' [p=100] The image shows shoes.') AND ai_filter(ai_image(url) || ' [p=100] The image shows a black product.');
+----
+true
+
+query I
+SELECT breakpoint_requests FROM ai_mock_breakpoints();
+----
+40
+
+query II
+SELECT sum(llm_calls - embed_calls), sum(cached_tokens) > 0 FROM ai_usage();
+----
+40	true
+
+# a single leaf on an image has no later reads: nothing is written whatever the price (the mock restart
+# forgets the spans the previous query wrote, which this query would otherwise rightly read)
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_price_cache_write_mult = 1.0;
+
+query I
+SELECT count(*) >= 0 FROM pics WHERE ai_filter(ai_image(url) || ' [p=100] The image shows a hat.');
+----
+true
+
+query I
+SELECT breakpoint_requests FROM ai_mock_breakpoints();
+----
+0
+
+# the GPT-5.6 prices: a write needs more than 0.28 expected reads; a row whose first leaf is predicted to
+# pass rarely sends it plain. The mock's '[p=NN]' knob only sets the answer, not the prediction, so with
+# the neutral 0.5 prediction of an image leaf the two-leaf row (0.5 expected reads) still writes
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_price_cache_write_mult = 1.25;
+
+query I
+SELECT count(*) >= 0 FROM pics WHERE ai_filter(ai_image(url) || ' [p=100] The image shows a bag.') AND ai_filter(ai_image(url) || ' [p=100] The image shows a red product.');
+----
+true
+
+query I
+SELECT breakpoint_requests FROM ai_mock_breakpoints();
+----
+40
+
+# the scalar path (no fold) declares the same span but has no node to count reads: its reuse is unknown.
+# Under the write premium an unknown reuse is never written (a second sighting with no third behind it
+# loses); with free writes the adaptive rule writes on the second sighting (the second filter's call)
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET ai_hedge = false;
+
+statement ok
+SET ai_reorder = false;
+
+statement ok
+SET ai_factorize = 'off';
+
+query I
+SELECT count(*) >= 0 FROM pics WHERE ai_filter(ai_image(url) || ' [p=100] The image shows a coat.') AND ai_filter(ai_image(url) || ' [p=100] The image shows a blue product.');
+----
+true
+
+query I
+SELECT breakpoint_requests FROM ai_mock_breakpoints();
+----
+0
+
+# with free writes the adaptive rule bets on proven reuse: the images were already seen once above, so the
+# first filter's call is their second sighting and writes (20), the second filter's call reads (20)
+statement ok
+SET ai_price_cache_write_mult = 1.0;
+
+query I
+SELECT count(*) >= 0 FROM pics WHERE ai_filter(ai_image(url) || ' [p=100] The image shows a scarf.') AND ai_filter(ai_image(url) || ' [p=100] The image shows a green product.');
+----
+true
+
+query I
+SELECT breakpoint_requests FROM ai_mock_breakpoints();
+----
+40
+
+statement ok
+CALL ai_mock_stop();

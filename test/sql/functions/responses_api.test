@@ -1,0 +1,122 @@
+# name: test/sql/functions/responses_api.test
+# description: The client speaks the OpenAI Responses API (ai_api = 'responses') or Chat Completions (ai_api =
+# group: [functions]
+
+#              'chat'); the default 'auto' sends plain requests through chat and only a prompt-cache write or
+#              read through the Responses API (api_auto.test). Both carry the same prompts and the same JSON-schema
+#              output, so every function answers identically on either API (the mock seeds a Responses body
+#              exactly like the chat shape). On the Responses API an explicit prompt-cache breakpoint rides on
+#              the prefix's last block, an image included, with no carrier block.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+query I
+SELECT current_setting('ai_api');
+----
+auto
+
+statement error
+SET ai_api = 'completions';
+----
+ai_api must be 'auto', 'responses' or 'chat'
+
+statement ok
+CREATE TABLE docs AS SELECT 'doc' || i::VARCHAR AS d FROM range(40) r(i);
+
+foreach api responses chat
+
+statement ok
+SET ai_api = '{api}';
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE OR REPLACE TABLE out_{api} AS SELECT d,
+    ai_filter('[p=60] F ' || d) AS f,
+    ai_classify('C ' || d, ['a', 'b', 'c']) AS c,
+    ai_classify('C2 ' || d, {'red': 'the color red', 'blue': 'the color blue'}) AS c2,
+    ai_score('S ' || d, 'how good', 1, 5) AS s,
+    ai_complete('M ' || d) AS m
+  FROM docs;
+
+query I
+SELECT sum(llm_calls) FROM ai_usage();
+----
+200
+
+query I
+SELECT sum(failed_calls) FROM ai_usage();
+----
+0
+
+endloop
+
+# identical answers on both APIs
+query I
+SELECT count(*) FROM ((SELECT * FROM out_responses EXCEPT SELECT * FROM out_chat) UNION ALL (SELECT * FROM out_chat EXCEPT SELECT * FROM out_responses));
+----
+0
+
+query IIII
+SELECT count(*) FILTER (WHERE f), count(DISTINCT c), count(DISTINCT c2), count(DISTINCT s) > 1 FROM out_responses;
+----
+31	3	2	true
+
+# a pair prompt whose prefix side ends in an image: the breakpoint rides on the image block itself
+statement ok
+SET ai_api = 'responses';
+
+statement ok
+CREATE TABLE imgs AS SELECT 'img' || i::VARCHAR AS name, 'http://example.invalid/' || i::VARCHAR || '.png' AS url FROM range(4) r(i);
+
+statement ok
+CREATE TABLE things AS SELECT 'thing ' || i::VARCHAR || ' ' || repeat('lorem ipsum dolor sit amet ', 170) AS t FROM range(5) r(i);
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE pairs AS SELECT name, t FROM things, imgs WHERE ai_filter('[p=50] fits? ' || t || ' :: ' || ai_image(url));
+
+# 5 members x 4 partners: every pair call is split (one write + 3 parked reads per member)
+query I
+SELECT breakpoint_requests FROM ai_mock_breakpoints();
+----
+20
+
+query I
+SELECT sum(llm_calls) FROM ai_usage();
+----
+20
+
+statement ok
+CALL ai_mock_stop();
+
+# a reasoning model answers with a reasoning item BEFORE the message item: the parser takes the message
+statement ok
+CALL ai_mock_start();
+
+query I
+SELECT ai_filter('[reasoning_item][p=100] Is this fine?');
+----
+true
+
+query I
+SELECT ai_complete('[reasoning_item] Say ok.') IS NOT NULL;
+----
+true
+
+query I
+SELECT ai_classify('[reasoning_item] the stock market fell', ['finance', 'sports']) IN ('finance', 'sports');
+----
+true
+
+statement ok
+CALL ai_mock_stop();
