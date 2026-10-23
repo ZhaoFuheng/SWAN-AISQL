@@ -59,7 +59,7 @@ pre-release). `connect()` reports a mismatch with the `pip install 'duckdb==...'
 **Building a wheel yourself** (from the repository checkout, after `make release`):
 
 ```sh
-pip install build wheel --pre "duckdb==$(sed -n 's/^dependencies = \["duckdb==\([^"]*\)"\]/\1/p' python/pyproject.toml)"
+pip install build wheel "duckdb==$(sed -n 's/^dependencies = \["duckdb==\([^"]*\)"\]/\1/p' python/pyproject.toml)"
 python/build_wheel.sh                        # packs build/release/extension/aisql/aisql.duckdb_extension
 pip install python/dist/swan_aisql-*.whl
 ```

@@ -152,14 +152,16 @@ def _literal(value: Any) -> str:
 def _check_engine(con: duckdb.DuckDBPyConnection) -> None:
     if DUCKDB_ENGINE is None:
         return
+    # fetchall, not fetchone: in DuckDB 2.0 a result fetched one row at a time stays open on the connection
+    # until exhausted, and the next execute() raises ResourceInUse
     engine, platform = con.execute(
         "SELECT v.library_version, p.platform FROM pragma_version() v, pragma_platform() p"
-    ).fetchone()
+    ).fetchall()[0]
     if engine != DUCKDB_ENGINE or platform != DUCKDB_PLATFORM:
         raise RuntimeError(
             f"swan_aisql {__version__} bundles the extension for DuckDB {DUCKDB_ENGINE} on {DUCKDB_PLATFORM} "
             f"(pip: duckdb=={DUCKDB_VERSION}); this process runs DuckDB {engine} on {platform}. "
-            f"Install the pinned engine: pip install --pre 'duckdb=={_required_duckdb()}'"
+            f"Install the pinned engine: pip install 'duckdb=={_required_duckdb()}'"
         )
 
 

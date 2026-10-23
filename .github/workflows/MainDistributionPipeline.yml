@@ -16,7 +16,7 @@ jobs:
     name: Build extension binaries
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v2.0-cyanoptera
     with:
-      duckdb_version: 96063b9e39749cc0f087bb11501d7edbee527957
+      duckdb_version: v2.0.0
       ci_tools_version: v2.0-cyanoptera
       extension_name: aisql
       # No WebAssembly: the LLM client needs threads and sockets. No MinGW: the MSVC build is the Windows binary.
@@ -26,7 +26,7 @@ jobs:
     name: Code Quality Check
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_code_quality.yml@v2.0-cyanoptera
     with:
-      duckdb_version: 96063b9e39749cc0f087bb11501d7edbee527957
+      duckdb_version: v2.0.0
       ci_tools_version: v2.0-cyanoptera
       extension_name: aisql
       format_checks: 'format;tidy'

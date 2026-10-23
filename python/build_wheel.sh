@@ -23,10 +23,10 @@ pin = sys.argv[1]
 try:
     import duckdb
 except ImportError:
-    sys.exit(f"the pinned duckdb is not importable: pip install --pre 'duckdb=={pin}'")
+    sys.exit(f"the pinned duckdb is not importable: pip install 'duckdb=={pin}'")
 if duckdb.__version__ != pin:
-    sys.exit(f"installed duckdb {duckdb.__version__} is not the pinned {pin}: pip install --pre 'duckdb=={pin}'")
-print(*duckdb.sql("SELECT version(), source_id FROM pragma_version()").fetchone())
+    sys.exit(f"installed duckdb {duckdb.__version__} is not the pinned {pin}: pip install 'duckdb=={pin}'")
+print(*duckdb.sql("SELECT version(), source_id FROM pragma_version()").fetchall()[0])  # 2.0: relations have no fetchone()
 EOF
 )
 

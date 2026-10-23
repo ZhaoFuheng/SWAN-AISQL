@@ -21,7 +21,7 @@ classifiers = [
 ]
 # Each release of swan-aisql is built against ONE exact DuckDB build (a DuckDB extension only loads into the
 # engine it was compiled for). build_wheel.sh verifies the bundled binary against this pin.
-dependencies = ["duckdb==2.0.0.dev2610011535"]
+dependencies = ["duckdb==2.0.0"]
 
 [project.optional-dependencies]
 # The embeddings server behind the learned predicate ordering (MiniLM for text, CLIP for images), started by

@@ -14,7 +14,7 @@ jobs:
     name: Build extension binaries
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v2.0-cyanoptera
     with:
-      duckdb_version: 96063b9e39749cc0f087bb11501d7edbee527957
+      duckdb_version: v2.0.0
       ci_tools_version: v2.0-cyanoptera
       extension_name: aisql
       exclude_archs: 'wasm_mvp;wasm_eh;wasm_threads;windows_amd64_mingw;linux_amd64_musl;linux_arm64_musl'
@@ -36,7 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           pip install build wheel "setuptools>=77"
-          pip install --pre "duckdb==$(sed -n 's/^dependencies = \["duckdb==\([^"]*\)"\]/\1/p' python/pyproject.toml)"
+          pip install "duckdb==$(sed -n 's/^dependencies = \["duckdb==\([^"]*\)"\]/\1/p' python/pyproject.toml)"
           mkdir -p wheelhouse
           for ext in $(find ci-artifacts -name 'aisql.duckdb_extension'); do
             python/build_wheel.sh "$ext"
