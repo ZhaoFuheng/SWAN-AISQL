@@ -14,3 +14,7 @@ q12  lat=   58.6s calls=   540 fresh=  540 tok=   685181 ~$0.2084  n=63/58  P=0.
 q13  lat=   62.3s calls=   500 fresh=  500 tok=  2102273 ~$0.5584  n=12/12  P=0.75 R=0.75 quality=0.75
 TOTAL(13q)  latency=1701.6s  calls=17683  ~cost=$16.3319  tokens=60806480  macro-quality=0.68
 
+Palimpzest ECOMM gpt-5.6-luna via http://localhost:4001  optimizer=pareto  policy=MaxQuality  workers=20  sf500  serial  queries=['q14']
+q14  lat=   61.4s calls=   524 fresh=  524 tok=  1979580 ~$0.5147  n=2/2  P=1.0 R=0.5 quality=0.667
+TOTAL(14q)  latency=1555.2s  calls=18207  ~cost=$16.8466  tokens=62786060  macro-quality=0.679
+

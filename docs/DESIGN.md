@@ -133,10 +133,11 @@ share one filter, so the fold stage sees them together. This is what makes `IN (
 them; the law for a semi join lifts it back above (SWAN 2.0 football-16: 296 calls -> 22).
 
 **Speculative pre-filter.** When the pull-up lifts a predicate above a join it leaves a copy at the
-leaf that only *prunes*: a row the selectivity model expects to fail is evaluated there and dropped
-before the join; every other row passes through unevaluated to the lifted predicate, which is
-complete on its own. The semi-join reduction has already pruned the leaf relationally, so this spends
-calls only on rows the join would keep. `ai_speculative` switches it off for parity runs.
+leaf that only *prunes*, and only from what is already known: a row whose verdict the cache already
+holds as false is dropped before the join; every other row passes through unevaluated to the lifted
+predicate, which is complete on its own. The copy makes no model call, no prediction and no
+embedding, so it costs nothing and cannot change the answer. `ai_speculative` switches it off for
+parity runs.
 
 ---
 
@@ -146,8 +147,10 @@ Nothing in the plan fixes which predicate runs first. The node carries the tree;
 holds it chooses, per input, which leaf to ask next, so the expensive calls short-circuit as early as
 the data allows.
 
-* **In a region**, each row picks its next leaf by an exact minimum-expected-cost search over the
-  tree, using the leaf's predicted pass rate and its prompt cost. An input whose answer is already
+* **In a region**, each row picks its next leaf by a minimum-expected-cost search over the tree,
+  using the leaf's predicted pass rate and its prompt cost: exact (a dynamic program over the tree's
+  three-valued states, under leaf independence) for trees of up to 12 leaves, a greedy rank descent
+  for wider ones. An input whose answer is already
   on its way costs the row nothing, so the search prefers waiting for it over opening another leaf.
   A leaf is asked only for the distinct inputs that some still-undecided row needs; each input is
   sent on its own, and the verdict re-decides every row that shares it the moment it lands. Where
@@ -229,7 +232,9 @@ LIMIT 10;
 
 A materialised CTE is an optimisation barrier. DuckDB materialises any CTE referenced more than
 once, and a semantic filter sealed inside one runs on its **full base table** no matter how
-selective the outer query is.
+selective the outer query is. The default answer is to inline the CTE (`ai_inline_ai_ctes`); with
+inlining off, the CTE stays materialised and *demand reduction* carries its readers' join keys into
+the body instead, taking a demand only from a join side whose unmatched rows the join drops.
 
 Three distinct mechanisms must cross that boundary, and they are not interchangeable:
 
@@ -258,7 +263,11 @@ deep-copies a neighbour as its build side. `LogicalOperator::Copy` serialises an
   appends columns on each call shifts the argument layout the scalar functions infer from it.
 * **Never duplicate an LLM predicate to serve a relational purpose.** The reducer needs only the
   neighbour's *keys*, so its build copy keeps the relational skeleton and neutralises AI
-  predicates to `TRUE`. Semi-joining against the resulting superset is still result-preserving.
+  predicates to `TRUE`. Semi-joining against the resulting superset is still result-preserving, so
+  the stripping is allowed only where the copy stays a superset: under an inner or semi join, the
+  preserved side of a one-sided join, a projection, filter, sort or plain DISTINCT. Below an anti
+  join's excluded side, an outer join's null-extended side, an ASOF join's right side, a LIMIT, an
+  aggregate or a window the copy could shrink, and that reducer is declined.
 * **Positional maps are remapped by binding identity** whenever a rewrite reorders an operator's
   output, and the map may sit several operators above the one that was reshaped.
 * **A mock that is more forgiving than the provider hides bugs.** Mock fidelity is a correctness
@@ -281,7 +290,29 @@ Three layers, each with one job:
 * **Provider prefix cache** — explicit prompt caching at the provider. Operators only declare
   structure (`prefix`, expected reuse); the client owns the economics: when to spend a cache write,
   parking same-prefix calls until the write lands, re-priming after the provider's TTL, failing
-  open. Caching changes cost, never answers, replay hits or tests.
+  open. Caching changes cost, never answers, replay hits or tests. The client picks the API per request
+  (`ai_api = auto`): Chat Completions for a plain request, the OpenAI Responses API for one that
+  writes or reads a declared span, where the breakpoint rides on the last prefix block, an image
+  included; through Chat Completions an image-ending prefix is never cached (measured), and a span
+  written on one API is read on the same one. One breakpoint per
+  request, after the longest prefix worth sharing. Three declarers: the factor graph (a pair
+  prompt's member side), a region leaf over an image or a document (its leading input span, hinted
+  with how many of the row's ai_filter leaves share it; another function's leaf is another span,
+  its own system prompt and schema), and every ai_filter / ai_complete call's constant head (the
+  instruction or few-shot text the prompt starts with, read at bind from the prompt expression),
+  taken as the span instead of the input when it alone clears the minimum, shared by every row the
+  declarer sees. The lifecycle also reads the provider's
+  cached-token count back on every warm read: a zero re-primes the key once, a second zero gives it
+  up, and three keys given up in a row switch splitting off for the process. The engine never
+  reorders a prompt: the convention is the shared input first (an image before its instruction, a
+  pair prompt's repeated side first), and a region declares only a span its prompt leads with. The
+  write is spent on first sight only when the expected later reads, from the row's leaf order and
+  predicted pass rates, exceed the price threshold (write − 1) / (1 − read): 0.28 at GPT-5.6's
+  1.25x write and 0.1x read rates, both measured on our own calls.
+  Every request asks the provider for explicit cache mode, so nothing outside the declared spans is
+  written at the write price; with `ai_prefix_cache` off no cache fields are sent and the provider's
+  own default applies, and an endpoint that rejects the fields (a 400 naming them) is detected once
+  and served plain bodies from then on.
 * **Recording proxy** (bench only) — replays recorded answers, cost and latency so experiments are free
   and reproducible. Model inference at temperature 0 is treated as deterministic, so one cache is the
   single source of answers and latencies for every system and every reported number is a replay of it;
@@ -327,22 +358,23 @@ cross-engine protocol above). The full list, with defaults and environment varia
 
 ---
 
-## 9. Measured state (2026-10-03)
+## 9. Measured state
 
 All numbers are from the recorded runs in `aisql-bench/` (chat model `gpt-5.6-luna`; the Jev column routes
 ai_filter, ai_classify and, on MOVIE, the bounded ai_score of q9/q10 to System One). †The SWAN column was
-recorded fresh on 2026-10-01, after `ai_filter` gained its reasoning sentence; the LOTUS and Jev recordings
+recorded fresh on 2026-10-23 on DuckDB 2.0.0 under `ai_api = auto` (Chat Completions for a plain request, the Responses API for a prefix-cache write or warm read; SemBench one query at a time); the LOTUS and Jev recordings
 are from 2026-09-23/25 and PLOP's and BlendSQL's from 2026-10-02 (agent_bench LOTUS and BlendSQL: 2026-10-02/03),
-so the SemBench and agent_bench latencies compare recordings from different days. The SWAN 2.0 row is one
-back-to-back session. Quality, calls and cost are comparable throughout.
+so the SemBench and agent_bench latencies compare recordings from different days. On SWAN 2.0 the baselines
+were recorded in one session (2026-10-03/05) and SWAN on 2026-10-23, so its latency column compares days as
+well. Quality, calls and cost are comparable throughout.
 
 | benchmark | SWAN | SWAN + Jev (ai_filter/ai_classify on TypeSafe) | LOTUS / PLOP / BlendSQL |
 |---|---|---|---|
-| SemBench MOVIE (10q) | **0.832**, 18.8k calls, $2.28, 1,686s† | 0.795, 18.8k, **$0.39**, 511s | LOTUS 0.780, 201k, $14.45, 10,654s; BlendSQL 0.763, 18.7k, $1.44, 1,188s; Palimpzest 1.5.3 (Abacus optimizer) 0.776, 68.5k, $17.89, 4,865s; ThalamusDB 0.841 on 8 of 10, 1.0k, $0.52, 3,661s; PLOP-DP 0.726, 19.1k, $1.69, 1,665s |
-| SemBench ECOMM (14q) | **0.724**, 16.4k, $8.32, 2,882s† | 0.688, 16.6k, $7.39, 826s | LOTUS 0.637, 17.8k, $6.40, 1,990s; Palimpzest 0.680 on q1–q13 (SWAN 0.703 / LOTUS 0.648 there), 17.7k, $16.33, 1,494s; ThalamusDB 0.596 on 5 of 14, 2.8k, $3.45, 12,305s |
-| SemBench MMQA (11q) | **0.692**, 15.9k, $2.31, 1,314s† | 0.603, 14.1k, $1.53, 884s | LOTUS 0.449, 19.0k, $2.43, 1,720s; Palimpzest 0.687, 46.3k, $13.79, 3,284s; ThalamusDB 0.327 on 7 of 11, 1.3k, $0.52, 2,191s |
-| agent_bench Q1–Q30 | **1.000**, 11,172 calls, $0.29, 798s | — | LOTUS 0.632*, 25,741, $2.90, 1,807s†; BlendSQL 0.758*, 24,631, $2.76, 1,965s†; Palimpzest 1.5.3 (Abacus optimizer) 0.735*, 25,777, $6.82, 2,088s†; ThalamusDB 0.661*, 19,512, $2.09, 8,582s† (Q19 at the 6,000 s cap); PLOP-DP (public Morrila fork) 1.000, 13,329, $0.50, 1,092s |
-| SWAN 2.0 (120q, 4 BIRD databases) | 0.755, **19,695** calls, **$2.13**, **2,055s** | — | LOTUS 0.760, 69,204, $4.04, 4,101s; BlendSQL 0.761, 59,620, $4.95, 4,608s; Palimpzest (Abacus optimizer) 0.766, 70,933, $9.85, 2,991s; ThalamusDB 0.396 (0.689 on the 69 questions its filters express), 158,290, $12.73, 36,945s; PLOP-DP 0.690, 25,604, $1.72, 10,431s |
+| SemBench MOVIE (10q) | **0.818**, 18.9k calls, $2.26, 1,802s† | 0.795, 18.8k, **$0.39**, 511s | LOTUS 0.780, 201k, $14.45, 10,654s; BlendSQL 0.763, 18.7k, $1.44, 1,188s; Palimpzest 1.5.3 (Abacus optimizer) 0.776, 68.5k, $17.89, 4,865s; ThalamusDB 0.841 on 8 of 10, 1.0k, $0.52, 3,661s; PLOP-DP 0.726, 19.1k, $1.69, 1,665s |
+| SemBench ECOMM (14q) | **0.832**, 15.8k, $6.75, 1,513s† | 0.688, 16.6k, $7.39, 826s | LOTUS 0.637, 17.8k, $6.40, 1,990s; Palimpzest 0.679, 18.2k, $16.85, 1,555s (q14 is our program, SemBench wrote none); ThalamusDB 0.596 on 5 of 14, 2.8k, $3.45, 12,305s |
+| SemBench MMQA (11q) | **0.648**, 16.6k, $2.41, 1,351s† | 0.603, 14.1k, $1.53, 884s | LOTUS 0.449, 19.0k, $2.43, 1,720s; Palimpzest 0.687, 46.3k, $13.79, 3,284s; ThalamusDB 0.327 on 7 of 11, 1.3k, $0.52, 2,191s |
+| agent_bench Q1–Q30 | **1.000**, 11,172 calls, $0.29, 789s | — | LOTUS 0.632*, 25,741, $2.90, 1,807s†; BlendSQL 0.758*, 24,631, $2.76, 1,965s†; Palimpzest 1.5.3 (Abacus optimizer) 0.735*, 25,777, $6.82, 2,088s†; ThalamusDB 0.661*, 19,512, $2.09, 8,582s† (Q19 at the 6,000 s cap); PLOP-DP (public Morrila fork) 1.000, 13,329, $0.50, 1,092s |
+| SWAN 2.0 (120q, 4 BIRD databases) | 0.777, **20,176** calls, **$2.20**, **2,143s** | — | LOTUS 0.760, 69,204, $4.04, 4,101s; BlendSQL 0.761, 59,620, $4.95, 4,608s; Palimpzest (Abacus optimizer) 0.766, 70,933, $9.85, 2,991s; ThalamusDB 0.396 (0.689 on the 69 questions its filters express), 158,290, $12.73, 36,945s; PLOP-DP 0.690, 25,604, $1.72, 10,431s |
 
 Quality is each suite's own metric (F1 / ARI / row-multiset F1; agent_bench uses the deterministic
 LIMIT-free PLOP ground truth, generated by the public fork's un-rewritten execution; Q29/Q30's inner LIMITs are ordered by key in every system's copy). PLOP and BlendSQL do not support images, so ECOMM and MMQA are not run for
@@ -358,9 +390,9 @@ comparable. Per-query tables: `aisql-bench/AGENTBENCH/results/agentbench_compari
 SWAN 2.0 is the benchmark in github.com/ZhaoFuheng/SWANBench: one AISQL query per question that every system
 plans itself, with scaled and duplicated databases; its results folder holds the four systems' answers.
 Its row is the replay, from the published cache, of each system's fresh recording through an empty cache
-(LOTUS and PLOP from the session of 2026-10-03; BlendSQL and Palimpzest re-recorded on 2026-10-05, SWAN on 2026-10-06), so
+(LOTUS and PLOP from the session of 2026-10-03; BlendSQL and Palimpzest re-recorded on 2026-10-05, SWAN on 2026-10-23), so
 the numbers reproduce; SWAN, BlendSQL, LOTUS and Palimpzest are at parity on quality (the model's verdicts
-bound it: four fresh SWAN recordings scored 0.775 / 0.757 / 0.763 / 0.755, BlendSQL's two 0.773 / 0.761,
+bound it: five fresh SWAN recordings scored 0.775 / 0.757 / 0.763 / 0.755 / 0.777, BlendSQL's two 0.773 / 0.761,
 Palimpzest's two 0.769 / 0.766) and calls, cost and latency separate them.
 
 ---

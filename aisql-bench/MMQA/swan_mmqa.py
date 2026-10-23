@@ -30,7 +30,8 @@ MODEL = os.environ.get("AI_MODEL", "gpt-5.6-luna")
 CONC = os.environ.get("AI_MAX_CONCURRENCY", "20")
 # SWAN_TAG suffixes the result files (e.g. "_typesafe") so a variant run never clobbers the default run.
 TAG = os.environ.get("SWAN_TAG", "")
-ENV = {**os.environ, "AI_PROXY_URL": PROXY, "AI_MODEL": MODEL, "AI_API_KEY": "sk-test",
+ENV = {**os.environ, "DUCKDB_AGENT_MODE": "0",  # the 2.0 shell's agent mode truncates piped output
+       "AI_PROXY_URL": PROXY, "AI_MODEL": MODEL, "AI_API_KEY": "sk-test",
        "AI_MAX_CONCURRENCY": CONC, "AI_TIMEOUT_MS": "180000"}
 OUTF, USEF = "/tmp/swan_out.json", "/tmp/swan_usage.json"
 

@@ -20,7 +20,10 @@ PY="${PYTHON:-python3}"
 if [ -z "${OPENAI_API_KEY:-}" ]; then
 	echo "no OPENAI_API_KEY in $ROOT/.env: replay-only (recorded requests answer from serve/.llm_cache.duckdb, new ones fail)"
 elif ! curl -sf -m 2 http://127.0.0.1:4000/health >/dev/null 2>&1; then
-	nohup litellm --config "$HERE/litellm.config.yaml" --port 4000 > "$HERE/litellm.log" 2>&1 &
+	LITELLM="$(command -v litellm || true)"
+	[ -x "$ROOT/.venv/bin/litellm" ] && LITELLM="$ROOT/.venv/bin/litellm"   # the repo venv's, whatever the shell's PATH
+	[ -n "$LITELLM" ] || { echo "litellm not found: pip install litellm (in the repo's .venv)"; exit 1; }
+	nohup "$LITELLM" --config "$HERE/litellm.config.yaml" --port 4000 > "$HERE/litellm.log" 2>&1 &
 	echo "litellm      :4000  (pid $!, log serve/litellm.log)"
 else
 	echo "litellm      :4000  already running"

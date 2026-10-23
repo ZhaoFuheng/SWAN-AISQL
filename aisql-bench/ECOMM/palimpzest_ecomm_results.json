@@ -3,7 +3,7 @@
  "optimizer": "pareto",
  "policy": "MaxQuality",
  "concurrency": 20,
- "updated": "2026-10-04 18:42:54 MDT",
+ "updated": "2026-10-22 10:17:34 MDT",
  "per_query": {
   "q1": {
    "latency_s": 30.5,
@@ -485,16 +485,52 @@
    "error": null,
    "ran_at": "2026-10-04 18:42:54 MDT",
    "wall_s": 62.3
+  },
+  "q14": {
+   "latency_s": 61.4,
+   "wall_s": 88.1,
+   "llm_calls_fresh": 524,
+   "llm_calls": 524,
+   "cache_hits": null,
+   "tokens": 1979580,
+   "reasoning_tokens": null,
+   "cost_usd": 0.51469,
+   "cost_is_estimate": true,
+   "optimizer": "pareto",
+   "policy": "MaxQuality",
+   "pz_stats": {
+    "optimization_time": 0.0,
+    "optimization_cost": 0.0,
+    "plan_execution_time": 61.36761021614075,
+    "plan_execution_cost": 0.0,
+    "total_execution_time": 61.36761021614075,
+    "total_execution_cost": 0.0,
+    "input_text_tokens": 0.0,
+    "input_audio_tokens": 0.0,
+    "input_image_tokens": 0.0,
+    "cache_read_tokens": 0.0,
+    "cache_creation_tokens": 0.0,
+    "output_text_tokens": 11310.0,
+    "embedding_input_tokens": 0.0,
+    "start_time": 1792685879.6540139
+   },
+   "n_out": 2,
+   "n_gold": 2,
+   "precision": 1.0,
+   "recall": 0.5,
+   "metric": "f1",
+   "quality": 0.667,
+   "error": null,
+   "ran_at": "2026-10-22 10:17:34 MDT"
   }
  },
  "total": {
-  "n_queries": 13,
-  "latency_s": 1493.8,
-  "cost_usd": 16.3319,
+  "n_queries": 14,
+  "latency_s": 1555.2,
+  "cost_usd": 16.8466,
   "cost_is_estimate": true,
-  "tokens": 60806480,
-  "llm_calls": 17683,
-  "macro_quality": 0.68,
-  "wall_s": 1701.6
+  "tokens": 62786060,
+  "llm_calls": 18207,
+  "macro_quality": 0.679
  }
 }

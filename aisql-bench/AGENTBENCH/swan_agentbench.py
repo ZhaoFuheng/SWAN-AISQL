@@ -40,7 +40,8 @@ QUERY_DIR = os.environ.get("SWAN_QUERY_DIR", "swan_queries")
 
 # the hybrid-bench protocol sends ai_filter's prompt bare (PLOP's exact text, no system message), so that the
 # proxy's shared-verdict alias (CACHE_ALIAS_CHAT=1) serves SWAN the verdict recorded for PLOP's identical prompt
-ENV = {**os.environ, "AI_MODEL": MODEL, "AI_API_KEY": "sk-test", "AI_MAX_CONCURRENCY": CONC,
+ENV = {**os.environ, "DUCKDB_AGENT_MODE": "0",  # the 2.0 shell's agent mode truncates piped output
+       "AI_MODEL": MODEL, "AI_API_KEY": "sk-test", "AI_MAX_CONCURRENCY": CONC,
        "AI_TIMEOUT_MS": "180000", "AI_PROMPT_VARIANT": os.environ.get("AI_PROMPT_VARIANT", "plain")}
 
 
