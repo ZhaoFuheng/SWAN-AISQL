@@ -18,6 +18,7 @@ jobs:
       ci_tools_version: v2.0-cyanoptera
       extension_name: aisql
       exclude_archs: 'wasm_mvp;wasm_eh;wasm_threads;windows_amd64_mingw;linux_amd64_musl;linux_arm64_musl'
+      opt_in_archs: 'osx_amd64'   # DuckDB 2.0's CI matrix makes Intel macOS opt-in (dropped in 2.1); we still ship it
 
   wheels:
     name: Pack wheels
@@ -69,7 +70,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pip install --pre --find-links wheelhouse swan-aisql
+          # the pinned engine from PyPI, then the wheel from THIS run only: --no-index makes a missing platform
+          # wheel fail here instead of silently installing the previous release from PyPI
+          pip install "duckdb==$(sed -n 's/^dependencies = \["duckdb==\([^"]*\)"\]/\1/p' python/pyproject.toml)"
+          pip install --no-index --find-links wheelhouse swan-aisql
+          python -c "import swan_aisql, swan_aisql._build as b; print(swan_aisql.__version__, b.DUCKDB_ENGINE, b.DUCKDB_PLATFORM)"
           python python/tests/test_smoke.py
 
   publish:

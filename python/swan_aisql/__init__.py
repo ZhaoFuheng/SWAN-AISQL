@@ -33,7 +33,12 @@ try:  # written by build_wheel.sh: the DuckDB build the bundled binary loads int
 except ImportError:  # source tree without a built wheel
     DUCKDB_ENGINE = DUCKDB_PLATFORM = DUCKDB_SOURCE_ID = DUCKDB_VERSION = None
 
-__version__ = "0.1.2"
+try:  # the installed distribution's version (pyproject.toml), so this never goes stale
+    from importlib.metadata import version as _dist_version
+
+    __version__ = _dist_version("swan-aisql")
+except Exception:  # noqa: BLE001 -- an uninstalled checkout
+    __version__ = "0.2.0"
 __all__ = [
     "connect",
     "load",
