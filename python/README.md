@@ -53,8 +53,7 @@ server at all the engine notices on the first request, orders predicates by prom
 and every query still runs.
 
 **Version coupling.** A DuckDB extension loads only into the exact DuckDB build it was compiled for, so each
-swan-aisql release pins one `duckdb` version (this release: the version in the package metadata, a 2.0
-pre-release). `connect()` reports a mismatch with the `pip install 'duckdb==...'` line that fixes it.
+swan-aisql release pins one `duckdb` version (this release: 2.0.0, the DuckDB 2.0 LTS). `connect()` reports a mismatch with the `pip install 'duckdb==...'` line that fixes it.
 
 **Building a wheel yourself** (from the repository checkout, after `make release`):
 
