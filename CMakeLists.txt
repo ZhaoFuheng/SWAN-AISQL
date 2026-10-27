@@ -30,7 +30,6 @@ set(EXTENSION_SOURCES
     src/functions/ai_functions.cpp
     src/plan/logical_ai_region.cpp
     src/optimizer/aisql_optimizer.cpp
-    src/optimizer/ai_cte_split.cpp
     src/optimizer/ai_cte_demand.cpp
     src/optimizer/ai_predicate_rewrite.cpp
     src/optimizer/ai_filter_tree_build.cpp
