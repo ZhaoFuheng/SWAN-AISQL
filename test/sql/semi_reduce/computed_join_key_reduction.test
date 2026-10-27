@@ -1,0 +1,118 @@
+# name: test/sql/semi_reduce/computed_join_key_reduction.test
+# description: A reduction must reach an AI predicate through a COMPUTED join key on the neighbour's side
+# group: [semi_reduce]
+
+#              (ON sp.book_id = 'bookid_' || REPLACE(r.purchase_id, ...)), through the DISTINCT of the CTE that
+#              holds the predicate, and through that CTE's own inner join, into the input the predicate sits on.
+#              Each is a step the reducer couldn't take, and missing any one leaves the SEMI above the predicate,
+#              pruning rows already paid for (agent_bench Q4: 141 calls where 127 books survive the outer filter).
+#              Every case asserts the same rows as the reducer switched off.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+# 200 books, 2,000 reviews keyed 'purchaseid_<n>' -> 'bookid_<n>'; every book has a review in a recent year,
+# far fewer have a recent review rated 4 or more
+statement ok
+CREATE TABLE books AS SELECT 'bookid_'||i::VARCHAR AS book_id, 'title '||i::VARCHAR AS title FROM range(200) r(i);
+
+statement ok
+CREATE TABLE reviews AS SELECT 'purchaseid_'||(i % 200)::VARCHAR AS purchase_id, 2014 + (i % 7) AS yr,
+       CASE WHEN i % 23 = 0 THEN 5 ELSE 2 END AS rating
+FROM range(2000) r(i);
+
+# the books the outer query can keep: a recent review rated >= 4
+query I
+SELECT count(DISTINCT purchase_id) FROM reviews WHERE yr >= 2016 AND rating >= 4;
+----
+62
+
+statement ok
+SELECT ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE r_on AS
+WITH recent AS (
+  SELECT DISTINCT 'bookid_' || REPLACE(purchase_id, 'purchaseid_', '') AS book_id FROM reviews WHERE yr >= 2016
+),
+popular AS (
+  SELECT DISTINCT b.book_id, b.title FROM books b JOIN recent p ON p.book_id = b.book_id
+  WHERE b.title IS NOT NULL AND ai_filter('[p=60] recently popular? ' || b.title)
+)
+SELECT r.purchase_id, r.yr, sp.book_id, sp.title
+FROM reviews r JOIN popular sp ON sp.book_id = 'bookid_' || REPLACE(r.purchase_id, 'purchaseid_', '')
+WHERE r.yr >= 2016 AND r.rating >= 4;
+
+# one call per book the outer filter can keep, not per book with any recent review (200)
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+62
+
+statement ok
+SET ai_semi_reduce = false;
+
+statement ok
+SELECT ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE r_off AS
+WITH recent AS (
+  SELECT DISTINCT 'bookid_' || REPLACE(purchase_id, 'purchaseid_', '') AS book_id FROM reviews WHERE yr >= 2016
+),
+popular AS (
+  SELECT DISTINCT b.book_id, b.title FROM books b JOIN recent p ON p.book_id = b.book_id
+  WHERE b.title IS NOT NULL AND ai_filter('[p=60] recently popular? ' || b.title)
+)
+SELECT r.purchase_id, r.yr, sp.book_id, sp.title
+FROM reviews r JOIN popular sp ON sp.book_id = 'bookid_' || REPLACE(r.purchase_id, 'purchaseid_', '')
+WHERE r.yr >= 2016 AND r.rating >= 4;
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+200
+
+query I
+SELECT count(*) FROM ((SELECT * FROM r_on EXCEPT ALL SELECT * FROM r_off) UNION ALL (SELECT * FROM r_off EXCEPT ALL SELECT * FROM r_on));
+----
+0
+
+query I
+SELECT count(*) > 0 FROM r_on;
+----
+true
+
+# A join inside the leaf whose condition draws (random() < 2: always true, but volatile) evaluates the draw once per
+# pair it sees: the reduction must not descend through it, so the SEMI stays above and every book is asked. A LEFT
+# join, whose condition reads the preserved side, so that it stays on the join instead of becoming a filter above it
+statement ok
+SET ai_semi_reduce = true;
+
+statement ok
+SELECT ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE r_vol AS
+WITH recent AS (
+  SELECT DISTINCT 'bookid_' || REPLACE(purchase_id, 'purchaseid_', '') AS book_id FROM reviews WHERE yr >= 2016
+),
+popular AS (
+  SELECT DISTINCT b.book_id, b.title FROM books b LEFT JOIN recent p ON p.book_id = b.book_id AND random() < 2 + 0 * length(b.title)
+  WHERE b.title IS NOT NULL AND ai_filter('[p=60] recently popular? ' || b.title)
+)
+SELECT r.purchase_id, r.yr, sp.book_id, sp.title
+FROM reviews r JOIN popular sp ON sp.book_id = 'bookid_' || REPLACE(r.purchase_id, 'purchaseid_', '')
+WHERE r.yr >= 2016 AND r.rating >= 4;
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+200
+
+query I
+SELECT count(*) FROM ((SELECT * FROM r_vol EXCEPT ALL SELECT * FROM r_off) UNION ALL (SELECT * FROM r_off EXCEPT ALL SELECT * FROM r_vol));
+----
+0

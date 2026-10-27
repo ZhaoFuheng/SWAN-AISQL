@@ -15,6 +15,7 @@
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/planner/operator/logical_join.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
+#include "duckdb/planner/operator/logical_aggregate.hpp"
 #include "duckdb/planner/operator/logical_cteref.hpp"
 #include "duckdb/planner/operator/logical_materialized_cte.hpp"
 #include "duckdb/planner/expression/bound_cast_expression.hpp"
@@ -153,8 +154,43 @@ void SemiJoinReducer::GatherCluster(unique_ptr<LogicalOperator> &op,
 				return e->GetExpressionType() == ExpressionType::BOUND_COLUMN_REF ? &e->Cast<BoundColumnRefExpression>()
 				                                                                  : nullptr;
 			};
+			// Or a COMPUTED key ('bookid_' || REPLACE(purchase_id, ...)): an expression over one relation's columns
+			// that can't throw, isn't volatile and calls no AI function. The SEMI evaluates it on rows the original
+			// join may never see (the reducer copy keeps only its relational skeleton), so it must be safe on any row.
+			auto key_expression = [](const Expression &side) -> const BoundColumnRefExpression * {
+				if (side.IsVolatile() || side.CanThrow() || ExpressionHasAIFunction(side)) {
+					return nullptr;
+				}
+				const BoundColumnRefExpression *first = nullptr;
+				bool ok = true;
+				std::function<void(const Expression &)> walk = [&](const Expression &e) {
+					if (e.GetExpressionClass() == ExpressionClass::BOUND_SUBQUERY) {
+						ok = false;
+						return;
+					}
+					if (e.GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
+						auto &colref = e.Cast<BoundColumnRefExpression>();
+						if (colref.Depth() != 0 ||
+						    (first && colref.Binding().table_index != first->Binding().table_index)) {
+							ok = false;
+						} else if (!first) {
+							first = &colref;
+						}
+						return;
+					}
+					ExpressionIterator::EnumerateChildren(e, [&](const Expression &child) { walk(child); });
+				};
+				walk(side);
+				return ok ? first : nullptr;
+			};
 			const auto *lref = key_column(lhs);
 			const auto *rref = key_column(rhs);
+			if (!lref) {
+				lref = key_expression(lhs);
+			}
+			if (!rref) {
+				rref = key_expression(rhs);
+			}
 			if (!lref || !rref) {
 				continue;
 			}
@@ -487,17 +523,27 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 			unique_ptr<Expression> rhs_key;
 			if (cp.right_expr) {
 				rhs_key = cp.right_expr->Copy();
+				bool rebound = true;
 				std::function<void(unique_ptr<Expression> &)> rebind = [&](unique_ptr<Expression> &e) {
 					if (e->GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
+						// every column of j's key, not only the one the edge is filed under (a computed key may read
+						// several)
 						auto &colref = e->Cast<BoundColumnRefExpression>();
-						if (colref.Binding() == cp.right) {
-							e = make_uniq<BoundColumnRefExpression>(colref.GetReturnType(), copy_binding);
+						for (idx_t b = 0; b < original_bindings.size(); b++) {
+							if (original_bindings[b] == colref.Binding()) {
+								e = make_uniq<BoundColumnRefExpression>(colref.GetReturnType(), copy_bindings[b]);
+								return;
+							}
 						}
+						rebound = false;
 						return;
 					}
 					ExpressionIterator::EnumerateChildren(*e, [&](unique_ptr<Expression> &child) { rebind(child); });
 				};
 				rebind(rhs_key);
+				if (!rebound) {
+					return false;
+				}
 			} else {
 				rhs_key = make_uniq<BoundColumnRefExpression>(cp.right_type, copy_binding);
 			}
@@ -535,6 +581,70 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 			rewrite(expr);
 			return ok;
 		};
+		// Replace each key column the target input lacks with the column an INNER join's equality equates it to.
+		auto swap_to_side = [](unique_ptr<Expression> &expr, LogicalComparisonJoin &join,
+		                       const vector<ColumnBinding> &side_bindings) {
+			auto in_side = [&](const ColumnBinding &b) {
+				return std::find(side_bindings.begin(), side_bindings.end(), b) != side_bindings.end();
+			};
+			std::function<void(unique_ptr<Expression> &)> rewrite = [&](unique_ptr<Expression> &e) {
+				if (e->GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
+					auto &colref = e->Cast<BoundColumnRefExpression>();
+					if (in_side(colref.Binding())) {
+						return;
+					}
+					for (auto &cond : join.conditions) {
+						if (!cond.IsComparison() || cond.GetComparisonType() != ExpressionType::COMPARE_EQUAL ||
+						    cond.GetLHS().GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF ||
+						    cond.GetRHS().GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF) {
+							continue;
+						}
+						auto &l = cond.GetLHS().Cast<BoundColumnRefExpression>();
+						auto &r = cond.GetRHS().Cast<BoundColumnRefExpression>();
+						const BoundColumnRefExpression *other = nullptr;
+						if (l.Binding() == colref.Binding() && in_side(r.Binding())) {
+							other = &r;
+						} else if (r.Binding() == colref.Binding() && in_side(l.Binding())) {
+							other = &l;
+						}
+						if (other && other->GetReturnType() == colref.GetReturnType()) {
+							e = make_uniq<BoundColumnRefExpression>(colref.GetReturnType(), other->Binding());
+							return;
+						}
+					}
+					return;
+				}
+				ExpressionIterator::EnumerateChildren(*e, [&](unique_ptr<Expression> &child) { rewrite(child); });
+			};
+			rewrite(expr);
+		};
+		auto translate_through_groups = [](vector<unique_ptr<Expression>> &exprs, LogicalAggregate &agg) -> bool {
+			if (agg.grouping_sets.size() > 1 || !agg.grouping_functions.empty()) {
+				return false;
+			}
+			bool ok = true;
+			std::function<void(unique_ptr<Expression> &)> rewrite = [&](unique_ptr<Expression> &e) {
+				if (e->GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
+					auto &colref = e->Cast<BoundColumnRefExpression>();
+					if (colref.Binding().table_index == agg.group_index) {
+						const idx_t k = colref.Binding().column_index.GetIndex();
+						if (k >= agg.groups.size()) {
+							ok = false;
+							return;
+						}
+						e = agg.groups[k]->Copy();
+					} else {
+						ok = false; // an aggregate's result, or a column the aggregate doesn't expose
+					}
+					return;
+				}
+				ExpressionIterator::EnumerateChildren(*e, [&](unique_ptr<Expression> &child) { rewrite(child); });
+			};
+			for (auto &e : exprs) {
+				rewrite(e);
+			}
+			return ok;
+		};
 		auto keys_available = [](const vector<unique_ptr<Expression>> &exprs, const vector<ColumnBinding> &binds) {
 			bool all = true;
 			for (auto &e : exprs) {
@@ -570,7 +680,9 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 		// because those depend on the rows the reduction would remove: `(... WHERE ai_filter(x) ORDER BY id
 		// LIMIT 1) JOIN hot`, reduced below the limit, returns the first SURVIVING passer instead of the first
 		// passer (empty when that one has no partner), and a row_number() changes value. Key availability
-		// alone is not a commutation rule.
+		// alone is not a commutation rule. Two more cross: a GROUP BY whose key reads only grouping columns
+		// (it removes whole groups, so a surviving group's aggregates and any HAVING over them are unchanged;
+		// translate_through_groups refuses a key on an aggregate's result), and a join inside the leaf, below.
 		auto commutes_with_semi = [](const LogicalOperator &node) {
 			switch (node.type) {
 			case LogicalOperatorType::LOGICAL_PROJECTION:
@@ -579,21 +691,73 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 				return true;
 			case LogicalOperatorType::LOGICAL_DISTINCT:
 				return node.Cast<LogicalDistinct>().distinct_type == DistinctType::DISTINCT;
+			case LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY:
+				return true;
 			case LogicalOperatorType::LOGICAL_EXTENSION_OPERATOR:
 				return LogicalAIRegion::Is(node);
 			default:
 				return false;
 			}
 		};
-		for (unique_ptr<LogicalOperator> *cur = &leaves[i].get(); *cur && (*cur)->children.size() == 1;) {
+		for (unique_ptr<LogicalOperator> *cur = &leaves[i].get(); *cur;) {
 			auto &node = **cur;
-			if (!commutes_with_semi(node)) {
+			// an operator that DRAWS (nextval() AS v, WHERE random() < p, ORDER BY random(), a join ON ... AND
+			// random() < p) evaluates once per row it sees: a SEMI underneath changes which rows draw, so the values
+			// the join keeps change (DuckDB's own pushdown stops at a volatile projection for the same reason). The
+			// SEMI stays above.
+			if (AIOperatorHasVolatileNonAI(node)) {
 				break;
 			}
-			// an operator that DRAWS (nextval() AS v, WHERE random() < p, ORDER BY random()) evaluates once per
-			// row it sees: a SEMI underneath changes which rows draw, so the values the join keeps change
-			// (DuckDB's own pushdown stops at a volatile projection for the same reason). The SEMI stays above.
-			if (AIOperatorHasVolatileNonAI(node)) {
+			if (node.type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN && node.children.size() == 2) {
+				// A join inside the leaf (a CTE's own join, below its DISTINCT): continue into the input that
+				// supplies every key column, if dropping that input's non-joining rows drops exactly the output rows
+				// with those keys -- either side of an INNER join, the preserved side of an outer, SEMI or ANTI join.
+				// Through an INNER join a key column may also be swapped for the column its equality condition equates
+				// it to, so the descent can reach the input holding the AI stage (filter pushdown may have put the
+				// other side's column in the key).
+				auto &join = node.Cast<LogicalComparisonJoin>();
+				const auto join_type = join.join_type;
+				optional_idx side;
+				vector<unique_ptr<Expression>> side_exprs;
+				for (idx_t pass = 0; pass < 2 && !side.IsValid(); pass++) {
+					for (idx_t k = 0; k < 2 && !side.IsValid(); k++) {
+						// first pass: only an input with an AI stage below; second: any
+						if (pass == 0 && !SubtreeHasAIFunction(*node.children[k])) {
+							continue;
+						}
+						const bool preserved =
+						    join_type == JoinType::INNER ||
+						    (k == 0 && (join_type == JoinType::LEFT || join_type == JoinType::SEMI ||
+						                join_type == JoinType::ANTI)) ||
+						    (k == 1 && (join_type == JoinType::RIGHT || join_type == JoinType::RIGHT_SEMI ||
+						                join_type == JoinType::RIGHT_ANTI));
+						if (!preserved) {
+							continue;
+						}
+						const auto child_bindings = node.children[k]->GetColumnBindings();
+						vector<unique_ptr<Expression>> exprs;
+						for (auto &e : lhs_exprs) {
+							exprs.push_back(e->Copy());
+						}
+						if (join_type == JoinType::INNER) {
+							for (auto &e : exprs) {
+								swap_to_side(e, join, child_bindings);
+							}
+						}
+						if (keys_available(exprs, child_bindings)) {
+							side = k;
+							side_exprs = std::move(exprs);
+						}
+					}
+				}
+				if (!side.IsValid()) {
+					break;
+				}
+				lhs_exprs = std::move(side_exprs);
+				cur = &node.children[side.GetIndex()];
+				continue;
+			}
+			if (node.children.size() != 1 || !commutes_with_semi(node)) {
 				break;
 			}
 			vector<unique_ptr<Expression>> next;
@@ -609,6 +773,13 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 					}
 				}
 				if (!ok) {
+					break;
+				}
+			} else if (node.type == LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY) {
+				// A key over GROUPING columns commutes with the grouping (a DISTINCT is a GROUP BY without aggregates):
+				// dropping input rows whose group key can't join drops exactly the groups that can't. A key reading an
+				// aggregate's result can't move below it.
+				if (!translate_through_groups(next, node.Cast<LogicalAggregate>())) {
 					break;
 				}
 			}

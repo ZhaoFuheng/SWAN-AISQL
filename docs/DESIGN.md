@@ -259,6 +259,16 @@ but not its neighbour is never copied there: outside the definition the scan is 
 recursive CTE does not exist"). The planner's decorrelation of a
 lateral join creates such CTEs. Skipping the reduction only leaves that neighbour unpruned by it.
 
+**The reduction follows the key down to the predicate.** A SEMI above the AI predicate prunes rows
+already paid for, so the reducer carries the join key down the reduced leaf until it is below the
+predicate: through projections (a computed key is translated, not stopped at), through a GROUP BY or
+DISTINCT on its grouping columns (pruning input rows whose group can't join prunes exactly those
+groups), and into the input of a join inside the leaf that supplies the key, either side of an inner
+join (swapping a key column for the one its equality condition equates it to) or the preserved side
+of an outer, semi or anti join. A join key may itself be computed on either side
+(`ON sp.book_id = 'bookid_' || REPLACE(r.purchase_id, ...)`), provided it reads one relation, can't
+throw and isn't volatile: the SEMI evaluates it on rows the original join never sees.
+
 ---
 
 ## 6. Duplication safety
