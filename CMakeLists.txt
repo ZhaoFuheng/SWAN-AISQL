@@ -32,6 +32,7 @@ set(EXTENSION_SOURCES
     src/optimizer/aisql_optimizer.cpp
     src/optimizer/ai_cte_split.cpp
     src/optimizer/ai_cte_demand.cpp
+    src/optimizer/ai_lateral_unnest.cpp
     src/optimizer/ai_predicate_rewrite.cpp
     src/optimizer/ai_filter_tree_build.cpp
     src/optimizer/ai_limit_pushdown.cpp

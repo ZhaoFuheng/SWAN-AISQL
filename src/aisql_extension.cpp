@@ -308,6 +308,10 @@ static void RegisterAISettings(DatabaseInstance &db) {
 	// what lets relational pushdown and the semi-join reduction reach the predicate -- it is
 	// boundary removal, not an optimisation in itself. Correct since the AIKeyBind idempotence
 	// fix (a duplicated AI subtree used to come back mis-bound). See DESIGN.md §5.
+	config.AddExtensionOption("ai_lateral_unnest",
+	                          "Rewrite a decorrelated FROM t, LATERAL UNNEST(f(t)) into an UNNEST over t, so an AI "
+	                          "predicate in t is not copied to a side no join key reaches",
+	                          LogicalType::BOOLEAN, EnvOnUnlessOff("AI_LATERAL_UNNEST", true));
 	config.AddExtensionOption("ai_inline_ai_ctes",
 	                          "Inline CTEs containing AI functions so relational pruning and the "
 	                          "semantic pull-up can reach the predicate",

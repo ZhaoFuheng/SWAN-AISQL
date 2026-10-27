@@ -16,6 +16,7 @@
 
 #include "optimizer/ai_cte_split.hpp"
 #include "optimizer/ai_cte_demand.hpp"
+#include "optimizer/ai_lateral_unnest.hpp"
 
 #include "ai_client.hpp"
 #include "ai_settings.hpp"
@@ -146,6 +147,12 @@ static void AisqlPreOptimizePlan(OptimizerExtensionInput &input, unique_ptr<Logi
 	// and the ordinary reducer walks single-child chains, so it can no longer descend below the
 	// predicate and its reduction lands above it, pruning nothing (computed_key_reduction: 10
 	// calls -> 178). So inlining stays the default and demand reduction takes over when it is off.
+	// The planner decorrelates `FROM t, LATERAL UNNEST(f(t))` into t joined to an unnest of t's deduplicated
+	// columns. Inlining an AI CTE in t would copy its predicate into that dedup side, which no join key
+	// reaches, so turn the self-join back into an UNNEST over t first (agent_bench Q21: 100 calls -> 17).
+	if (AIBoolSetting(input.optimizer.context, "ai_lateral_unnest", true)) {
+		AIRewriteLateralUnnests(input.optimizer.binder, plan);
+	}
 	if (AIBoolSetting(input.optimizer.context, "ai_inline_ai_ctes", true)) {
 		MarkAICTEsInline(*plan); // DuckDB's cte_inlining (a built-in, runs next) performs the inlining
 	} else {
