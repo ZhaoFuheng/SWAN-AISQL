@@ -29,6 +29,9 @@ public:
 	//! (positions in the region's child output): the early stop then counts DISTINCT passing tuples over
 	//! these columns, not passing rows. Empty = count rows.
 	vector<idx_t> limit_distinct_cols;
+	//! A constant LIMIT sits above this region but couldn't be pushed into it (limit stays -1): the consumer
+	//! may stop early, so the region keeps its cold gate (ignores ai_leaf_cold_slices) instead of going broad.
+	bool under_limit = false;
 
 public:
 	//! Downcast helper replacing the fork's enum check: matches on the verification identifier,

@@ -130,7 +130,8 @@ idx_t AILeafRegionState::Append(DataChunk &chunk, idx_t limit_floor, bool &limit
 	// calls start after the first slice's features instead of the chunk's (500 CLIP image embeds are ~80 s
 	// of ingest time), and lets this query's own verdicts order the later rows: text regions too (agent_bench
 	// Q17 237 -> 156 calls for +4-7 s).
-	constexpr idx_t kSliceRows = 100;
+	// SET ai_leaf_slice_rows (default 100). A smaller slice commits fewer rows to their first leaf while cold.
+	const idx_t kSliceRows = MaxValue<idx_t>(AIConfig::Get().leaf_slice_rows, 1);
 	for (idx_t begin = 0; begin < count;) {
 		const idx_t slice = MinValue<idx_t>(kSliceRows, count - begin);
 		if (begin > 0 && limit < 0 && dispatcher && !Warm()) {
@@ -149,6 +150,9 @@ idx_t AILeafRegionState::Append(DataChunk &chunk, idx_t limit_floor, bool &limit
 			return row_result.size() - rows_before;
 		}
 		begin += slice;
+		if (limit < 0) {
+			slices_ingested++;
+		}
 		if (begin < count && Pump(limit_floor)) {
 			limit_met = true;
 			return row_result.size() - rows_before;
@@ -442,6 +446,10 @@ void AILeafRegionState::ApplyVerdict(idx_t l, uint32_t rep_id, bool value, bool 
 bool AILeafRegionState::Warm() const {
 	if (n < 2) {
 		return true; // nothing to order
+	}
+	const idx_t cold_slices = AIConfig::Get().leaf_cold_slices;
+	if (cold_slices > 0 && !under_limit && slices_ingested >= cold_slices) {
+		return true; // bounded cold phase: a rarely asked leaf would otherwise gate every slice
 	}
 	if (AISelectivityTrainSteps() == 0) {
 		return false;

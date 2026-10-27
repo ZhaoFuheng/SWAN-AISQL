@@ -47,6 +47,8 @@ InsertionOrderPreservingMap<string> PhysicalAIRegion::ParamsToString() const {
 			}
 			result["Distinct On"] = cols;
 		}
+	} else if (under_limit) {
+		result["Unpushed Limit Above"] = "true";
 	}
 	SetEstimatedCardinality(result, estimated_cardinality);
 	return result;
@@ -117,6 +119,7 @@ public:
 		stream.is_node = AIDedupIsFilterNode(fn);
 		if (stream.is_node) {
 			stream.leaf = make_uniq<AILeafRegionState>(context, fn, child_types, op.limit, op.limit_distinct_cols);
+			stream.leaf->under_limit = op.under_limit;
 		} else {
 			stream.map = make_uniq<AISQLMapChunk>(context, child_types, AIDedupKeyCols(fn));
 		}

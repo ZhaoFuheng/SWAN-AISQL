@@ -1,0 +1,128 @@
+# name: test/sql/region/cold_slices_under_limit.test
+# description: SET ai_leaf_cold_slices bounds the leaf region's cold phase, except under a LIMIT that couldn't
+# group: [region]
+
+#              be pushed into the region (Unpushed Limit Above): there the consumer may stop early, and a region warmed
+#              early runs ahead of it (SWAN 2.0 california_schools-28, DISTINCT substr(...) ... LIMIT 5).
+#              Either way the answer is the per-row answer.
+#              WHY THE CALL-COUNT ASSERT IS SAFE HERE: with calibrated ordering and the mock's 5 ms per call, the
+#              shape at the end is count-stable (2,656 calls with 100-row slices, 2,621 with 20 in every run), so
+#              the smaller slice is asserted with a 20-call margin, which fails when the setting is a no-op. The
+#              flag's own effect (no overshoot under an un-pushed LIMIT) doesn't reproduce against the mock, so it
+#              is asserted on the plan and on the answer, not on the count.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE school AS SELECT i AS id, 'school '||i::VARCHAR AS name FROM range(300) r(i);
+
+# a DISTINCT on a computed key isn't pushed: the region is flagged Unpushed Limit Above
+query II
+EXPLAIN SELECT DISTINCT substr(s.name, 1, 8) AS k FROM school s
+WHERE ai_filter('[p=50] continuation? '||s.name) AND ai_filter('[p=50] in the county? '||s.name)
+LIMIT 3;
+----
+physical_plan	<REGEX>:(?s).*Ai Region.*Unpushed Limit Above: true.*
+
+# a pushed LIMIT carries its own limit, not the flag
+query II
+EXPLAIN SELECT s.name FROM school s
+WHERE ai_filter('[p=50] continuation? '||s.name) AND ai_filter('[p=50] in the county? '||s.name)
+LIMIT 3;
+----
+physical_plan	<!REGEX>:(?s).*Unpushed Limit Above.*
+
+# no LIMIT: no flag
+query II
+EXPLAIN SELECT s.name FROM school s
+WHERE ai_filter('[p=50] continuation? '||s.name) AND ai_filter('[p=50] in the county? '||s.name);
+----
+physical_plan	<!REGEX>:(?s).*Unpushed Limit Above.*
+
+# parity: the no-LIMIT answer is the same with the cold phase bounded or not
+statement ok
+SET ai_leaf_slice_rows = 10;
+
+statement ok
+CREATE TABLE ref AS SELECT s.name FROM school s
+WHERE ai_filter('[p=50] continuation? '||s.name) AND ai_filter('[p=50] in the county? '||s.name);
+
+statement ok
+SET ai_leaf_cold_slices = 2;
+
+query I
+SELECT count(*) FROM (
+  (SELECT s.name FROM school s
+   WHERE ai_filter('[p=50] continuation? '||s.name) AND ai_filter('[p=50] in the county? '||s.name)
+   EXCEPT ALL SELECT name FROM ref)
+  UNION ALL
+  (SELECT name FROM ref EXCEPT ALL
+   SELECT s.name FROM school s
+   WHERE ai_filter('[p=50] continuation? '||s.name) AND ai_filter('[p=50] in the county? '||s.name)));
+----
+0
+
+# under the un-pushed LIMIT (cap ignored): exactly k distinct keys, each from a row that passes both filters
+statement ok
+CREATE TABLE limited AS SELECT DISTINCT substr(s.name, 1, 8) AS k FROM school s
+WHERE ai_filter('[p=50] continuation? '||s.name) AND ai_filter('[p=50] in the county? '||s.name)
+LIMIT 3;
+
+query I
+SELECT count(DISTINCT k) FROM limited;
+----
+3
+
+query I
+SELECT count(*) FROM limited l WHERE l.k NOT IN (SELECT substr(name, 1, 8) FROM ref);
+----
+0
+
+# fewer rows committed blind: 20-row cold slices ask fewer calls than 100-row ones, for the same answer
+statement ok
+SET threads=1;
+
+statement ok
+SET ai_leaf_cold_slices = 0;
+
+statement ok
+CREATE TABLE t AS SELECT i AS k FROM range(2000) r(i);
+
+statement ok
+SET ai_leaf_slice_rows = 100;
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE ref100 AS SELECT k FROM t
+WHERE ai_filter('[sleep=5] [p=70] is it a? '||k::VARCHAR) AND ai_filter('[sleep=5] [p=30] is it b? '||k::VARCHAR);
+
+statement ok
+CREATE TABLE calls100 AS SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT AS n FROM ai_usage();
+
+statement ok
+SET ai_leaf_slice_rows = 20;
+
+statement ok
+SET ai_leaf_cold_slices = 5;
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE res20 AS SELECT k FROM t
+WHERE ai_filter('[sleep=5] [p=70] is it a? '||k::VARCHAR) AND ai_filter('[sleep=5] [p=30] is it b? '||k::VARCHAR);
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT + 20 < (SELECT n FROM calls100) FROM ai_usage();
+----
+true
+
+query I
+SELECT count(*) FROM ((SELECT k FROM res20 EXCEPT ALL SELECT k FROM ref100) UNION ALL (SELECT k FROM ref100 EXCEPT ALL SELECT k FROM res20));
+----
+0

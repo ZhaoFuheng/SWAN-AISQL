@@ -45,9 +45,12 @@ public:
 	AILeafRegionState(ClientContext &context, const BoundFunctionExpression &eval_call,
 	                  const vector<LogicalType> &child_types, int64_t limit, vector<idx_t> limit_distinct_cols = {});
 	~AILeafRegionState();
+	//! An un-pushed LIMIT above: ai_leaf_cold_slices doesn't apply (warming early makes the region go broad).
+	bool under_limit = false;
 
-	//! Fold a child chunk in slices of 100 rows: each slice is deduped, its new reps get texts + predictions
-	//! (one batched embed per leaf), and each new row picks its first leaf. Between slices, landed verdicts
+	//! Fold a child chunk in slices of ai_leaf_slice_rows rows (default 100): each slice is deduped, its new
+	//! reps get texts + predictions (one batched embed per leaf), and each new row picks its first leaf.
+	//! Between slices, landed verdicts
 	//! are applied and pending reps dispatched (or, under a LIMIT, floor-sized waves are evaluated inline), so
 	//! the first calls start after the first slice's features and later slices are decided by a model already
 	//! trained on earlier verdicts. Returns the number of the chunk's rows ingested (whole slices); fewer than
@@ -160,7 +163,8 @@ private:
 	void DispatchBounded(idx_t cap);
 	void SubmitRep(idx_t l, uint32_t rep_id);
 	uint32_t dispatch_gen = 0;
-	//! Every leaf has a batch of verdicts and the model has trained on them (always true for one leaf).
+	//! Every leaf has a batch of verdicts and the model has trained on them (always true for one leaf), or
+	//! ai_leaf_cold_slices slices are in.
 	bool Warm() const;
 	static constexpr idx_t GATE_LABELS = 20; //! verdicts per leaf before the model counts as warm
 	//! Apply every verdict that has landed, without blocking.
@@ -205,6 +209,7 @@ private:
 	//! concurrency-wide window in flight until it has that many verdicts, so every later submission's hint
 	//! sees real pass rates (a backlog submitted cold writes every row on the model's neutral guess).
 	vector<idx_t> async_inflight;
+	idx_t slices_ingested = 0; //! slices appended without a LIMIT (SET ai_leaf_cold_slices bounds the cold phase)
 	//! Owning-thread time accounting (seconds), see TimingSummary.
 	double t_embed = 0, t_refresh = 0, t_decide = 0, t_wait = 0, t_warm_gate = 0;
 	idx_t refreshes = 0, waits = 0;

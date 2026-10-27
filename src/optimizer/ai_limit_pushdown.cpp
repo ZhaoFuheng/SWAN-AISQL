@@ -444,6 +444,20 @@ void AILimitPushdown::Visit(unique_ptr<LogicalOperator> &op) {
 		// join's preserved side, where k passers still yield >=k join-output rows.
 		TryPushBelowPreservingJoin(cur.get(), k);
 	}
+	MarkUnderLimit(*op->children[0]);
+}
+
+void AILimitPushdown::MarkUnderLimit(LogicalOperator &op) {
+	// Every region below a LIMIT that didn't take a limit of its own: the consumer may stop early, so the
+	// region shouldn't run ahead of it (see LogicalAIRegion::under_limit).
+	if (auto *region = LogicalAIRegion::TryCast(op)) {
+		if (region->limit < 0) {
+			region->under_limit = true;
+		}
+	}
+	for (auto &child : op.children) {
+		MarkUnderLimit(*child);
+	}
 }
 
 unique_ptr<LogicalOperator> AILimitPushdown::Optimize(unique_ptr<LogicalOperator> op) {
