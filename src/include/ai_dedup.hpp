@@ -192,6 +192,13 @@ double AILeafPredictFeature(const vector<float> &feat);
 void AILeafPredictFeatures(const vector<const vector<float> *> &feats, vector<double> &p_out);
 //! The selectivity model's training-step counter, so a stored prediction can be recognised as stale.
 uint64_t AISelectivityTrainSteps();
+//! The P(true) a leaf is ordered by under SET ai_leaf_prior, from the leaf's verdicts so far in this query
+//! (`passes` of `landed`, and the sum over them of logit(model P when asked)) and the model's `p_model` for
+//! the input at hand. mlp: p_model. calibrated: p_model with its logit shifted by landed / (landed + 20) of the
+//! gap between logit((passes + 1) / (landed + 2)) and the mean logit the leaf was asked at.
+double AILeafOrderingP(double p_model, idx_t passes, idx_t landed, double sum_logit_asked);
+//! logit(p), clamped to [1e-4, 1 - 1e-4].
+double AILeafLogit(double p);
 //! Evaluate leaf `leaf` over `texts`: the LLM verdict per rep, through the same worker pool, single-flight,
 //! speculative gate and MLP training as the per-row batch. out_valid[i] = 0 -> no verdict (NULL).
 void AILeafEvaluate(ClientContext &context, const BoundFunctionExpression &eval_call, idx_t leaf,

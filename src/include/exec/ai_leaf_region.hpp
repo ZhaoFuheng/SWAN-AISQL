@@ -118,6 +118,7 @@ private:
 		uint32_t hint_row = 0;
 		bool has_hint_row = false;
 		bool async_inflight = false; //! submitted to the async dispatcher and not yet landed
+		uint32_t redecided = 0;      //! the DispatchBounded call that last re-decided its waiters
 	};
 	struct Leaf {
 		vector<idx_t> key_cols;
@@ -155,11 +156,18 @@ private:
 	//! Hand pending reps to the dispatcher (round-robin over the leaves): all of them once the model is warm
 	//! (or on `flush`), else only leaves with a concurrency-wide batch pending.
 	void DispatchPending(bool flush = false);
+	//! DispatchPending under SET ai_leaf_lookahead: at most `cap` outstanding, rows re-decided at submission.
+	void DispatchBounded(idx_t cap);
+	void SubmitRep(idx_t l, uint32_t rep_id);
+	uint32_t dispatch_gen = 0;
 	//! Every leaf has a batch of verdicts and the model has trained on them (always true for one leaf).
 	bool Warm() const;
 	static constexpr idx_t GATE_LABELS = 20; //! verdicts per leaf before the model counts as warm
 	//! Apply every verdict that has landed, without blocking.
 	void ReapLanded();
+	//! The P(true) DecideRow orders leaf `l` by for a rep the model predicted `p_mlp` for (ai_leaf_prior).
+	double OrderingP(idx_t l, double p_mlp) const;
+	vector<double> sum_logit_pask; //! per leaf: sum over observed verdicts of logit(model P when asked)
 	//! Wait for at least one verdict, then apply what landed.
 	void WaitAndReap();
 	//! LIMIT path: evaluate one inline wave of up to `wave_cap` of leaf `l`'s pending reps.
@@ -190,7 +198,8 @@ private:
 	vector<idx_t> landed; //! verdicts landed per leaf (the warm gate waits for a batch on every leaf)
 	//! Per leaf: valid verdicts seen and how many were true -- this query's own pass rate, which the prefix-
 	//! cache write decision trusts over the cold model's prediction once a few answers are in (shrunk toward
-	//! the prediction with a prior of PASS_RATE_PRIOR answers). The leaf ORDER keeps the model's prediction.
+	//! the prediction with a prior of PASS_RATE_PRIOR answers). The leaf order uses them under
+	//! SET ai_leaf_prior = calibrated, to set the model's level for the leaf (OrderingP).
 	vector<idx_t> observed_n, observed_true;
 	//! Per leaf: reps in flight on the async dispatcher. A leaf whose reps carry a write hint is held to one
 	//! concurrency-wide window in flight until it has that many verdicts, so every later submission's hint

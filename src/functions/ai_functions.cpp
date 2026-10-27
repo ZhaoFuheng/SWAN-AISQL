@@ -1400,6 +1400,31 @@ static void AIEmbedFunction(DataChunk &args, ExpressionState &state, Vector &res
 //! unevaluated; below it the leaf is evaluated (and pruned when false) before the join.
 static constexpr double AI_SPECULATIVE_THRESHOLD = 0.5;
 
+//! Per node and query: each leaf's verdicts so far, for SET ai_leaf_prior (AILeafOrderingP). Shared by the
+//! bind data's copies, written by the batch's worker threads.
+struct AILeafPriorStats {
+	std::mutex lock;
+	vector<idx_t> passes, landed;
+	vector<double> sum_logit_asked;
+	void Add(idx_t n, idx_t l, double p_asked, bool value) {
+		std::lock_guard<std::mutex> guard(lock);
+		if (passes.size() < n) {
+			passes.resize(n, 0);
+			landed.resize(n, 0);
+			sum_logit_asked.resize(n, 0.0);
+		}
+		passes[l] += value ? 1 : 0;
+		landed[l]++;
+		sum_logit_asked[l] += AILeafLogit(p_asked);
+	}
+	void Adjust(vector<double> &p) {
+		std::lock_guard<std::mutex> guard(lock);
+		for (idx_t l = 0; l < p.size(); l++) {
+			p[l] = l < landed.size() ? AILeafOrderingP(p[l], passes[l], landed[l], sum_logit_asked[l]) : p[l];
+		}
+	}
+};
+
 struct AIFilterWithEmbedBindData : public FunctionData {
 	AIFilterWithEmbedBindData(shared_ptr<AIFilterTreeNode> tree, string tree_str, idx_t leaf_count,
 	                          bool speculative = false, double threshold = 0.5, int64_t limit = -1, string meta = "",
@@ -1430,10 +1455,13 @@ struct AIFilterWithEmbedBindData : public FunctionData {
 	// rows have PASSED; the rest stay false, which is sound because the LIMIT keeps only k anyway. -1 = no
 	// limit. Only set when the filter's boolean result feeds nothing but that LIMIT.
 	int64_t limit;
+	shared_ptr<AILeafPriorStats> leaf_prior_stats = make_shared_ptr<AILeafPriorStats>();
 
 	unique_ptr<FunctionData> Copy() const override {
-		return make_uniq<AIFilterWithEmbedBindData>(tree, tree_str, leaf_count, speculative, threshold, limit, meta,
-		                                            wrappers);
+		auto copy = make_uniq<AIFilterWithEmbedBindData>(tree, tree_str, leaf_count, speculative, threshold, limit,
+		                                                 meta, wrappers);
+		copy->leaf_prior_stats = leaf_prior_stats;
+		return std::move(copy);
 	}
 	bool Equals(const FunctionData &other_p) const override {
 		auto &other = other_p.Cast<AIFilterWithEmbedBindData>();
@@ -2706,7 +2734,13 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 			for (idx_t l = 0; l < n; l++) {
 				eff_cost[l] = cost[row][l] * domain_frac[l];
 			}
-			idx_t leaf = warm_pick ? warm_leaf : AIFilterTreeChooseNextLeaf(tree, leaf_values[row], p_row, eff_cost);
+			// SET ai_leaf_prior=calibrated: the order uses the model calibrated to the leaf's observed pass rate;
+			// the speculative gate above keeps the model's own estimate.
+			vector<double> p_ord = p_row;
+			if (AIConfig::Get().leaf_prior_calibrated) {
+				bind_data.leaf_prior_stats->Adjust(p_ord);
+			}
+			idx_t leaf = warm_pick ? warm_leaf : AIFilterTreeChooseNextLeaf(tree, leaf_values[row], p_ord, eff_cost);
 			if (leaf >= n) {
 				// A concurrent waiter routed this row's last unknown leaf between the fold check above and
 				// the pick: nothing left to evaluate. Re-fold and resolve; fall back to the first unknown
@@ -2776,7 +2810,7 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 				if (!any) {
 					break;
 				}
-				const idx_t alt = AIFilterTreeChooseNextLeaf(tree, leaf_values[row], p_row, masked);
+				const idx_t alt = AIFilterTreeChooseNextLeaf(tree, leaf_values[row], p_ord, masked);
 				if (alt >= n || masked[alt] >= 1e29 || alt == leaf) {
 					break;
 				}
@@ -2853,6 +2887,9 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 				self->ok = value_ok;
 				self->ready = true;
 				waiters.swap(self->waiters);
+			}
+			if (value_ok) {
+				bind_data.leaf_prior_stats->Add(n, leaf, p_row[leaf], value);
 			}
 			completions.fetch_add(1);              // only real calls advance the async trainer's cadence
 			route_row(row, leaf, value, value_ok); // the fetcher's own row
@@ -3199,6 +3236,22 @@ void AILeafFeatures(const BoundFunctionExpression &eval_call, const AILeafTexts 
 			feats_out[estimable[u]] = BuildPredicateFeature(embs[2 * u].embedding, embs[2 * u + 1].embedding);
 		}
 	}
+}
+
+double AILeafLogit(double p) {
+	p = MinValue(MaxValue(p, 1e-4), 1.0 - 1e-4);
+	return std::log(p / (1.0 - p));
+}
+
+double AILeafOrderingP(double p_model, idx_t passes, idx_t landed, double sum_logit_asked) {
+	if (!AIConfig::Get().leaf_prior_calibrated || landed == 0) {
+		return p_model;
+	}
+	const double n_l = double(landed);
+	const double observed = (double(passes) + 1.0) / (n_l + 2.0);
+	const double delta = AILeafLogit(observed) - sum_logit_asked / n_l;
+	const double w = n_l / (n_l + 20.0);
+	return 1.0 / (1.0 + std::exp(-(AILeafLogit(p_model) + w * delta)));
 }
 
 double AILeafPredictFeature(const vector<float> &feat) {

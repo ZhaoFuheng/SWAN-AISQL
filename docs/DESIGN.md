@@ -205,6 +205,35 @@ known. The model is process-global and keeps training
 across queries; the predicate text being part of the feature is what lets it generalise across
 predicates rather than forget.
 
+**The model ranks the inputs; the leaf's own verdicts set its level** (`ai_leaf_prior`, default
+`calibrated`). The model separates leaves poorly: in SWAN 2.0 superhero-08 it predicted 0.37–0.49 for
+one leaf and 0.37–0.54 for another whose pass rates are 0.45 and 0.20, and a leaf's mean prediction
+swung between 0.47 and 0.91 from one training step to the next, so the search asked the wrong leaf
+first for the whole query. The pass rate a leaf has shown in the query is the better level, but alone
+it throws away the model's ranking of inputs within the leaf, which pays where pass rates are close.
+So the order uses the model's prediction with its logit shifted toward the observed rate: by
+w · (logit((passes + 1) / (landed + 2)) − the mean logit the leaf was asked at), with
+w = landed / (landed + 20), so the shift grows with the evidence and is zero before the first verdict.
+The shift is measured against the predictions at ask time, so a model that has moved since is over- or
+under-corrected; re-predicting the answered inputs after every training step measured worse (−1.4% calls
+against −2.2% on SWAN 2.0's 31 multi-leaf queries). The speculative gate keeps the model's own estimate,
+and the per-row batch is ordered the same way. `mlp` orders by the model alone.
+
+**A queued call is not a committed one** (`ai_leaf_lookahead`, default 2). A warm region used to hand
+every pending input to the request pool at once: in superhero-08 it queued one leaf for 399 rows within
+0.3 s of warming, 538 calls behind a 20-wide pool, and the estimates that improved over the next seconds
+could change none of them. With lookahead k, at most k × `ai_concurrency` calls are outstanding, and the
+rows behind a pending input are re-decided just before it is submitted: a row may be finished by a verdict
+that landed meanwhile, move to another leaf, or keep this one. Each input is re-decided at most once per
+dispatch, so the loop ends; afterwards either a call is outstanding or nothing is pending. The pool stays
+full, so latency does not grow. The flush at the end of the input is bounded the same way; the cold gate,
+the LIMIT waves and the per-row batch are unchanged. 0 submits everything at once, as before.
+
+Neither changes a result: both choose only which leaf a row asks next and when, and a row's value is
+still the tree's Kleene value over the verdicts it asked for. On SWAN 2.0 together they cut calls by 2.2%
+and wall time by 3%, with no query worse and identical rows on 31 of 31 (replayed offline from a fixed
+cache, three runs per arm); the parity test is `test/sql/region/leaf_ordering.test`.
+
 **A worked example.**
 
 ```sql
@@ -353,8 +382,9 @@ connection's requests go (endpoint, model, key, retries, prices, TLS) and every 
 connection, with `SET GLOBAL` for the process default; the request pool, the embedding client and the
 local cache are process-wide. Two debug
 settings stay: `ai_debug_log` (diagnostics per subsystem) and `ai_debug_prompt_variant` (the
-cross-engine protocol above). The full list, with defaults and environment variables, is
-[SETTINGS.md](SETTINGS.md).
+cross-engine protocol above). The run-time order has two settings of its own, `ai_leaf_prior` and
+`ai_leaf_lookahead` (§4), for the same parity and A/B purpose. The full list, with defaults and
+environment variables, is [SETTINGS.md](SETTINGS.md).
 
 ---
 

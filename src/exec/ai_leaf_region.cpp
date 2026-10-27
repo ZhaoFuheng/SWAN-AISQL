@@ -35,6 +35,7 @@ AILeafRegionState::AILeafRegionState(ClientContext &context, const BoundFunction
 	// leaves share a span: another function's request has its own system prompt and schema, so the same
 	// input under it is another span, and its reads must not be counted on.
 	lead_key.assign(n, string());
+	sum_logit_pask.assign(n, 0.0);
 	for (idx_t l = 0; l < n; l++) {
 		lead_key[l] = evaluator->LeafKind(l) == 'F' ? AILeafLeadKey(eval_call, l) : string();
 	}
@@ -336,7 +337,7 @@ void AILeafRegionState::DecideRow(uint32_t row) {
 		if (rep.state == 3 && rep.valid) {
 			values[l] = rep.verdict ? AITriState::TRI_TRUE : AITriState::TRI_FALSE;
 		}
-		p[l] = rep.p;
+		p[l] = OrderingP(l, rep.p);
 		// A leaf already asked, or one that can never answer (NULL prompt), is not a candidate. The cost of
 		// asking a leaf FOR THIS ROW is its call cost amortized over the rows its rep serves: above a join
 		// the small side's rep is shared by every row of the big side, so it is the cheap question even when
@@ -417,6 +418,10 @@ void AILeafRegionState::MergePassedKeys(std::unordered_set<string> &out) const {
 	}
 }
 
+double AILeafRegionState::OrderingP(idx_t l, double p_mlp) const {
+	return AILeafOrderingP(p_mlp, observed_true[l], observed_n[l], sum_logit_pask[l]);
+}
+
 void AILeafRegionState::ApplyVerdict(idx_t l, uint32_t rep_id, bool value, bool valid) {
 	auto &rep = leaves[l].reps[rep_id];
 	rep.state = 3;
@@ -430,6 +435,7 @@ void AILeafRegionState::ApplyVerdict(idx_t l, uint32_t rep_id, bool value, bool 
 	if (valid) {
 		observed_n[l]++;
 		observed_true[l] += value ? 1 : 0;
+		sum_logit_pask[l] += AILeafLogit(rep.p);
 	}
 }
 
@@ -448,8 +454,103 @@ bool AILeafRegionState::Warm() const {
 	return true;
 }
 
+void AILeafRegionState::SubmitRep(idx_t l, uint32_t rep_id) {
+	auto &leaf = leaves[l];
+	auto &rep = leaf.reps[rep_id];
+	rep.state = 2;
+	if (!dispatcher) {
+		dispatcher = make_uniq<AIAsyncDispatcher>(AIConfig::Get().max_concurrency);
+	}
+	if (dispatched == 0) {
+		t_first_call = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
+		rows_at_first_call = row_result.size();
+	}
+	dispatched++;
+	rep.async_inflight = true;
+	async_inflight[l]++;
+	if (rep.has_hint_row) {
+		rep.reuse_hint = ReuseHintFor(rep.hint_row, l); // on the verdicts observed by now
+	}
+	const AILeafUnitEvaluator &eval = *evaluator;
+	ClientContext &ctx = context;
+	const string &qt = query_text;
+	dispatcher->Submit((static_cast<idx_t>(l) << 32) | rep_id,
+	                   [&eval, &ctx, &qt, l, prompt = leaf.texts.prompt[rep_id], pred = leaf.texts.pred_text[rep_id],
+	                    feat = rep.feat, hint = rep.reuse_hint, lead = leaf.texts.lead_span[rep_id],
+	                    head = leaf.texts.head, head_reads = static_cast<double>(leaf.reps.size()) - 1.0]() {
+		                   return eval.Evaluate(ctx, l, prompt, pred, feat, qt, hint, &lead, &head, head_reads);
+	                   });
+}
+
+// SET ai_leaf_lookahead = k: keep at most k x ai_concurrency calls outstanding, and re-decide the rows behind a
+// pending rep just before it is submitted, so a row's next leaf is chosen with the estimates of the moment it
+// is asked, not of the moment it was queued. Round-robin over the leaves as below. Afterwards either something
+// is outstanding or nothing is pending (Finish and DecideThrough rely on it). A rep is re-decided at most once
+// per call, so the loop cannot cycle.
+void AILeafRegionState::DispatchBounded(idx_t cap) {
+	const uint32_t gen = ++dispatch_gen;
+	vector<idx_t> head(n, 0);
+	auto outstanding = [&]() {
+		return dispatcher ? dispatcher->Outstanding() : idx_t(0);
+	};
+	// As in DispatchPending: a leaf whose reps carry a prefix-cache write hint keeps one concurrency-wide batch
+	// in flight until it has that many verdicts, so its hints are computed on observed pass rates.
+	const idx_t hint_batch = MaxValue<idx_t>(AIConfig::Get().max_concurrency, 1);
+	auto hint_capped = [&](idx_t l) {
+		return has_partner[l] && observed_n[l] < hint_batch && async_inflight[l] >= hint_batch;
+	};
+	for (;;) {
+		bool any = false;
+		for (idx_t l = 0; l < n && outstanding() < cap; l++) {
+			auto &leaf = leaves[l];
+			while (head[l] < leaf.pending.size() && !hint_capped(l)) {
+				const uint32_t rep_id = leaf.pending[head[l]++];
+				auto &rep = leaf.reps[rep_id];
+				if (rep.state != 1) {
+					continue; // a stale entry: re-decided away, or already submitted
+				}
+				any = true;
+				if (rep.redecided != gen) {
+					rep.redecided = gen;
+					vector<uint32_t> rows = std::move(rep.waiters);
+					rep.waiters.clear();
+					rep.state = 0;
+					RefreshStalePredictions(rows.data(), rows.size());
+					for (const auto row : rows) {
+						DecideRow(row); // may finish the row, move it, or choose this rep again (re-queued)
+					}
+					if (rep.state != 1) {
+						break; // nobody chose it now
+					}
+				}
+				SubmitRep(l, rep_id);
+				break;
+			}
+		}
+		if (!any || outstanding() >= cap) {
+			break;
+		}
+	}
+	for (idx_t l = 0; l < n; l++) {
+		auto &pending = leaves[l].pending;
+		vector<uint32_t> keep;
+		for (idx_t i = head[l]; i < pending.size(); i++) {
+			if (leaves[l].reps[pending[i]].state == 1) {
+				keep.push_back(pending[i]);
+			}
+		}
+		pending.swap(keep);
+	}
+}
+
 void AILeafRegionState::DispatchPending(bool flush) {
 	if (limit >= 0) {
+		return;
+	}
+	// A region of one leaf has nothing to order, so it dispatches as before.
+	const idx_t lookahead = AIConfig::Get().leaf_lookahead;
+	if (lookahead > 0 && n >= 2 && (flush || Warm())) {
+		DispatchBounded(lookahead * MaxValue<idx_t>(AIConfig::Get().max_concurrency, 1));
 		return;
 	}
 	// Warm: every pending rep goes at once. Cold: a leaf's reps go once a concurrency-wide batch is pending, so
@@ -486,32 +587,7 @@ void AILeafRegionState::DispatchPending(bool flush) {
 				continue;
 			}
 			any = true;
-			const uint32_t rep_id = leaf.pending[i];
-			auto &rep = leaf.reps[rep_id];
-			rep.state = 2;
-			if (!dispatcher) {
-				dispatcher = make_uniq<AIAsyncDispatcher>(AIConfig::Get().max_concurrency);
-			}
-			if (dispatched == 0) {
-				t_first_call = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
-				rows_at_first_call = row_result.size();
-			}
-			dispatched++;
-			rep.async_inflight = true;
-			async_inflight[l]++;
-			if (rep.has_hint_row) {
-				rep.reuse_hint = ReuseHintFor(rep.hint_row, l); // on the verdicts observed by now
-			}
-			const AILeafUnitEvaluator &eval = *evaluator;
-			ClientContext &ctx = context;
-			const string &qt = query_text;
-			dispatcher->Submit((static_cast<idx_t>(l) << 32) | rep_id,
-			                   [&eval, &ctx, &qt, l, prompt = leaf.texts.prompt[rep_id],
-			                    pred = leaf.texts.pred_text[rep_id], feat = rep.feat, hint = rep.reuse_hint,
-			                    lead = leaf.texts.lead_span[rep_id], head = leaf.texts.head,
-			                    head_reads = static_cast<double>(leaf.reps.size()) - 1.0]() {
-				                   return eval.Evaluate(ctx, l, prompt, pred, feat, qt, hint, &lead, &head, head_reads);
-			                   });
+			SubmitRep(l, leaf.pending[i]);
 		}
 		if (!any) {
 			break;
