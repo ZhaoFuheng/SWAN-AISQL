@@ -98,7 +98,7 @@ every system plans itself)
 | LOTUS 1.2.4 | 0.760 | 69,204 | $4.04 | 4,101 s |
 | BlendSQL 0.1.27 | 0.761 | 59,620 | $4.95 | 4,608 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.766 | 70,933 | $9.85 | 2,991 s |
-| PLOP-DP | 0.690 | 25,604 | $1.72 | 10,431 s |
+| PLOP-DP | 0.704 | 25,640 | $1.11 | 10,270 s |
 | **SWAN-AISQL** | 0.777 | **20,176** | **$2.20** | **2,143 s** |
 
 Quality is at parity among LOTUS, BlendSQL, Palimpzest and SWAN (the model's verdicts bound it); calls, cost
