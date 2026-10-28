@@ -1,3 +1,4 @@
+#include "optimizer/semi_join_reducer.hpp"
 #include "optimizer/semantic_filter_pullup.hpp"
 
 #include "ai_client.hpp"
@@ -200,6 +201,11 @@ static bool IsInnerJoin(const LogicalOperator &op) {
 //! `reduces` reports whether `op` removes rows of that child (the lift is then worth keeping).
 static bool Commutes(const LogicalOperator &op, idx_t child_idx, bool &reduces) {
 	reduces = false;
+	// an operator that DRAWS (SELECT id, nextval('s') AS v over the predicate) evaluates its draw on every
+	// row that reaches it: lifted above it, the predicate would let the rows it rejects draw first
+	if (AIOperatorHasVolatileNonAI(op)) {
+		return false;
+	}
 	switch (op.type) {
 	case LogicalOperatorType::LOGICAL_FILTER:
 		// a relational conjunct above the predicate's site removes rows before it runs
@@ -280,8 +286,9 @@ void SemanticFilterPullup::Extract(unique_ptr<LogicalOperator> &op, vector<Pulle
 		vector<char> pull(filter.expressions.size(), 0);
 		for (idx_t i = 0; i < filter.expressions.size(); i++) {
 			AIMixedLeaf leaf;
-			if (AIDetectMixedLeaf(*filter.expressions[i], leaf)) {
-				leaves.push_back(leaf);
+			if (AIDetectMixedLeaf(*filter.expressions[i], leaf) &&
+			    !AIExpressionHasVolatileNonAI(*filter.expressions[i])) {
+				leaves.push_back(leaf); // a volatile prompt stays where the query evaluates it (once per base row)
 				pull[i] = 1;
 			}
 		}
@@ -322,7 +329,10 @@ void SemanticFilterPullup::Extract(unique_ptr<LogicalOperator> &op, vector<Pulle
 		PulledGroup group;
 		vector<JoinCondition> keep_conds;
 		for (auto &cond : join.conditions) {
-			if (!cond.IsComparison() && ExprContainsAICall(cond.GetJoinExpression())) {
+			// a condition that draws (nextval() in the prompt) is evaluated once per joined pair where it is;
+			// lifted, it would run once per duplicate an outer join above makes of that pair
+			if (!cond.IsComparison() && ExprContainsAICall(cond.GetJoinExpression()) &&
+			    !AIExpressionHasVolatileNonAI(cond.GetJoinExpression())) {
 				group.exprs.push_back(std::move(cond.JoinExpressionReference()));
 			} else {
 				keep_conds.push_back(std::move(cond));
@@ -351,7 +361,7 @@ void SemanticFilterPullup::Extract(unique_ptr<LogicalOperator> &op, vector<Pulle
 		// join on C == cross product then filter C. For a pure-AI condition (the common case) the lifted
 		// filter then reorders/dedups; a mixed AI+relational condition is still correct, just evaluated above.
 		auto &join = op->Cast<LogicalAnyJoin>();
-		if (join.condition && ExprContainsAICall(*join.condition)) {
+		if (join.condition && ExprContainsAICall(*join.condition) && !AIExpressionHasVolatileNonAI(*join.condition)) {
 			PulledGroup group;
 			group.exprs.push_back(std::move(join.condition));
 			op = LogicalCrossProduct::Create(std::move(op->children[0]), std::move(op->children[1]));

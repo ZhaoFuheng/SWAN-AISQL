@@ -1,5 +1,6 @@
 #include "optimizer/ai_positional_maps.hpp"
 #include "optimizer/ai_join_rewrite.hpp"
+#include "optimizer/semi_join_reducer.hpp"
 
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/catalog_entry/scalar_function_catalog_entry.hpp"
@@ -201,6 +202,11 @@ void AIJoinRewrite::TryPushBelowJoin(unique_ptr<LogicalOperator> &op, unique_ptr
 	// expressions into the call; else use it as-is.
 	auto inlined = region.expressions[0]->Copy();
 	if (proj && !InlineProjectionRefs(inlined, *proj)) {
+		return;
+	}
+	// The projection may have handed the call a DRAW (SELECT q.v, ai_complete(.. || q.v) over q's nextval()):
+	// inlined below the join it would draw again, and the prompt's value would not be the displayed one.
+	if (AIExpressionHasVolatileNonAI(*inlined)) {
 		return;
 	}
 	// All columns the call reads must come from exactly ONE join side; that side is where the region goes.
@@ -709,8 +715,17 @@ bool AIJoinRewrite::TrySemiConvertForConsumer(LogicalOperator &consumer) {
 	vector<DeadExprs> deads;
 	bool saw_region = false;
 	vector<LogicalOperator *> chain; // the row-preserving ops between the consumer and the join, top-down
+	// every slot the consumer keeps an expression in: an aggregate's GROUP BY list (nextval() AS g ... GROUP BY g,
+	// sitting directly on the join) as well as its aggregates, a DISTINCT's targets
+	if (AIOperatorHasVolatileNonAI(consumer)) {
+		return false; // DISTINCT id, nextval(): the join's duplicates are distinct rows, the fan-out is the result
+	}
 	LogicalOperator *cur = consumer.children[0].get();
 	while (cur->children.size() == 1) {
+		if (AIOperatorHasVolatileNonAI(*cur)) {
+			return false; // a draw on the chain (nextval() AS v, WHERE nextval() > 3): which duplicates it sees is the
+			              // result
+		}
 		if (cur->type == LogicalOperatorType::LOGICAL_PROJECTION) {
 			auto &proj = cur->Cast<LogicalProjection>();
 			BindingSet below;

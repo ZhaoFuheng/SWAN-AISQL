@@ -465,7 +465,7 @@ static void GetRowKeys(DataChunk &args, const AIKeyBindData &bind_data, idx_t ro
 	for (idx_t j = 0; j < bind_data.key_count; j++) {
 		Value value = args.data[bind_data.key_start + j].GetValue(row);
 		if (!value.IsNull()) {
-			keys.push_back(value.ToString());
+			keys.push_back(AIValueKeyText(value));
 		}
 	}
 }
@@ -2314,11 +2314,9 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 			if (!row_valid[row]) {
 				continue;
 			}
-			string key;
+			string key; // every leaf's prompt, NULL-flagged (a NULL leaf is not '') and length-prefixed
 			for (idx_t l = 0; l < n; l++) {
-				key.push_back(leaf_valid && !(*leaf_valid)[row][l] ? '\x00' : '\x01'); // a NULL leaf is not ''
-				key += prompt[row][l];
-				key.push_back('\x1f');
+				AIAppendKeyPart(key, prompt[row][l], leaf_valid && !(*leaf_valid)[row][l]);
 			}
 			auto it = rep_of_key.find(key);
 			if (it == rep_of_key.end()) {

@@ -35,6 +35,18 @@ void AISetSpeculativeStandDown(Expression &call);
 //! The child-output columns `eval_call` reads (its dedup key).
 vector<idx_t> AIDedupKeyCols(const BoundFunctionExpression &eval_call);
 
+//! A value's identity as a dedup key: a primitive's text (a float's bits), a nested value's typed serialization. The
+//! text of a nested value drops what tells two values apart (a UNION prints its member alone: a := 1 and b := 1 are
+//! both '1', so a prompt branching on union_tag() would share one verdict); the serialization carries the type.
+string AIValueKeyText(const Value &v);
+
+//! Append one column of a dedup key: a NULL-flag byte (NULL stays distinct from ''), then the value's key text,
+//! length-prefixed, so a value holding any separator byte cannot make two tuples collide. The map chunk, the leaf
+//! dictionary, the factor graph's member key and the batch row key all build their keys from it, so one
+//! representative means the same thing everywhere.
+void AIAppendKeyPart(string &key, const Value &v);
+void AIAppendKeyPart(string &key, const string &text, bool is_null);
+
 //! True iff `eval_call` is an ai_function_with_embed / speculative_ai_function_with_embed node (evaluated via
 //! the reorder worker pool + count-weighted LIMIT early-stop), as opposed to a plain scalar AI function.
 bool AIDedupIsFilterNode(const BoundFunctionExpression &eval_call);

@@ -1,4 +1,5 @@
 #include "optimizer/ai_region_rewrite.hpp"
+#include "optimizer/semi_join_reducer.hpp"
 #include "optimizer/ai_positional_maps.hpp"
 #include <unordered_set>
 #include "duckdb/planner/operator/logical_order.hpp"
@@ -139,6 +140,14 @@ bool AIRegionRewrite::HoistAICalls(unique_ptr<Expression> &expr, unique_ptr<Logi
 			is_node = unit != nullptr;
 		}
 	}
+	if ((hoist_expr || unit) && AIExpressionHasVolatileNonAI(*expr)) {
+		// a call whose prompt draws (nextval()/random()), or a wrapper that does: the region would evaluate it
+		// once per distinct text, not once per row as the query says. The call stays native; a draw-free call
+		// INSIDE it (ai_filter(ai_complete(x) || random())) is still hoisted below. A volatile term BESIDE the
+		// call (ai_filter(x) OR random() < p) never reaches here: the check is on the unit, not the root.
+		hoist_expr = false;
+		unit.reset();
+	}
 	if (hoist_expr || unit) {
 		const auto return_type = expr->GetReturnType();
 		const auto dedup_index = optimizer.binder.GenerateTableIndex();
@@ -151,23 +160,23 @@ bool AIRegionRewrite::HoistAICalls(unique_ptr<Expression> &expr, unique_ptr<Logi
 		expr = make_uniq<BoundColumnRefExpression>(return_type, ColumnBinding(dedup_index, ProjectionIndex(0)));
 		return true;
 	}
-	// Call-safety on the scan path (lazy_guard): a hoisted region evaluates EVERY distinct input, so never
-	// hoist from a position native execution evaluates lazily on a row subset -- factorization must never
-	// increase LLM calls. CASE: only the first WHEN condition runs on every row (later WHENs run on unmatched
-	// rows, THEN/ELSE on their branch subsets). Conjunctions: the adaptive short-circuit evaluates later arms
-	// only on surviving rows. (The join path keeps full recursion: there the fan-out dedup is the dominant win.)
-	if (lazy_guard) {
-		const auto cls = expr->GetExpressionClass();
-		if (cls == ExpressionClass::BOUND_CONJUNCTION) {
+	// Call-safety: a hoisted region evaluates EVERY distinct input, so never hoist from a position native
+	// execution evaluates lazily on a row subset -- factorization must never increase LLM calls. CASE, on both
+	// paths: only the first WHEN condition runs on every row; later WHENs run on unmatched rows and THEN/ELSE on
+	// their branch subsets, so a call hoisted from a branch would be asked for rows the branch never sees, and
+	// the branch's other expressions would run there too (CAST(txt AS INTEGER) throws on a row the CASE skips).
+	// Conjunctions, on the scan path only: the adaptive short-circuit evaluates later arms on surviving rows.
+	// (The join path recurses through conjunctions: there the fan-out dedup is the dominant win.)
+	const auto cls = expr->GetExpressionClass();
+	if (lazy_guard && cls == ExpressionClass::BOUND_CONJUNCTION) {
+		return false;
+	}
+	if (cls == ExpressionClass::BOUND_CASE) {
+		auto &case_checks = expr->Cast<BoundCaseExpression>().CaseChecksMutable();
+		if (case_checks.empty()) {
 			return false;
 		}
-		if (cls == ExpressionClass::BOUND_CASE) {
-			auto &case_checks = expr->Cast<BoundCaseExpression>().CaseChecksMutable();
-			if (case_checks.empty()) {
-				return false;
-			}
-			return HoistAICalls(case_checks[0].when_expr, child_slot, limit_k, true, false);
-		}
+		return HoistAICalls(case_checks[0].when_expr, child_slot, limit_k, lazy_guard, false);
 	}
 	bool hoisted = false;
 	ExpressionIterator::EnumerateChildren(*expr, [&](unique_ptr<Expression> &child) {

@@ -10,6 +10,7 @@
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/function/function_binder.hpp"
 #include "optimizer/ai_filter_tree_build.hpp"
+#include "optimizer/semi_join_reducer.hpp"
 #include "duckdb/planner/expression/bound_case_expression.hpp"
 #include "duckdb/planner/expression/bound_comparison_expression.hpp"
 #include "duckdb/planner/expression/bound_conjunction_expression.hpp"
@@ -149,10 +150,16 @@ void AIPredicateRewrite::RewriteFilter(unique_ptr<LogicalOperator> &filter_slot)
 
 	// A predicate is convertible when it is a pure ai_filter boolean tree. Only rewrite when there are
 	// >=2 ai_filter leaves across the convertible predicates -- a lone ai_filter gains nothing.
+	// A predicate whose prompt draws (nextval(), random()) is evaluated once per row as written; the node would
+	// evaluate it again for its features (predicate/input split). It stays a separate filter expression, like a
+	// relational one; the other AI predicates still fold.
+	auto convertible = [](const Expression &expr) {
+		return AIIsPureFilterBoolean(expr) && !AIExpressionHasVolatileNonAI(expr);
+	};
 	idx_t ai_leaf_count = 0;
 	bool any_convertible = false;
 	for (auto &expr : filter.expressions) {
-		if (AIIsPureFilterBoolean(*expr)) {
+		if (convertible(*expr)) {
 			any_convertible = true;
 			ai_leaf_count += AICountFilterLeaves(*expr);
 		}
@@ -165,7 +172,7 @@ void AIPredicateRewrite::RewriteFilter(unique_ptr<LogicalOperator> &filter_slot)
 	vector<unique_ptr<Expression>> leaf_prompts;
 	vector<unique_ptr<AIFilterTreeNode>> subtrees;
 	for (auto &expr : filter.expressions) {
-		if (AIIsPureFilterBoolean(*expr)) {
+		if (convertible(*expr)) {
 			subtrees.push_back(AIBuildFilterTree(*expr, leaf_prompts));
 		}
 	}
@@ -178,7 +185,7 @@ void AIPredicateRewrite::RewriteFilter(unique_ptr<LogicalOperator> &filter_slot)
 	// Non-convertible predicates stay as separate filter expressions.
 	vector<unique_ptr<Expression>> keep_exprs;
 	for (auto &expr : filter.expressions) {
-		if (!AIIsPureFilterBoolean(*expr)) {
+		if (!convertible(*expr)) {
 			keep_exprs.push_back(std::move(expr));
 		}
 	}
@@ -219,8 +226,8 @@ void AIPredicateRewrite::RewriteFilter(unique_ptr<LogicalOperator> &filter_slot)
 
 unique_ptr<Expression> AIPredicateRewrite::TryBuildReorderNode(const Expression &tree_expr) {
 	// A single boolean expression that is an AI tree over >=2 leaves -> one ai_function_with_embed node.
-	if (!AIIsMixedBoolean(tree_expr) || AICountMixedLeaves(tree_expr) < 2) {
-		return nullptr;
+	if (!AIIsMixedBoolean(tree_expr) || AICountMixedLeaves(tree_expr) < 2 || AIExpressionHasVolatileNonAI(tree_expr)) {
+		return nullptr; // (volatile: see TryRewriteFilter)
 	}
 	vector<AIMixedLeaf> leaves;
 	auto tree = AIBuildMixedTree(tree_expr, leaves);

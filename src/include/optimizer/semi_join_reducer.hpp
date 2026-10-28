@@ -27,6 +27,16 @@ namespace duckdb {
 //! relational purpose.
 bool AIStripAIPredicates(unique_ptr<LogicalOperator> &op);
 
+//! Whether `expr` / any expression in the plan under `op` calls a VOLATILE function other than the AI
+//! functions (nextval, random, uuid, ...). A rewrite that re-evaluates such an expression -- a copied
+//! neighbour, an inlined CTE body, a join whose fan-out it rides -- would see different values than the
+//! original, so every such rewrite declines. The AI functions are marked volatile too (the model may answer
+//! differently) but are exactly what the rewrites are about, and their answers are shared through the cache.
+bool AIExpressionHasVolatileNonAI(const Expression &expr);
+bool AIPlanHasVolatileNonAI(const LogicalOperator &op);
+//! The same over one operator's own expression slots only (no descent into its children).
+bool AIOperatorHasVolatileNonAI(const LogicalOperator &op);
+
 class SemiJoinReducer {
 public:
 	explicit SemiJoinReducer(Optimizer &optimizer) : optimizer(optimizer) {

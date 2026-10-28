@@ -1,9 +1,43 @@
 #include "rep/ai_sql_map_chunk.hpp"
 
+#include "ai_dedup.hpp"
 #include "duckdb/common/allocator.hpp"
+#include "duckdb/common/serializer/binary_serializer.hpp"
+#include "duckdb/common/serializer/memory_stream.hpp"
 #include "duckdb/main/client_context.hpp"
 
 namespace duckdb {
+
+string AIValueKeyText(const Value &v) {
+	// a float's text drops its payload (every NaN prints 'nan', while x::BIT tells them apart): the bits are the key
+	if (v.type().id() == LogicalTypeId::DOUBLE) {
+		const double d = v.GetValue<double>();
+		return string(const_char_ptr_cast(&d), sizeof(d));
+	}
+	if (v.type().id() == LogicalTypeId::FLOAT) {
+		const float f = v.GetValue<float>();
+		return string(const_char_ptr_cast(&f), sizeof(f));
+	}
+	if (!v.type().IsNested()) {
+		return v.ToString();
+	}
+	MemoryStream stream;
+	BinarySerializer::Serialize(v, stream);
+	return string(const_char_ptr_cast(stream.GetData()), stream.GetPosition());
+}
+
+void AIAppendKeyPart(string &key, const string &text, bool is_null) {
+	key.push_back(is_null ? '\x00' : '\x01');
+	if (!is_null) {
+		key += std::to_string(text.size());
+		key.push_back(':');
+		key += text;
+	}
+}
+
+void AIAppendKeyPart(string &key, const Value &v) {
+	AIAppendKeyPart(key, v.IsNull() ? string() : AIValueKeyText(v), v.IsNull());
+}
 
 AISQLMapChunk::AISQLMapChunk(ClientContext &context, vector<LogicalType> row_types_p, vector<idx_t> key_cols_p)
     : allocator(Allocator::Get(context)), row_types(std::move(row_types_p)), key_cols(std::move(key_cols_p)),
@@ -78,15 +112,9 @@ void AISQLMapChunk::StageRow(DataChunk &chunk, idx_t row) {
 
 void AISQLMapChunk::Append(DataChunk &chunk) {
 	for (idx_t row = 0; row < chunk.size(); row++) {
-		// Serialize the key columns: NULL-flag byte (keeps NULL distinct from "") + value + 0x1f separator.
-		string key;
+		string key; // the key columns, each NULL-flagged and length-prefixed (AIAppendKeyPart)
 		for (const idx_t kc : key_cols) {
-			const Value v = chunk.data[kc].GetValue(row);
-			key.push_back(v.IsNull() ? '\x00' : '\x01');
-			if (!v.IsNull()) {
-				key += v.ToString();
-			}
-			key.push_back('\x1f');
+			AIAppendKeyPart(key, chunk.data[kc].GetValue(row));
 		}
 		auto it = key_to_rep.find(key);
 		if (it != key_to_rep.end()) {

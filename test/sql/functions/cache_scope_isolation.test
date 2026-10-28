@@ -1,0 +1,52 @@
+# name: test/sql/functions/cache_scope_isolation.test
+# description: The local cache is scoped per query TEXT: the same query re-run after ai_usage_reset() is served from
+# group: [functions]
+
+#              it, a different query that lands in the reused usage slot is not (it asks its own prompts).
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE p AS SELECT i AS id, 'row ' || i AS t FROM range(1, 6) r(i);
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM p WHERE ai_filter('[p=100] scope ' || t);
+----
+5
+
+# the same text again, after a reset: served from the local cache
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM p WHERE ai_filter('[p=100] scope ' || t);
+----
+5
+
+query II
+SELECT sum(llm_calls), sum(cache_hits) FROM ai_usage();
+----
+0	5
+
+# a different text with the same prompts, after a reset: its own calls
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM p WHERE ai_filter('[p=100] scope ' || t) AND id > 0;
+----
+5
+
+query II
+SELECT sum(llm_calls), sum(cache_hits) FROM ai_usage();
+----
+5	0
+
+statement ok
+CALL ai_mock_stop();

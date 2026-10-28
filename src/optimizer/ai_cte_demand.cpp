@@ -1,6 +1,8 @@
 #include "optimizer/ai_cte_demand.hpp"
 
 #include "optimizer/semi_join_reducer.hpp"
+#include "duckdb/planner/operator/logical_join.hpp"
+#include "duckdb/planner/operator/logical_distinct.hpp"
 #include "ai_client.hpp"
 
 #include <cstdio>
@@ -39,6 +41,43 @@ static bool ExpressionHasAIFunction(const Expression &expr) {
 		}
 	});
 	return found;
+}
+
+//! Whether every operator between the body's root and `target` commutes with a key SEMI join placed below
+//! `target`: projections, filters, sorts, a plain DISTINCT, inner joins and cross products do; a window
+//! (row_number), a LIMIT / TOP_N, an aggregate, DISTINCT ON or an outer join depend on the rows the reduction
+//! would remove (`row_number() OVER (...)` over the passers must count every passer, not only the joined ones).
+static bool PathCommutesWithSemi(const LogicalOperator &node, const LogicalFilter &target) {
+	if (&node == &target) {
+		return true;
+	}
+	bool ok;
+	switch (node.type) {
+	case LogicalOperatorType::LOGICAL_PROJECTION:
+	case LogicalOperatorType::LOGICAL_FILTER:
+	case LogicalOperatorType::LOGICAL_ORDER_BY:
+	case LogicalOperatorType::LOGICAL_CROSS_PRODUCT:
+		ok = true;
+		break;
+	case LogicalOperatorType::LOGICAL_DISTINCT:
+		ok = node.Cast<LogicalDistinct>().distinct_type == DistinctType::DISTINCT;
+		break;
+	case LogicalOperatorType::LOGICAL_COMPARISON_JOIN:
+	case LogicalOperatorType::LOGICAL_ANY_JOIN:
+		ok = node.Cast<LogicalJoin>().join_type == JoinType::INNER;
+		break;
+	default:
+		ok = false;
+	}
+	if (!ok) {
+		return false;
+	}
+	for (auto &child : node.children) {
+		if (PathCommutesWithSemi(*child, target)) {
+			return true; // the target is below this child; every ancestor so far commuted
+		}
+	}
+	return false; // the target is not under this node
 }
 
 //! The body's single AI-bearing filter, or null when there is none or more than one.
@@ -203,6 +242,11 @@ static bool ResolveCTERefs(Binder &binder, unique_ptr<LogicalOperator> &op,
 		if (entry == bodies.end()) {
 			return Decline("resolve: no definition found for the referenced CTE");
 		}
+		// the reference passed the key-source guard (a CTE scan has no expressions); its body must too
+		if (AIPlanHasVolatileNonAI(*entry->second)) {
+			return Decline(
+			    "resolve: the referenced CTE's body has a volatile expression: a copy would draw other keys");
+		}
 		unique_ptr<LogicalOperator> body_copy;
 		{
 			LogicalOperatorDeepCopy deep_copy(binder, nullptr);
@@ -249,6 +293,10 @@ static unique_ptr<LogicalOperator> BuildDemandUnion(Binder &binder, const vector
                                                     TableIndex reducing) {
 	vector<unique_ptr<LogicalOperator>> sources;
 	for (auto &demand : demands) {
+		if (AIPlanHasVolatileNonAI(**demand.neighbour)) {
+			Decline("union: the key source has a volatile expression (nextval, random): a copy would draw other keys");
+			return nullptr;
+		}
 		LogicalOperatorDeepCopy deep_copy(binder, nullptr);
 		unique_ptr<LogicalOperator> copy;
 		try {
@@ -354,6 +402,13 @@ static bool ReduceOne(Binder &binder, LogicalMaterializedCTE &cte,
 	}
 	if (cte.children[0]->type != LogicalOperatorType::LOGICAL_PROJECTION) {
 		return Decline("body root is not a projection");
+	}
+	if (!PathCommutesWithSemi(*cte.children[0], *ai_filter)) {
+		return Decline("an operator between the body's root and its AI filter (window, limit, aggregate, outer join) "
+		               "does not commute with the reduction");
+	}
+	if (AIPlanHasVolatileNonAI(*cte.children[0])) {
+		return Decline("the body has a volatile expression: it must run exactly once, unreduced");
 	}
 	vector<ReferenceDemand> demands;
 	if (!GatherDemands(cte.children[1], cte.table_index, demands)) {

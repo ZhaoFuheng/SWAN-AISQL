@@ -168,6 +168,8 @@ std::atomic<bool> &AIDebugKnobsEnabled();
 struct AIQueryUsage {
 	uint64_t query_id = 0;      // stable id assigned when the query is first seen
 	string query_text;          // the SQL text (from ClientContext::GetCurrentQuery)
+	string cache_scope;         // the local cache's per-query scope: a hash of the text (same text = same scope,
+	                            // across ai_usage_reset(); a different text never sees this query's entries)
 	uint64_t llm_calls = 0;     // actual requests sent to a model (chat + embed)
 	uint64_t embed_calls = 0;   // subset of llm_calls that were ai_embed requests (chat = llm_calls - embed_calls)
 	uint64_t embed_tokens = 0;  // subset of input_tokens/total_tokens from ai_embed requests

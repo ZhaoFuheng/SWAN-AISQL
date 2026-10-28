@@ -1,0 +1,36 @@
+# name: test/sql/factor_join/multiplicity_overflow.test
+# description: A tuple's multiplicity past 2^64 saturates instead of wrapping to zero
+# group: [factor_join]
+
+#              (eight aliases of 256 identical rows joined by seven AI predicates: one representative per
+#              side, 256^8 duplicates of the one surviving tuple; the fan-out used to emit nothing)
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE t AS SELECT 'k' AS x FROM range(256);
+
+query I
+SELECT count(*) FROM (SELECT 1 AS one FROM t t1, t t2, t t3, t t4, t t5, t t6, t t7, t t8
+  WHERE ai_filter('[p=100] e1 ' || t1.x || t2.x) AND ai_filter('[p=100] e2 ' || t2.x || t3.x)
+    AND ai_filter('[p=100] e3 ' || t3.x || t4.x) AND ai_filter('[p=100] e4 ' || t4.x || t5.x)
+    AND ai_filter('[p=100] e5 ' || t5.x || t6.x) AND ai_filter('[p=100] e6 ' || t6.x || t7.x)
+    AND ai_filter('[p=100] e7 ' || t7.x || t8.x) LIMIT 1 OFFSET 1);
+----
+1
+
+# a small LIMIT with an OFFSET reads past the first duplicates of the same tuple
+query I
+SELECT count(*) FROM (SELECT 1 AS one FROM t t1, t t2, t t3, t t4, t t5, t t6, t t7, t t8
+  WHERE ai_filter('[p=100] f1 ' || t1.x || t2.x) AND ai_filter('[p=100] f2 ' || t2.x || t3.x)
+    AND ai_filter('[p=100] f3 ' || t3.x || t4.x) AND ai_filter('[p=100] f4 ' || t4.x || t5.x)
+    AND ai_filter('[p=100] f5 ' || t5.x || t6.x) AND ai_filter('[p=100] f6 ' || t6.x || t7.x)
+    AND ai_filter('[p=100] f7 ' || t7.x || t8.x) LIMIT 3 OFFSET 2);
+----
+3
+
+statement ok
+CALL ai_mock_stop();

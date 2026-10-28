@@ -170,14 +170,9 @@ bool AILeafRegionState::AppendSlice(DataChunk &chunk, idx_t begin, idx_t end) {
 	for (idx_t l = 0; l < n; l++) {
 		auto &leaf = leaves[l];
 		for (idx_t row = begin; row < end; row++) {
-			string key;
+			string key; // the leaf's key columns, each NULL-flagged and length-prefixed (AIAppendKeyPart)
 			for (const idx_t kc : leaf.key_cols) {
-				const Value v = chunk.data[kc].GetValue(row);
-				key.push_back(v.IsNull() ? '\x00' : '\x01');
-				if (!v.IsNull()) {
-					key += v.ToString();
-				}
-				key.push_back('\x1f');
+				AIAppendKeyPart(key, chunk.data[kc].GetValue(row));
 			}
 			auto it = leaf.dict.find(key);
 			uint32_t rep;

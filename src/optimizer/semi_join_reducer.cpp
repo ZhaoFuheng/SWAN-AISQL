@@ -1,5 +1,6 @@
 #include "optimizer/semi_join_reducer.hpp"
 #include <functional>
+#include "duckdb/common/string_util.hpp"
 #include "duckdb/planner/expression/bound_constant_expression.hpp"
 #include "duckdb/planner/operator/logical_filter.hpp"
 #include "duckdb/planner/operator/logical_projection.hpp"
@@ -18,6 +19,9 @@
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "duckdb/planner/expression_iterator.hpp"
+#include "duckdb/planner/logical_operator_visitor.hpp"
+#include "duckdb/planner/operator/logical_sample.hpp"
+#include "duckdb/function/lambda_functions.hpp"
 #include "duckdb/planner/logical_operator_deep_copy.hpp"
 #include "duckdb/common/enums/join_type.hpp"
 
@@ -297,6 +301,65 @@ bool AIStripAIPredicates(unique_ptr<LogicalOperator> &op) {
 	return StripAIPredicatesBelow(op, true);
 }
 
+bool AIExpressionHasVolatileNonAI(const Expression &expr) {
+	if (expr.GetExpressionClass() == ExpressionClass::BOUND_FUNCTION) {
+		auto &fn = expr.Cast<BoundFunctionExpression>();
+		const string &name = fn.Function().GetName().GetIdentifierName();
+		const bool is_ai = StringUtil::StartsWith(name, "ai_") || name == "speculative_ai_function_with_embed";
+		const bool takes_lambda = fn.Function().HasBindLambdaCallback();
+		if (!is_ai && !takes_lambda && fn.Function().GetStability() == FunctionStability::VOLATILE) {
+			return true;
+		}
+		// A lambda function takes its body's volatility (list_transform(l, x -> x + random()) binds VOLATILE), and
+		// the body is not among the expression's children. An AI call inside it (x -> ai_complete(x)) is as exempt
+		// as one outside, so the body gets this same walk instead of the function's stability.
+		if (takes_lambda && fn.BindInfo()) {
+			auto body = fn.BindInfo()->Cast<LambdaFunctionData>().GetLambdaExpression();
+			if (body && AIExpressionHasVolatileNonAI(*body)) {
+				return true;
+			}
+		}
+	}
+	bool found = false;
+	ExpressionIterator::EnumerateChildren(expr, [&](const Expression &child) {
+		if (!found && AIExpressionHasVolatileNonAI(child)) {
+			found = true;
+		}
+	});
+	return found;
+}
+
+bool AIOperatorHasVolatileNonAI(const LogicalOperator &op) {
+	// an unseeded SAMPLE draws its rows: a copy draws other rows (a seeded one repeats them)
+	if (op.type == LogicalOperatorType::LOGICAL_SAMPLE) {
+		auto &options = op.Cast<LogicalSample>().sample_options;
+		if (!options || !options->seed.IsValid()) {
+			return true;
+		}
+	}
+	// every slot an operator keeps an expression in: `expressions`, an aggregate's groups, a sort's or
+	// top-N's orders, a join's conditions (comparison, ASOF, delim, any-join), a limit's bounds
+	bool found = false;
+	LogicalOperatorVisitor::EnumerateExpressions(op, [&](const unique_ptr<Expression> *e) {
+		if (!found && *e && AIExpressionHasVolatileNonAI(**e)) {
+			found = true;
+		}
+	});
+	return found;
+}
+
+bool AIPlanHasVolatileNonAI(const LogicalOperator &op) {
+	if (AIOperatorHasVolatileNonAI(op)) {
+		return true;
+	}
+	for (auto &child : op.children) {
+		if (AIPlanHasVolatileNonAI(*child)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<LogicalOperator>>> &leaves,
                                      const vector<Edge> &edges) {
 	if (leaves.size() < 2 || edges.empty()) {
@@ -358,6 +421,9 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 	auto apply_reducer = [&](idx_t i, idx_t j, const vector<Edge> &redu_edges) -> bool {
 		LogicalOperatorDeepCopy deep_copy(optimizer.binder, nullptr);
 		unique_ptr<LogicalOperator> reducer_side;
+		if (AIPlanHasVolatileNonAI(*leaves[j].get())) {
+			return false; // a copy would draw its keys afresh (nextval, random): they would not match the real side
+		}
 		try {
 			reducer_side = deep_copy.DeepCopy(leaves[j].get()); // copy leaf j (possibly already reduced)
 		} catch (...) {
@@ -494,6 +560,12 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 		for (unique_ptr<LogicalOperator> *cur = &leaves[i].get(); *cur && (*cur)->children.size() == 1;) {
 			auto &node = **cur;
 			if (!commutes_with_semi(node)) {
+				break;
+			}
+			// an operator that DRAWS (nextval() AS v, WHERE random() < p, ORDER BY random()) evaluates once per
+			// row it sees: a SEMI underneath changes which rows draw, so the values the join keeps change
+			// (DuckDB's own pushdown stops at a volatile projection for the same reason). The SEMI stays above.
+			if (AIOperatorHasVolatileNonAI(node)) {
 				break;
 			}
 			vector<unique_ptr<Expression>> next;

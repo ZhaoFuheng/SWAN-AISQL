@@ -1,0 +1,139 @@
+# name: test/sql/functions/dedup_key_collision.test
+# description: Every deduplication key (region map, leaf dictionary, batch row key, factor-graph member) encodes its
+# group: [functions]
+
+#              components length-prefixed, so a value that contains the former separator bytes (0x1f 0x01) cannot
+#              make two different tuples one representative. Rows 1 and 2 below have different prompts but used to
+#              share one key, one call and one verdict.
+
+require aisql
+
+require parquet
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE k AS SELECT * FROM (VALUES (1, 'X' || chr(31) || chr(1) || 'Y', 'Z'), (2, 'X', 'Y' || chr(31) || chr(1) || 'Z')) v(id, a, b);
+
+# scan region (map keyed on the two input columns): two distinct prompts, two calls
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM k WHERE ai_filter('[p=100] ' || a || '-' || b);
+----
+true
+
+query I
+SELECT sum(llm_calls) FROM ai_usage();
+----
+2
+
+# the batch path, same shape
+statement ok
+SET ai_factorize = 'off';
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM k WHERE ai_filter('[p=100] batch ' || a || '-' || b);
+----
+2
+
+query I
+SELECT sum(llm_calls) FROM ai_usage();
+----
+2
+
+statement ok
+SET ai_factorize = 'all';
+
+# leaf region above a join (a two-column leaf key per leaf): two distinct prompts per leaf
+statement ok
+CREATE TABLE j AS SELECT 1 AS id UNION ALL SELECT 2;
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM k JOIN j USING (id) WHERE ai_filter('[p=100] leaf ' || a || '-' || b) AND ai_filter('[p=100] other ' || b || '-' || a);
+----
+2
+
+query I
+SELECT sum(llm_calls) FROM ai_usage();
+----
+4
+
+# factor graph: members keyed on their columns; a cross product with a pair predicate
+statement ok
+CREATE TABLE ga AS SELECT * FROM (VALUES (1, 'X' || chr(31) || chr(1) || 'Y', 'Z'), (2, 'X', 'Y' || chr(31) || chr(1) || 'Z')) v(id, a, b);
+
+statement ok
+CREATE TABLE gb AS SELECT 'w' AS w;
+
+statement ok
+SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM ga, gb WHERE ai_filter('[p=100] pair ' || ga.a || '-' || ga.b || gb.w);
+----
+2
+
+query I
+SELECT sum(llm_calls) FROM ai_usage();
+----
+2
+
+# A nested value's text is not its identity: a UNION prints its member alone (a := 1 and b := 1 both '1'), so a
+# prompt branching on the tag shared one verdict for both. Three rows of each tag; the tag decides.
+statement ok
+CREATE TABLE un AS SELECT i AS id, CASE WHEN i % 2 = 0 THEN union_value(a := 1)::UNION(a INT, b INT) ELSE union_value(b := 1)::UNION(a INT, b INT) END AS v FROM range(6) r(i);
+
+query I
+SELECT count(*) FROM un WHERE ai_filter(CASE union_tag(v) WHEN 'a' THEN '[p=100] yes ' ELSE '[p=0] no ' END || v::VARCHAR);
+----
+3
+
+query I
+SELECT count(*) FILTER (WHERE ok) FROM (SELECT ai_filter(CASE union_tag(v) WHEN 'a' THEN '[p=100] yes2 ' ELSE '[p=0] no2 ' END || v::VARCHAR) AS ok FROM un);
+----
+3
+
+# the same union inside a struct and a list
+query I
+SELECT count(*) FROM (SELECT {'x': v} AS s FROM un) WHERE ai_filter(CASE union_tag(s.x) WHEN 'a' THEN '[p=100] yes3 ' ELSE '[p=0] no3 ' END || s.x::VARCHAR);
+----
+3
+
+query I
+SELECT count(*) FROM (SELECT [v] AS l FROM un) WHERE ai_filter(CASE union_tag(l[1]) WHEN 'a' THEN '[p=100] yes4 ' ELSE '[p=0] no4 ' END || l[1]::VARCHAR);
+----
+3
+
+# the batch path, same union
+statement ok
+SET ai_factorize = 'off';
+
+query I
+SELECT count(*) FROM un WHERE ai_filter(CASE union_tag(v) WHEN 'a' THEN '[p=100] yes5 ' ELSE '[p=0] no5 ' END || v::VARCHAR);
+----
+3
+
+statement ok
+SET ai_factorize = 'all';
+
+# A float's text drops its payload: two NaNs (bits ...001 and ...002, three rows each) both print 'nan', and
+# x::BIT tells them apart. The prompt branches on the bits; the key keeps them.
+statement ok
+CREATE TABLE nanp AS SELECT id, x FROM read_parquet('{WORKING_DIRECTORY}/test/sql/functions/nan_payloads.parquet');
+
+query I
+SELECT count(*) FROM nanp WHERE ai_filter(CASE WHEN x::BIT = '0111111111111000000000000000000000000000000000000000000000000001'::BIT THEN '[p=100] one ' ELSE '[p=0] two ' END || x::VARCHAR);
+----
+3
+
+statement ok
+CALL ai_mock_stop();

@@ -1,4 +1,5 @@
 #include "optimizer/ai_filter_tree_build.hpp"
+#include "optimizer/semi_join_reducer.hpp"
 
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/catalog_entry/scalar_function_catalog_entry.hpp"
@@ -697,6 +698,13 @@ bool AIBuildMixedLeafArgs(ClientContext &context, const vector<AIMixedLeaf> &lea
 	vector<string> metas(m);
 	for (idx_t j = 0; j < m; j++) {
 		auto &leaf = leaves[j];
+		// A prompt that draws (nextval(), random()) is evaluated once per row as written; a node evaluates
+		// it again for its features (predicate/input split), so no node is built over it -- whichever pass
+		// asks (mixed/pure filter fold, LIMIT, speculative pull-up).
+		if (AIExpressionHasVolatileNonAI(*leaf.ai_call) ||
+		    (leaf.wrapper && AIExpressionHasVolatileNonAI(*leaf.wrapper))) {
+			return false;
+		}
 		auto &children = leaf.ai_call->Cast<BoundFunctionExpression>().GetChildren();
 		// Wrapped leaf: the value slot carries the serialized wrapper (base64: no ';', ':' or '@', so the
 		// token still splits like the others); the feature text names the wrapper over `result`.

@@ -6,6 +6,8 @@
 #include "ai_prompt_cost.hpp"
 #include "ai_settings.hpp"
 
+#include "duckdb/common/operator/add.hpp"
+#include "duckdb/common/operator/multiply.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/common/error_data.hpp"
 #include "duckdb/execution/expression_executor.hpp"
@@ -167,15 +169,33 @@ unique_ptr<LocalSinkState> PhysicalAIFactorGraph::GetLocalSinkState(ExecutionCon
 	return make_uniq<FactorGraphLocalSinkState>(it->second);
 }
 
+// A tuple's multiplicity is the product of its members' fan-outs, and a term's confirmed rows the sum of those:
+// both can pass 2^63 (eight aliases of 256 identical rows: 256^8), where wrapping would count nothing. Saturate.
+static idx_t SaturatingMul(idx_t a, idx_t b) {
+	idx_t result;
+	return TryMultiplyOperator::Operation<idx_t, idx_t, idx_t>(a, b, result) ? result : NumericLimits<idx_t>::Maximum();
+}
+
+static int64_t SaturatingAdd(int64_t a, int64_t b) {
+	int64_t result;
+	return TryAddOperator::Operation<int64_t, int64_t, int64_t>(a, b, result) ? result
+	                                                                          : NumericLimits<int64_t>::Maximum();
+}
+
+//! The multiplicity of the tuple `assignment` (one representative per side), as a signed count for LIMIT arithmetic.
+static int64_t TupleMultiplicity(const FactorGraphSinkState &sink, const vector<idx_t> &assignment) {
+	idx_t product = 1;
+	for (idx_t s = 0; s < assignment.size(); s++) {
+		product = SaturatingMul(product, sink.sides[s].counts[assignment[s]]);
+	}
+	return product > static_cast<idx_t>(NumericLimits<int64_t>::Maximum()) ? NumericLimits<int64_t>::Maximum()
+	                                                                       : static_cast<int64_t>(product);
+}
+
 static string FactorRowKey(DataChunk &chunk, idx_t row) {
-	string key;
+	string key; // every column, NULL-flagged and length-prefixed (AIAppendKeyPart): no value makes two members collide
 	for (idx_t col = 0; col < chunk.ColumnCount(); col++) {
-		const Value v = chunk.data[col].GetValue(row);
-		key.push_back(v.IsNull() ? '\x00' : '\x01');
-		if (!v.IsNull()) {
-			key += v.ToString();
-		}
-		key.push_back('\x1f');
+		AIAppendKeyPart(key, chunk.data[col].GetValue(row));
 	}
 	return key;
 }
@@ -714,17 +734,113 @@ struct GraphUnitBaker {
 		}
 		key.clear();
 		for (idx_t l = 0; l < prompts.size(); l++) {
-			key += nulls[l] ? '\x00' : '\x01'; // a NULL leaf is not an empty prompt
-			if (l < prefixes.size()) {
-				key += prefixes[l];
-			}
-			key += prompts[l];
-			key += '\x1f';
+			// prefix and prompt each NULL-flagged and length-prefixed (AIAppendKeyPart): a NULL leaf is not an
+			// empty prompt, and no prefix/prompt split or separator byte can make two units collide
+			AIAppendKeyPart(key, l < prefixes.size() ? prefixes[l] : string(), nulls[l] != 0);
+			AIAppendKeyPart(key, prompts[l], nulls[l] != 0);
 		}
 		key += is_unary ? "u" : "e";
 		key += is_unary ? side_sig[domain] : edge_sig[domain];
 	}
 };
+
+// The root of the forest component holding `side` (follow parent edges up).
+static idx_t ComponentRoot(const PhysicalAIFactorGraph::TermPlan &plan, const vector<idx_t> &parent_edge_of_side,
+                           idx_t side) {
+	while (parent_edge_of_side[side] != DConstants::INVALID_INDEX) {
+		auto &edge = plan.edges[parent_edge_of_side[side]];
+		side = edge.s == side ? edge.t : edge.s;
+	}
+	return side;
+}
+
+// Does the component rooted at `root` hold one tuple (a live, unary-true representative per side) whose every
+// edge is confirmed TRUE? The same anchored walk the existential satisfaction check runs, restricted to that
+// component's sides and without an anchor.
+static bool ComponentHasConfirmedTuple(const FactorGraphSinkState &sink, const PhysicalAIFactorGraph::TermPlan &plan,
+                                       const vector<idx_t> &parent_edge_of_side, idx_t root,
+                                       const vector<vector<char>> &live, const vector<vector<char>> &uval,
+                                       const std::function<bool(idx_t, idx_t, idx_t)> &pair_true) {
+	const idx_t k1 = live.size();
+	vector<idx_t> sides;
+	for (idx_t s = 0; s < k1; s++) {
+		if (ComponentRoot(plan, parent_edge_of_side, s) == root) {
+			sides.push_back(s);
+		}
+	}
+	vector<idx_t> assignment(k1, DConstants::INVALID_INDEX);
+	std::function<bool(idx_t)> walk = [&](idx_t pos) {
+		if (pos >= sides.size()) {
+			return true;
+		}
+		const idx_t side = sides[pos];
+		for (idx_t r = 0; r < sink.sides[side].reps.size(); r++) {
+			if (!live[side][r] || (!plan.unary_leaves[side].empty() && uval[side][r] != 1)) {
+				continue;
+			}
+			bool ok = true;
+			for (idx_t e = 0; e < plan.edges.size() && ok; e++) {
+				auto &ed = plan.edges[e];
+				if (ed.s != side && ed.t != side) {
+					continue;
+				}
+				const idx_t other = ed.s == side ? ed.t : ed.s;
+				if (assignment[other] == DConstants::INVALID_INDEX) {
+					continue; // checked when the other endpoint is assigned
+				}
+				ok = ed.s == side ? pair_true(e, r, assignment[other]) : pair_true(e, assignment[other], r);
+			}
+			if (!ok) {
+				continue;
+			}
+			assignment[side] = r;
+			if (walk(pos + 1)) {
+				return true;
+			}
+			assignment[side] = DConstants::INVALID_INDEX;
+		}
+		return false;
+	};
+	return walk(0);
+}
+
+// EXISTENTIAL usefulness seed, shared by both schedulers: a member of the existential side is useful while it
+// is live, unsatisfied and (with unary leaves) confirmed. The edge graph is a forest, not always a tree:
+// EXISTS (... FROM tb, tc, td WHERE f(ta.x, tb.y) AND g(tc.z, td.w)) has a second component no parent edge
+// reaches from the existential side. Its pairs would never be asked and no member could ever be satisfied.
+// Such a component is independent of every member: ONE confirmed tuple in it satisfies the existential for
+// all of them, so its root is useful in full while an unsatisfied member remains AND the component holds no
+// confirmed tuple yet; the caller then lets children inherit across their parent edge in level order.
+static void SeedExistentialUsefulness(const FactorGraphSinkState &sink, const PhysicalAIFactorGraph::TermPlan &plan,
+                                      idx_t es, const vector<idx_t> &parent_edge_of_side,
+                                      const vector<vector<char>> &live, const vector<vector<char>> &uval,
+                                      const vector<char> &satisfied,
+                                      const std::function<bool(idx_t, idx_t, idx_t)> &pair_true,
+                                      vector<vector<char>> &useful) {
+	const idx_t k1 = useful.size();
+	for (idx_t s = 0; s < k1; s++) {
+		useful[s].assign(sink.sides[s].reps.size(), 0);
+	}
+	for (idx_t m = 0; m < satisfied.size(); m++) {
+		useful[es][m] =
+		    static_cast<char>(live[es][m] && !satisfied[m] && (plan.unary_leaves[es].empty() || uval[es][m] == 1));
+	}
+	bool any_open = false;
+	for (idx_t m = 0; m < satisfied.size() && !any_open; m++) {
+		any_open = useful[es][m] != 0;
+	}
+	const idx_t es_root = ComponentRoot(plan, parent_edge_of_side, es);
+	for (idx_t s = 0; s < k1; s++) {
+		if (s == es_root || parent_edge_of_side[s] != DConstants::INVALID_INDEX) {
+			continue;
+		}
+		const bool open =
+		    any_open && !ComponentHasConfirmedTuple(sink, plan, parent_edge_of_side, s, live, uval, pair_true);
+		for (idx_t m = 0; m < sink.sides[s].reps.size(); m++) {
+			useful[s][m] = static_cast<char>(open && live[s][m] && (plan.unary_leaves[s].empty() || uval[s][m] == 1));
+		}
+	}
+}
 
 static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGraph &op,
                                       const PhysicalAIFactorGraph::TermPlan &plan, int64_t term_limit,
@@ -919,15 +1035,9 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 				satisfied[m] = 1;
 			}
 		}
-		// usefulness: root = live unsatisfied confirmed members; downstream = confirmed-true
-		// pair from a useful parent member
-		for (idx_t s = 0; s < k1; s++) {
-			useful[s].assign(sink.sides[s].reps.size(), 0);
-		}
-		for (idx_t m = 0; m < satisfied.size(); m++) {
-			useful[es][m] =
-			    static_cast<char>(live[es][m] && !satisfied[m] && (plan.unary_leaves[es].empty() || uval[es][m] == 1));
-		}
+		SeedExistentialUsefulness(
+		    sink, plan, es, parent_edge_of_side, live, uval, satisfied,
+		    [&](idx_t e, idx_t i, idx_t j) { return pval[e][pkey(e, i, j)] == 1; }, useful);
 		// sides in increasing level order inherit usefulness across their parent edge
 		vector<idx_t> order(k1);
 		for (idx_t s = 0; s < k1; s++) {
@@ -1108,11 +1218,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 		vector<idx_t> assignment(k1);
 		std::function<bool(idx_t)> walk = [&](idx_t side) {
 			if (side == k1) {
-				int64_t product = 1;
-				for (idx_t s = 0; s < k1; s++) {
-					product *= NumericCast<int64_t>(sink.sides[s].counts[assignment[s]]);
-				}
-				confirmed += product;
+				confirmed = SaturatingAdd(confirmed, TupleMultiplicity(sink, assignment));
 				return confirmed >= want;
 			}
 			for (idx_t r = 0; r < sink.sides[side].reps.size(); r++) {
@@ -1744,13 +1850,7 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 				satisfied[m] = 1;
 			}
 		}
-		for (idx_t s = 0; s < k1; s++) {
-			useful[s].assign(sink.sides[s].reps.size(), 0);
-		}
-		for (idx_t m = 0; m < satisfied.size(); m++) {
-			useful[es][m] =
-			    static_cast<char>(live[es][m] && !satisfied[m] && (plan.unary_leaves[es].empty() || uval[es][m] == 1));
-		}
+		SeedExistentialUsefulness(sink, plan, es, parent_edge_of_side, live, uval, satisfied, has_pair, useful);
 		vector<idx_t> order(k1);
 		for (idx_t s = 0; s < k1; s++) {
 			order[s] = s;
@@ -1831,11 +1931,7 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 		vector<idx_t> assignment(k1);
 		std::function<bool(idx_t)> walk = [&](idx_t side) {
 			if (side == k1) {
-				int64_t product = 1;
-				for (idx_t s = 0; s < k1; s++) {
-					product *= NumericCast<int64_t>(sink.sides[s].counts[assignment[s]]);
-				}
-				confirmed += product;
+				confirmed = SaturatingAdd(confirmed, TupleMultiplicity(sink, assignment));
 				return confirmed >= want;
 			}
 			for (idx_t r = 0; r < sink.sides[side].reps.size(); r++) {
@@ -2481,7 +2577,7 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 		idx_t n = 1;
 		for (idx_t s = 0; s < k; s++) {
 			if (std::find(skip.begin(), skip.end(), s) == skip.end()) {
-				n *= sink.sides[s].reps.size();
+				n = SaturatingMul(n, sink.sides[s].reps.size());
 			}
 		}
 		return n;
@@ -2489,11 +2585,7 @@ void RunFactorGraphEvaluation(ClientContext &context, const PhysicalAIFactorGrap
 	auto union_rows = [&]() {
 		int64_t rows = 0;
 		for (auto &t : union_set) {
-			int64_t product = 1;
-			for (idx_t s = 0; s < k; s++) {
-				product *= NumericCast<int64_t>(sink.sides[s].counts[t[s]]);
-			}
-			rows += product;
+			rows = SaturatingAdd(rows, TupleMultiplicity(sink, t));
 		}
 		return rows;
 	};
@@ -2604,10 +2696,8 @@ SourceResultType PhysicalAIFactorGraph::GetDataInternal(ExecutionContext &contex
 	idx_t out = 0;
 	while (state.cur_assignment < state.assignments.size() && out < STANDARD_VECTOR_SIZE) {
 		auto &assignment = state.assignments[state.cur_assignment];
-		idx_t dup_total = 1;
-		for (idx_t s = 0; s < k; s++) {
-			dup_total *= sink.sides[s].counts[assignment[s]];
-		}
+		// saturated (TupleMultiplicity): a wrap to 0 would emit nothing where a LIMIT expects rows
+		const idx_t dup_total = static_cast<idx_t>(TupleMultiplicity(sink, assignment));
 		if (state.cur_dup >= dup_total) {
 			state.cur_assignment++;
 			state.cur_dup = 0;

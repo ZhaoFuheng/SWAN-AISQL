@@ -1,6 +1,7 @@
 #include "ai_client.hpp"
 
 #include "ai_prompt_cost.hpp"
+#include "duckdb/common/crypto/md5.hpp"
 #include "duckdb/common/types/blob.hpp"
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/main/client_context.hpp"
@@ -68,11 +69,14 @@ static idx_t TagQueryIndex(idx_t index) {
 }
 // Caller must hold UsageMutex(). The record a tagged index names, or the discard record when its
 // generation has been reset away.
+static AIQueryUsage &DiscardRecord() {
+	static AIQueryUsage value;
+	return value;
+}
 static AIQueryUsage &UsageRecord(idx_t tagged) {
-	static AIQueryUsage discard;
 	const idx_t index = tagged & 0xFFFFFFFFULL;
 	if ((tagged >> 32) != UsageGeneration() || index >= Queries().size()) {
-		return discard;
+		return DiscardRecord();
 	}
 	return Queries()[index];
 }
@@ -87,6 +91,9 @@ static idx_t GetOrCreateQueryIndex(const string &query_text) {
 	AIQueryUsage record;
 	record.query_id = NextQueryId()++;
 	record.query_text = query_text;
+	MD5Context digest; // 128-bit: two query texts sharing a scope is not a practical event (a 64-bit hash's was)
+	digest.Add(query_text);
+	record.cache_scope = digest.FinishHex();
 	Queries().push_back(std::move(record));
 	QueryIndex().emplace(query_text, index);
 	return TagQueryIndex(index);
@@ -1420,8 +1427,16 @@ static string CacheScopePrefix(const AIConfig &config, idx_t query_index) {
 	if (config.local_cache_cross_query) {
 		return string("g\x1f");
 	}
-	// the record slot, not the generation tag: a query re-run after ai_usage_reset() keeps its cache scope
-	return std::to_string(query_index & 0xFFFFFFFFULL) + "\x1f";
+	// the query TEXT's hash (stored on its usage record): the same query re-run after ai_usage_reset() keeps
+	// its scope, a different query that lands in a reused record slot does not inherit it
+	std::lock_guard<std::mutex> lock(UsageMutex());
+	auto &record = UsageRecord(query_index);
+	if (&record == &DiscardRecord()) {
+		// a request that outlived its query (reset away): a scope of its own, named by its tagged index, so two
+		// stragglers from different queries never serve each other and no live query inherits theirs
+		return "discard\x1f" + std::to_string(query_index) + "\x1f";
+	}
+	return record.cache_scope + "\x1f";
 }
 
 static string RequestSignature(const AIConfig &config, const AIRequest &request) {

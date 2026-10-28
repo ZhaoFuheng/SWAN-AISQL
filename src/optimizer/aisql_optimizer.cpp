@@ -97,8 +97,9 @@ static bool MarkAICTEsInline(LogicalOperator &op) {
 	bool changed = false;
 	if (op.type == LogicalOperatorType::LOGICAL_MATERIALIZED_CTE) {
 		auto &cte = op.Cast<LogicalMaterializedCTE>();
+		// A body with nextval()/random() must run once: inlining would give each reference its own draw.
 		if (cte.materialize != CTEMaterialize::CTE_MATERIALIZE_NEVER && !op.children.empty() &&
-		    PlanHasAIFunction(*op.children[0])) {
+		    PlanHasAIFunction(*op.children[0]) && !AIPlanHasVolatileNonAI(*op.children[0])) {
 			cte.materialize = CTEMaterialize::CTE_MATERIALIZE_NEVER;
 			changed = true;
 		}
