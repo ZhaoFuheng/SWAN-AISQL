@@ -110,6 +110,14 @@ struct AIConfig {
 	bool tls_verify = true;
 	//! Debug log channels (csv: region, spec, yann, leaftexts, mock).
 	string debug_log;
+	//! Where a leaf's P(true) for ordering comes from (SET ai_leaf_prior), in the leaf region and the per-row batch:
+	//!   mlp         the selectivity model's prediction per input
+	//!   calibrated  the model's prediction with its logit shifted toward the leaf's pass rate observed in this
+	//!               query, by landed / (landed + 20): keeps the model's ranking within a leaf, fixes its level
+	bool leaf_prior_calibrated = true;
+	//! Leaf region: once warm (and on flush), keep at most this many x ai_concurrency calls outstanding and
+	//! re-decide a pending rep's rows when it is submitted (SET ai_leaf_lookahead; 0 = submit all at once).
+	idx_t leaf_lookahead = 2;
 	//! Local cache (layer 1): process-global response caches (chat + embed) serving repeats
 	//! within and across queries in this process. In-batch single-flight dedup is unaffected.
 	bool local_cache = true;

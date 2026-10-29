@@ -1,0 +1,146 @@
+# name: test/sql/region/leaf_ordering.test
+# description: SET ai_leaf_prior and SET ai_leaf_lookahead change only which leaf a row asks next and when, never
+# group: [region]
+
+#              the answer. calibrated orders by the model with its level set by the leaf's own pass rate in the
+#              query; lookahead keeps at most k x ai_concurrency calls outstanding and re-decides a row just
+#              before its call is sent. Both are on by default; mlp / 0 is the order before them.
+#              WHY THE CALL-COUNT ASSERTS ARE SAFE HERE: under mlp / 0 the count of a short-circuiting shape
+#              varies with timing and platform (2,895-2,975 calls on macOS, 2,797-2,813 on Linux, over repeated
+#              runs of the shape below), so each setting is bounded by its OWN count, which is stable: calibrated
+#              alone settles on the selective leaf after the first verdicts (2,656 in every run on both); lookahead
+#              alone, with the mock's 5 ms per call building a queue behind the pool, re-decides the queued rows
+#              as the model learns (2,703-2,706 on both). Each bound sits below every mlp / 0 count measured, so
+#              it fails when its setting is made a no-op; each count must also stay below this run's mlp / 0.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET threads=1;
+
+statement ok
+CREATE TABLE t AS SELECT i AS k FROM range(2000) r(i);
+
+statement error
+SET ai_leaf_prior = 'marginal';
+----
+ai_leaf_prior must be mlp or calibrated
+
+# the order before these settings: the reference answer and the reference count
+statement ok
+SET ai_leaf_prior = 'mlp';
+
+statement ok
+SET ai_leaf_lookahead = 0;
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE ref AS SELECT k FROM t
+WHERE ai_filter('[sleep=5] [p=70] is it a? '||k::VARCHAR) AND ai_filter('[sleep=5] [p=30] is it b? '||k::VARCHAR);
+
+statement ok
+CREATE TABLE calls_mlp AS SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT AS n FROM ai_usage();
+
+# calibrated alone: the selective leaf is asked first once its pass rate shows
+statement ok
+SET ai_leaf_prior = 'calibrated';
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE res_calibrated AS SELECT k FROM t
+WHERE ai_filter('[sleep=5] [p=70] is it a? '||k::VARCHAR) AND ai_filter('[sleep=5] [p=30] is it b? '||k::VARCHAR);
+
+query II
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT < 2700, (sum(llm_calls)-sum(embed_calls))::BIGINT < (SELECT n FROM calls_mlp) FROM ai_usage();
+----
+true	true
+
+query I
+SELECT count(*) FROM ((SELECT k FROM res_calibrated EXCEPT ALL SELECT k FROM ref)
+                      UNION ALL (SELECT k FROM ref EXCEPT ALL SELECT k FROM res_calibrated));
+----
+0
+
+# lookahead alone: rows queued behind the pool are re-decided with the estimates of the moment they are sent
+statement ok
+SET ai_leaf_prior = 'mlp';
+
+statement ok
+SET ai_leaf_lookahead = 2;
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE res_lookahead AS SELECT k FROM t
+WHERE ai_filter('[sleep=5] [p=70] is it a? '||k::VARCHAR) AND ai_filter('[sleep=5] [p=30] is it b? '||k::VARCHAR);
+
+query II
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT < 2740, (sum(llm_calls)-sum(embed_calls))::BIGINT < (SELECT n FROM calls_mlp) FROM ai_usage();
+----
+true	true
+
+query I
+SELECT count(*) FROM ((SELECT k FROM res_lookahead EXCEPT ALL SELECT k FROM ref)
+                      UNION ALL (SELECT k FROM ref EXCEPT ALL SELECT k FROM res_lookahead));
+----
+0
+
+# the defaults: calibrated, lookahead 2, with the same answer
+statement ok
+RESET ai_leaf_prior;
+
+statement ok
+RESET ai_leaf_lookahead;
+
+query II
+SELECT current_setting('ai_leaf_prior'), current_setting('ai_leaf_lookahead');
+----
+calibrated	2
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM (
+  (SELECT k FROM t
+   WHERE ai_filter('[sleep=5] [p=70] is it a? '||k::VARCHAR) AND ai_filter('[sleep=5] [p=30] is it b? '||k::VARCHAR)
+   EXCEPT ALL SELECT k FROM ref)
+  UNION ALL
+  (SELECT k FROM ref EXCEPT ALL
+   SELECT k FROM t
+   WHERE ai_filter('[sleep=5] [p=70] is it a? '||k::VARCHAR) AND ai_filter('[sleep=5] [p=30] is it b? '||k::VARCHAR)));
+----
+0
+
+# the per-row batch (no region) is ordered by the calibrated prior as well, with the same answer
+statement ok
+RESET ai_leaf_prior;
+
+statement ok
+RESET ai_leaf_lookahead;
+
+statement ok
+SET ai_factorize = 'off';
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM (
+  (SELECT k FROM t
+   WHERE ai_filter('[sleep=5] [p=70] is it a? '||k::VARCHAR) AND ai_filter('[sleep=5] [p=30] is it b? '||k::VARCHAR)
+   EXCEPT ALL SELECT k FROM ref)
+  UNION ALL
+  (SELECT k FROM ref EXCEPT ALL
+   SELECT k FROM t
+   WHERE ai_filter('[sleep=5] [p=70] is it a? '||k::VARCHAR) AND ai_filter('[sleep=5] [p=30] is it b? '||k::VARCHAR)));
+----
+0

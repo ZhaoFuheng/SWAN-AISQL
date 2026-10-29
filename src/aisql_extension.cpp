@@ -190,6 +190,20 @@ static const vector<AIConfigSetting> &AIConfigSettings() {
 		     LogicalType::VARCHAR, EnvOr("AI_LOCAL_CACHE_SCOPE", Value("query")), [](AIConfig &c, const Value &v) {
 			     c.local_cache_cross_query = StringValue::Get(v) == "cross_query";
 		     }});
+		t.push_back({"ai_leaf_prior", "Leaf ordering P(true): mlp, or calibrated to the leaf's observed pass rate",
+		             LogicalType::VARCHAR, Value("calibrated"), [](AIConfig &c, const Value &v) {
+			             const string s = StringValue::Get(v);
+			             if (s != "mlp" && s != "calibrated") {
+				             throw InvalidInputException("ai_leaf_prior must be mlp or calibrated");
+			             }
+			             c.leaf_prior_calibrated = s == "calibrated";
+		             }});
+		t.push_back(
+		    {"ai_leaf_lookahead",
+		     "Leaf region: calls outstanding at most k x ai_concurrency, rows re-decided at submission (0 = off)",
+		     LogicalType::UBIGINT, Value::UBIGINT(2), [](AIConfig &c, const Value &v) {
+			     c.leaf_lookahead = v.GetValue<uint64_t>();
+		     }});
 		t.push_back({"ai_debug_log", "Debug logging channels (csv: region,spec,yann)", LogicalType::VARCHAR, Value(""),
 		             str(&AIConfig::debug_log)});
 		t.push_back({"ai_debug_prompt_variant", "ai_filter prompt variant: strict/soft/plain", LogicalType::VARCHAR,
@@ -229,7 +243,7 @@ AIConfig AIConfigForContext(ClientContext &context) {
 
 // DuckDB takes a plain function pointer as the SET callback (no captures), so each table entry gets its own
 // instantiation that finds its row by index.
-constexpr size_t kAIConfigSettingCount = 30;
+constexpr size_t kAIConfigSettingCount = 32;
 
 template <size_t I>
 static void AIConfigSettingCallback(ClientContext &, SetScope scope, Value &v) {

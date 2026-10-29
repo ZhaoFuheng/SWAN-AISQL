@@ -60,6 +60,8 @@ local cache, TypeSafe routing, logging) apply to the whole process however they 
 | `ai_factor_pair_limit` | integer | `100000000` | largest estimated pair domain (left rows x right rows of one AI join edge) the factor graph takes under the dense scheduler, or for a cyclic edge graph (evaluated by the staged schedule, which lists each edge's live pairs); above it the join runs as a region over the cross product, which streams the pairs. The sparse scheduler takes any forest of edges |
 | `ai_join_factorize` | `off` / `pushdown` / `factor` | `factor` | AI-condition joins: expand / push the region below the join / factor graph over the pair domain (`DUCKDB_AI_GROUP_JOIN`) |
 | `ai_limit` | `true` / `false` | `true` | LIMIT push-down into AI evaluation (early stop) (`DUCKDB_AI_LIMIT`) |
+| `ai_leaf_prior` | `mlp` / `calibrated` | `calibrated` | the P(true) a leaf is ordered by: `mlp` the selectivity model's prediction; `calibrated` the same with its logit shifted toward the leaf's pass rate observed in the query, by landed / (landed + 20) |
+| `ai_leaf_lookahead` | integer ≥ 0 | `2` | a warm region keeps at most k × `ai_concurrency` calls outstanding and re-decides the rows behind an input just before it is submitted; `0` submits every pending input at once |
 
 **Debug / experiment knobs** (`ai_debug_*`) — stable but not part of the user contract
 
