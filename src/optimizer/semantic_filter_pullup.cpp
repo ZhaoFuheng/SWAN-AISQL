@@ -216,6 +216,11 @@ static bool Commutes(const LogicalOperator &op, idx_t child_idx, bool &reduces) 
 	case LogicalOperatorType::LOGICAL_CROSS_PRODUCT:
 		reduces = true;
 		return true;
+	case LogicalOperatorType::LOGICAL_UNNEST:
+		// UNNEST repeats its input's columns once per element and drops a row whose list is empty or NULL, so a
+		// filter on those columns gives the same rows above it (a lateral unnest after ai_lateral_unnest)
+		reduces = true;
+		return true;
 	case LogicalOperatorType::LOGICAL_COMPARISON_JOIN:
 	case LogicalOperatorType::LOGICAL_ANY_JOIN: {
 		// a filter on one side commutes with the join iff that side is preserved; it is worth lifting
@@ -265,6 +270,7 @@ static bool ChildMayGrow(const LogicalOperator &op, idx_t child_idx, bool op_may
 	case LogicalOperatorType::LOGICAL_COMPARISON_JOIN:
 	case LogicalOperatorType::LOGICAL_ANY_JOIN:
 	case LogicalOperatorType::LOGICAL_CROSS_PRODUCT:
+	case LogicalOperatorType::LOGICAL_UNNEST:
 	case LogicalOperatorType::LOGICAL_ORDER_BY:
 	case LogicalOperatorType::LOGICAL_LIMIT:
 	case LogicalOperatorType::LOGICAL_TOP_N:

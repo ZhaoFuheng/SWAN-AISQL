@@ -120,14 +120,14 @@ order structural.
 an AI predicate costs a call per distinct input, so stage 2 lifts it as high as it legally can. The
 walk is bottom-up and knows nothing about query shapes, only one commutation law per operator: a
 filter on the columns of one input moves above a filter, a projection (routing its columns through,
-appending a passthrough column when the consumers above tolerate it), a cross product, the
-preserved side of a join (both sides of INNER; the left of SEMI, ANTI, LEFT, SINGLE, MARK; the right
+appending a passthrough column when the consumers above tolerate it), a cross product, an UNNEST
+(it repeats its input's columns per element), the preserved side of a join (both sides of INNER; the left of SEMI, ANTI, LEFT, SINGLE, MARK; the right
 of RIGHT, RIGHT_SEMI, RIGHT_ANTI), and a CTE node's main query; it stops at aggregates, limits,
 sorts, set operations, windows and a CTE body. Lifting through a preserving operator never adds a
 call (the output projected onto the predicate's columns is a subset of its input), so the only
 question is where the lift stops paying: the predicate settles directly above the highest operator
 it crossed that can remove rows of its input (inner, semi and anti joins, a filter with relational
-conjuncts), and goes back exactly where it was if it crossed none. Predicates settling at one site
+conjuncts, an UNNEST, which drops a row whose list is empty or NULL), and goes back exactly where it was if it crossed none. Predicates settling at one site
 share one filter, so the fold stage sees them together. This is what makes `IN (SELECT ...)` and
 `EXISTS` work: DuckDB plans them as semi joins above the scan and pushes the AI predicate under
 them; the law for a semi join lifts it back above (SWAN 2.0 football-16: 296 calls -> 22).
@@ -252,6 +252,20 @@ specialised around the CTE shape.
 **Pull-up may descend into a CTE's main query, never its body.** Lifting a predicate out of a body
 that other references also read would silently drop the filter for those references.
 
+**A lateral unnest must not copy the predicate it reads** (`ai_lateral_unnest`, default on). The
+planner decorrelates `FROM s, LATERAL UNNEST(f(s.x))` into two CTEs: a domain of s's rows, and its
+rows grouped on the columns f reads, joined back as domain ⋈ unnest(f(dedup)) on IS NOT DISTINCT
+FROM. DuckDB's own rewriter turns that back into an UNNEST only when f is a bare column. Otherwise
+the self-join stays, and once an AI CTE in s is inlined, its predicate is copied into the dedup
+side. That copy joins the query only on f's columns, never on a key a reduction prunes by, so it
+asks about every row of s: in agent_bench Q21 the joins leave 17 businesses and the query made 100
+calls. The pre-optimize hook, before the inliner, rewrites the self-join into an UNNEST of f over
+the domain. Each domain row matches exactly one dedup row, because the dedup groups the domain on
+the very columns the join compares, so the rows are the same; the rewrite checks that pairing and
+declines otherwise. It also declines a `LEFT JOIN LATERAL`, where an empty list keeps its row, and
+`WITH ORDINALITY`, which an UNNEST expression doesn't number. With it, Q21 and Q23 make 17 and 51
+calls, which is all the joins leave, and the pull-up can lift the predicate above the UNNEST, so a row
+with nothing to unnest is never asked (Q24: 62 calls to 59). The test is `test/sql/semi_reduce/lateral_unnest_reduction.test`.
 **A reducer copy stays in the scope of the CTEs it reads.** Because the reducer looks past a CTE into
 its main query, one join cluster can hold leaves inside a CTE's scope and leaves outside it. A
 reduction copies the reducing leaf into the reduced one, so a leaf that scans a CTE enclosing it
@@ -349,7 +363,7 @@ work can never subsidise the next.
 
 ## 8. What is configurable
 
-Each plan stage has one setting: `ai_inline_ai_ctes` (the pre-optimize hook), `ai_semi_reduce` (1),
+Each plan stage has one setting: `ai_inline_ai_ctes` and `ai_lateral_unnest` (the pre-optimize hook), `ai_semi_reduce` (1),
 `ai_pullup` and `ai_speculative` (2), `ai_reorder` (3, the fold and the run-time ordering it enables),
 `ai_factorize` (4), `ai_join_factorize` (5) and `ai_limit` (0 and 6). Their purpose is the parity tests and
 A/B runs; the defaults are the measured composition. Everything that was

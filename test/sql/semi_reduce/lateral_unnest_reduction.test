@@ -1,0 +1,205 @@
+# name: test/sql/semi_reduce/lateral_unnest_reduction.test
+# description: The planner decorrelates `FROM s, LATERAL UNNEST(f(s.x))` into s joined to an unnest of s's
+# group: [semi_reduce]
+
+#              deduplicated columns. When s is an AI CTE that the query also reads directly, inlining it copies
+#              the AI predicate into that dedup side, where no join key reaches it, so the copy asks about every
+#              row of s however selective the joins are. ai_lateral_unnest turns the self-join back into an
+#              UNNEST over s; the existing reduction then reaches the one remaining predicate.
+#              Every case asserts the same rows as with the rewrite off.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+# 100 businesses, a mix of normal, NULL and empty category lists; the neighbour keeps 20 of them
+statement ok
+CREATE TABLE biz AS SELECT 'b_'||i::VARCHAR AS id,
+       CASE WHEN i % 7 = 0 THEN NULL WHEN i % 11 = 0 THEN '' ELSE 'cafe, bar and grill, '||(i%3)::VARCHAR END AS cats,
+       ['p', 'q'] AS lst
+FROM range(100) r(i);
+
+statement ok
+CREATE TABLE hot AS SELECT 'b_'||(i*5)::VARCHAR AS id FROM range(20) r(i);
+
+# === the shape: an AI CTE read directly and through a lateral unnest of a computed list ===
+statement ok
+SELECT ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE r_on AS
+WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+     tok AS (SELECT s.id, trim(t.v) AS cat FROM s, LATERAL UNNEST(string_split(replace(s.cats, ' and ', ', '), ',')) AS t(v)
+             WHERE trim(t.v) <> '')
+SELECT tok.id, tok.cat FROM tok JOIN s ON s.id = tok.id JOIN hot ON hot.id = tok.id;
+
+# one call per business the neighbour keeps that has a category to emit (the pull-up lifts the predicate
+# above the UNNEST, so a NULL or empty list is never asked)
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+16
+
+statement ok
+SET ai_lateral_unnest = false;
+
+statement ok
+SELECT ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE r_off AS
+WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+     tok AS (SELECT s.id, trim(t.v) AS cat FROM s, LATERAL UNNEST(string_split(replace(s.cats, ' and ', ', '), ',')) AS t(v)
+             WHERE trim(t.v) <> '')
+SELECT tok.id, tok.cat FROM tok JOIN s ON s.id = tok.id JOIN hot ON hot.id = tok.id;
+
+# without the rewrite the copy on the dedup side asks about all 100
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+100
+
+query I
+SELECT count(*) FROM ((SELECT * FROM r_on EXCEPT ALL SELECT * FROM r_off) UNION ALL (SELECT * FROM r_off EXCEPT ALL SELECT * FROM r_on));
+----
+0
+
+query I
+SELECT count(*) > 0 FROM r_on;
+----
+true
+
+# === an argument over two columns: rewritten, same rows ===
+statement ok
+CREATE TABLE two_off AS
+WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+     tok AS (SELECT s.id, t.v FROM s, LATERAL UNNEST(string_split(s.cats || ',' || s.id, ',')) AS t(v))
+SELECT tok.id, tok.v FROM tok JOIN s USING (id) JOIN hot USING (id);
+
+statement ok
+RESET ai_lateral_unnest;
+
+statement ok
+SELECT ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE two_on AS
+WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+     tok AS (SELECT s.id, t.v FROM s, LATERAL UNNEST(string_split(s.cats || ',' || s.id, ',')) AS t(v))
+SELECT tok.id, tok.v FROM tok JOIN s USING (id) JOIN hot USING (id);
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT < 100 FROM ai_usage();
+----
+true
+
+query I
+SELECT count(*) FROM ((SELECT * FROM two_on EXCEPT ALL SELECT * FROM two_off) UNION ALL (SELECT * FROM two_off EXCEPT ALL SELECT * FROM two_on));
+----
+0
+
+# === shapes the rewrite leaves alone: the same rows either way ===
+# LEFT JOIN LATERAL keeps a row whose list is empty or NULL; an UNNEST would drop it
+statement ok
+CREATE TABLE left_on AS
+WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+     tok AS (SELECT s.id, t.v FROM s LEFT JOIN LATERAL UNNEST(string_split(s.cats, ',')) AS t(v) ON true)
+SELECT tok.id, tok.v FROM tok JOIN s USING (id) JOIN hot USING (id);
+
+# WITH ORDINALITY numbers the elements, which an UNNEST expression doesn't carry
+statement ok
+CREATE TABLE ord_on AS
+WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+     tok AS (SELECT s.id, t.v, t.n FROM s, LATERAL UNNEST(string_split(s.cats, ',')) WITH ORDINALITY AS t(v, n))
+SELECT tok.id, tok.v, tok.n FROM tok JOIN s USING (id) JOIN hot USING (id);
+
+# a bare list column is DuckDB's own case
+statement ok
+CREATE TABLE bare_on AS
+WITH s AS (SELECT id, lst FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+     tok AS (SELECT s.id, t.v FROM s, LATERAL UNNEST(s.lst) AS t(v))
+SELECT tok.id, tok.v FROM tok JOIN s USING (id) JOIN hot USING (id);
+
+statement ok
+SET ai_lateral_unnest = false;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM left_on EXCEPT ALL
+  (WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+        tok AS (SELECT s.id, t.v FROM s LEFT JOIN LATERAL UNNEST(string_split(s.cats, ',')) AS t(v) ON true)
+   SELECT tok.id, tok.v FROM tok JOIN s USING (id) JOIN hot USING (id)))
+ UNION ALL
+ ((WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+        tok AS (SELECT s.id, t.v FROM s LEFT JOIN LATERAL UNNEST(string_split(s.cats, ',')) AS t(v) ON true)
+   SELECT tok.id, tok.v FROM tok JOIN s USING (id) JOIN hot USING (id)) EXCEPT ALL SELECT * FROM left_on));
+----
+0
+
+# every NULL-list business the filter and the neighbour keep is still there, once, with a NULL element
+query II
+SELECT count(*) FILTER (WHERE l.v IS NULL) = count(DISTINCT l.id) FILTER (WHERE b.cats IS NULL),
+       count(*) FILTER (WHERE l.v IS NULL) > 0
+FROM left_on l JOIN biz b USING (id);
+----
+true	true
+
+query I
+SELECT count(*) FROM ((SELECT * FROM ord_on EXCEPT ALL
+  (WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+        tok AS (SELECT s.id, t.v, t.n FROM s, LATERAL UNNEST(string_split(s.cats, ',')) WITH ORDINALITY AS t(v, n))
+   SELECT tok.id, tok.v, tok.n FROM tok JOIN s USING (id) JOIN hot USING (id)))
+ UNION ALL
+ ((WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+        tok AS (SELECT s.id, t.v, t.n FROM s, LATERAL UNNEST(string_split(s.cats, ',')) WITH ORDINALITY AS t(v, n))
+   SELECT tok.id, tok.v, tok.n FROM tok JOIN s USING (id) JOIN hot USING (id)) EXCEPT ALL SELECT * FROM ord_on));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM bare_on EXCEPT ALL
+  (WITH s AS (SELECT id, lst FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+        tok AS (SELECT s.id, t.v FROM s, LATERAL UNNEST(s.lst) AS t(v))
+   SELECT tok.id, tok.v FROM tok JOIN s USING (id) JOIN hot USING (id)))
+ UNION ALL
+ ((WITH s AS (SELECT id, lst FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+        tok AS (SELECT s.id, t.v FROM s, LATERAL UNNEST(s.lst) AS t(v))
+   SELECT tok.id, tok.v FROM tok JOIN s USING (id) JOIN hot USING (id)) EXCEPT ALL SELECT * FROM bare_on));
+----
+0
+
+# an argument that draws runs once per deduplicated row as planned; an UNNEST over s would run it once per row of s.
+# (random() * 0)::INTEGER always gives 0, so the rows can be compared, but it is volatile: the plan keeps its
+# decorrelated shape and the copy on the dedup side still asks about all 100. (DuckDB plans a volatile lateral with
+# row ids, a shape the rewrite already declines; the rewrite's own volatile check covers a plan that doesn't.)
+statement ok
+RESET ai_lateral_unnest;
+
+statement ok
+SELECT ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE vol_on AS
+WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+     tok AS (SELECT s.id, t.v FROM s, LATERAL UNNEST(string_split(s.cats || repeat(',', (random() * 0)::INTEGER), ',')) AS t(v))
+SELECT tok.id, tok.v FROM tok JOIN s USING (id) JOIN hot USING (id);
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+100
+
+statement ok
+SET ai_lateral_unnest = false;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM vol_on EXCEPT ALL
+  (WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+        tok AS (SELECT s.id, t.v FROM s, LATERAL UNNEST(string_split(s.cats || repeat(',', (random() * 0)::INTEGER), ',')) AS t(v))
+   SELECT tok.id, tok.v FROM tok JOIN s USING (id) JOIN hot USING (id)))
+ UNION ALL
+ ((WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+        tok AS (SELECT s.id, t.v FROM s, LATERAL UNNEST(string_split(s.cats || repeat(',', (random() * 0)::INTEGER), ',')) AS t(v))
+   SELECT tok.id, tok.v FROM tok JOIN s USING (id) JOIN hot USING (id)) EXCEPT ALL SELECT * FROM vol_on));
+----
+0

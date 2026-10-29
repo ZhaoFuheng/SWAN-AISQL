@@ -49,6 +49,7 @@ local cache, TypeSafe routing, logging) apply to the whole process however they 
 | setting | values | default | what it does |
 |---|---|---|---|
 | `ai_inline_ai_ctes` | `true` / `false` | `true` | inline CTEs that contain AI functions so pruning and pull-up can reach the predicate; `false` keeps them materialised and reduces the body by its readers' join keys instead (demand reduction) |
+| `ai_lateral_unnest` | `true` / `false` | `true` | rewrite the planner's decorrelated `FROM s, LATERAL UNNEST(f(s.x))` into an UNNEST over s, so an AI predicate in s isn't copied to a side no join key reaches (`AI_LATERAL_UNNEST`) |
 | `ai_semi_reduce` | `true` / `false` | `true` | Yannakakis semi-join reduction before any AI evaluation |
 | `ai_pullup` | `true` / `false` | `true` | lift each semantic filter through every operator it commutes with (joins' preserved sides, projections, CTE main queries) to just above the highest row-removing one (`DUCKDB_SEMANTIC_PULLUP`) |
 | `ai_speculative` | `true` / `false` | `true` | speculative pre-filter at a pulled-up predicate's leaf: rows whose verdict the cache already holds as false are pruned before the join, every other row passes through to the lifted predicate; no call, prediction or embedding is made at the leaf (`AI_SPECULATIVE`) |

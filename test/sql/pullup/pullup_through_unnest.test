@@ -1,0 +1,70 @@
+# name: test/sql/pullup/pullup_through_unnest.test
+# description: A semantic filter lifts through an UNNEST. UNNEST repeats its input's columns per element and drops
+# group: [pullup]
+
+#              a row whose list is empty or NULL, so a filter on those columns returns the same rows above it, and
+#              above it the rows with nothing to unnest (and those the filter on the elements drops) are never
+#              asked. The lateral unnest of an AI CTE becomes an UNNEST under ai_lateral_unnest (agent_bench Q24:
+#              62 calls where 59 businesses produce a category). Same rows as with the pull-up off.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+# 100 businesses: 15 with no category list, 8 more whose list holds only blanks
+statement ok
+CREATE TABLE biz AS SELECT 'b_'||i::VARCHAR AS id,
+       CASE WHEN i % 7 = 0 THEN NULL WHEN i % 11 = 0 THEN ' , ' ELSE 'cafe, bar, '||(i%3)::VARCHAR END AS cats
+FROM range(100) r(i);
+
+# the businesses that produce at least one category
+query I
+SELECT count(*) FROM biz WHERE list_count(list_filter(string_split(cats, ','), lambda x: trim(x) <> '')) > 0;
+----
+77
+
+statement ok
+SELECT ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE r_on AS
+WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] lists several services? '||id)),
+     tok AS (SELECT s.id, trim(t.v) AS category FROM s, LATERAL UNNEST(string_split(s.cats, ',')) AS t(v)
+             WHERE trim(t.v) <> '')
+SELECT id, category FROM tok;
+
+# one call per business with a category to emit
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+77
+
+statement ok
+SET ai_pullup = false;
+
+statement ok
+SELECT ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE r_off AS
+WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] lists several services? '||id)),
+     tok AS (SELECT s.id, trim(t.v) AS category FROM s, LATERAL UNNEST(string_split(s.cats, ',')) AS t(v)
+             WHERE trim(t.v) <> '')
+SELECT id, category FROM tok;
+
+# without the lift every business is asked
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+100
+
+query I
+SELECT count(*) FROM ((SELECT * FROM r_on EXCEPT ALL SELECT * FROM r_off) UNION ALL (SELECT * FROM r_off EXCEPT ALL SELECT * FROM r_on));
+----
+0
+
+query I
+SELECT count(*) > 0 FROM r_on;
+----
+true
