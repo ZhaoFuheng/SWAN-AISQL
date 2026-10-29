@@ -5,8 +5,8 @@
 #              regressions actually show. The single-CTE shapes in cte_boundary_shapes.test all
 #              survive a broken boundary implementation; these do not.
 #
-#              COVERAGE: shape I discriminates -- with the (unwired) semantic split enabled it goes
-#              16 -> 189 calls on unchanged rows. It must live in its OWN file: run after the
+#              COVERAGE: shape I discriminates -- an earlier boundary implementation took it from
+#              16 to 189 calls on unchanged rows. It must live in its OWN file: run after the
 #              single-CTE shapes in the same session it returns 18 either way, because the
 #              preceding statements change the plan it gets. A discriminating test that only
 #              discriminates in isolation has to BE isolated, so nothing is added above this line.
@@ -56,7 +56,7 @@ SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
 # ---------------------------------------------------------------------------------------------
 # I. FOUR CTEs, TWO of them AI-bearing, one of those SHARED between another CTE's body and the
 #    main query. This is the agent_bench Q26 arrangement and the shape that catches boundary
-#    regressions: the semantic split blows it up by an order of magnitude on the same rows.
+#    regressions: an earlier boundary implementation blew it up by an order of magnitude on the same rows.
 # ---------------------------------------------------------------------------------------------
 statement ok
 SELECT ai_usage_reset();

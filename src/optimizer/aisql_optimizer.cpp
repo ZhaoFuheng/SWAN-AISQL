@@ -14,7 +14,6 @@
 #include "optimizer/aisql_optimizer.hpp"
 #include "optimizer/ai_topn_pushdown.hpp"
 
-#include "optimizer/ai_cte_split.hpp"
 #include "optimizer/ai_cte_demand.hpp"
 
 #include "ai_client.hpp"
@@ -117,22 +116,6 @@ static void AisqlPreOptimizePlan(OptimizerExtensionInput &input, unique_ptr<Logi
 	if (!plan || !PlanHasAIFunction(*plan)) {
 		return;
 	}
-	// AISplitCTEsAtSemanticBoundary (optimizer/ai_cte_split.cpp) is the intended replacement for
-	// whole-body inlining: the relational prefix becomes an outer materialized CTE that runs ONCE
-	// and the thin remainder -- the predicate over a scan of that prefix -- is inlined into every
-	// reference, so pushdown and the reducer still get a real subtree per reference.
-	//
-	// NOT WIRED IN. It is blocked on ONE thing, and the measurements say exactly which. Splitting
-	// PINS the AI predicate above the relational work instead of letting pushdown sink it below
-	// the joins, which is worth a great deal (agent_bench Q30: 54 -> 7 calls, matching PLOP). But
-	// it also puts a CTE scan between the predicate and its leaf, and the semi-join reducer
-	// translates its keys DOWN through projections to a scan -- it cannot translate through a CTE
-	// scan, so its reducer never lands (computed_key_reduction: 10 -> 200 calls). Restricting the
-	// split to CTEs with >=2 references keeps that test green but discards the Q30 win outright
-	// (its CTEs have one reference each) and still costs Q26 426 -> 436.
-	//
-	// So the split is correct and valuable, and it needs the reducer to be able to reduce a CTE
-	// reference before it can be turned on. That is the one remaining piece.
 	// Two ways to get a semantic CTE's predicate onto the rows its readers can actually use, and
 	// they are ALTERNATIVES rather than a stack.
 	//

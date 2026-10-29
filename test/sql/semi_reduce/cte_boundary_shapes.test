@@ -20,9 +20,9 @@
 #              disabled stack (correctness). A binding error shows up here as a parity failure on
 #              a two-table query, instead of as four unrelated files breaking at once.
 #
-#              COVERAGE: shape I discriminates -- with the (unwired) semantic split enabled it
-#              fails 18 -> 189 calls, rows unchanged. The single-CTE shapes A-G do NOT: they all
-#              pass under the split, which is why this file needed the MULTI-CTE shapes H-K. What
+#              COVERAGE: shape I discriminates -- an earlier boundary implementation failed it
+#              18 -> 189 calls, rows unchanged. The single-CTE shapes A-G do NOT: they all
+#              passed under it, which is why this file needed the MULTI-CTE shapes H-K. What
 #              breaks is a CTE shared between another CTE's body and the main query, with a second
 #              AI CTE alongside -- the agent_bench Q26 arrangement, and the smallest one found
 #              that reproduces it.
