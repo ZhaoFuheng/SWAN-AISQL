@@ -61,6 +61,8 @@ local cache, TypeSafe routing, logging) apply to the whole process however they 
 | `ai_join_factorize` | `off` / `pushdown` / `factor` | `factor` | AI-condition joins: expand / push the region below the join / factor graph over the pair domain (`DUCKDB_AI_GROUP_JOIN`) |
 | `ai_limit` | `true` / `false` | `true` | LIMIT push-down into AI evaluation (early stop) (`DUCKDB_AI_LIMIT`) |
 | `ai_leaf_prior` | `mlp` / `calibrated` | `calibrated` | the P(true) a leaf is ordered by: `mlp` the selectivity model's prediction; `calibrated` the same with its logit shifted toward the leaf's pass rate observed in the query, by landed / (landed + 20) |
+| `ai_leaf_slice_rows` | integer ≥ 1 | `100` | rows the leaf region ingests per slice; while cold, each slice's rows commit to their first leaf and the next slice waits for the calls already out. `20` (= `ai_concurrency`) commits fewer rows blind: fewer calls, more cold rounds |
+| `ai_leaf_cold_slices` | integer ≥ 0 | `0` | the region counts as warm after this many slices even if a leaf has few verdicts, so a leaf asked last can't keep it cold; not applied below a LIMIT the push-down couldn't place in the region (EXPLAIN `Unpushed Limit Above`); `0` = unbounded |
 | `ai_leaf_lookahead` | integer ≥ 0 | `2` | a warm region keeps at most k × `ai_concurrency` calls outstanding and re-decides the rows behind an input just before it is submitted; `0` submits every pending input at once |
 
 **Debug / experiment knobs** (`ai_debug_*`) — stable but not part of the user contract

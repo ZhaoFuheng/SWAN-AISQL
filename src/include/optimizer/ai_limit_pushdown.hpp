@@ -55,6 +55,8 @@ private:
 	//! DuckDB's injective compress/decompress wrappers). Sound because any k distinct passers are a valid
 	//! answer to an unordered DISTINCT ... LIMIT k, exactly as any k passers are for a plain LIMIT k.
 	bool TryPushThroughDistinct(LogicalOperator &distinct_op, int64_t k);
+	//! Flag every region below a LIMIT that has no limit of its own (LogicalAIRegion::under_limit).
+	static void MarkUnderLimit(LogicalOperator &op);
 	//! Bind an ai_function_with_embed(tree_str, prompts.., preds.., inputs..) call. Null on bind failure.
 	unique_ptr<Expression> BuildNode(vector<unique_ptr<Expression>> args);
 };

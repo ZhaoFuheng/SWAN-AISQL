@@ -204,6 +204,15 @@ static const vector<AIConfigSetting> &AIConfigSettings() {
 		     LogicalType::UBIGINT, Value::UBIGINT(2), [](AIConfig &c, const Value &v) {
 			     c.leaf_lookahead = v.GetValue<uint64_t>();
 		     }});
+		t.push_back({"ai_leaf_slice_rows",
+		             "Leaf region: rows ingested per slice (each cold slice waits for the calls out)",
+		             LogicalType::UBIGINT, Value::UBIGINT(100), [](AIConfig &c, const Value &v) {
+			             c.leaf_slice_rows = MaxValue<idx_t>(v.GetValue<uint64_t>(), 1);
+		             }});
+		t.push_back({"ai_leaf_cold_slices", "Leaf region: leave the cold phase after k ingested slices (0 = unbounded)",
+		             LogicalType::UBIGINT, Value::UBIGINT(0), [](AIConfig &c, const Value &v) {
+			             c.leaf_cold_slices = v.GetValue<uint64_t>();
+		             }});
 		t.push_back({"ai_debug_log", "Debug logging channels (csv: region,spec,yann)", LogicalType::VARCHAR, Value(""),
 		             str(&AIConfig::debug_log)});
 		t.push_back({"ai_debug_prompt_variant", "ai_filter prompt variant: strict/soft/plain", LogicalType::VARCHAR,
@@ -243,7 +252,7 @@ AIConfig AIConfigForContext(ClientContext &context) {
 
 // DuckDB takes a plain function pointer as the SET callback (no captures), so each table entry gets its own
 // instantiation that finds its row by index.
-constexpr size_t kAIConfigSettingCount = 32;
+constexpr size_t kAIConfigSettingCount = 34;
 
 template <size_t I>
 static void AIConfigSettingCallback(ClientContext &, SetScope scope, Value &v) {

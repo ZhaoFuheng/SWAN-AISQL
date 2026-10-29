@@ -49,6 +49,8 @@ public:
 	int64_t limit;
 	//! With `limit`: count DISTINCT passing tuples over these child columns (see LogicalAIRegion).
 	vector<idx_t> limit_distinct_cols;
+	//! An un-pushed LIMIT above (see LogicalAIRegion::under_limit).
+	bool under_limit = false;
 
 public:
 	string GetName() const override {

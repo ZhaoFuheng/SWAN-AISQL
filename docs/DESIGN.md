@@ -234,6 +234,30 @@ still the tree's Kleene value over the verdicts it asked for. On SWAN 2.0 togeth
 and wall time by 3%, with no query worse and identical rows on 31 of 31 (replayed offline from a fixed
 cache, three runs per arm); the parity test is `test/sql/region/leaf_ordering.test`.
 
+**A shorter, bounded cold phase** (`ai_leaf_slice_rows`, `ai_leaf_cold_slices`; opt-in). While the region
+is cold, each slice's rows choose their first leaf before any verdict of theirs can teach the order, so the
+slice size is how many rows commit blind. With the default 100-row slices this commitment is most of what
+is left: replaying SWAN 2.0's traces offline, it explains about 610 of the 800 calls between the region and
+an idealised dispatcher that re-decides at every submission, and 20-row slices (one `ai_concurrency`-wide
+batch) recover it. A smaller slice alone stalls, though. A cold slice waits for the calls already out, and
+the region stays cold until every leaf has a batch of verdicts; a leaf that is always asked last can stay
+below that for the whole query (california_schools-11's last leaf, pass rate 0.93, is asked about 7 times),
+so 563 rows became 28 sequential rounds and the query took 4× as long. `ai_leaf_cold_slices = k` declares
+the region warm after k slices, whatever the leaves have seen; 5 × 20 rows is the default's first slice.
+
+The bound is not applied under a LIMIT the push-down could not place in the region: a region below a
+constant LIMIT that kept no limit of its own (EXPLAIN: `Unpushed Limit Above: true`, e.g. a DISTINCT on a
+computed key) feeds a consumer that may stop early. Warmed early, it stops waiting between slices and runs
+ahead of that consumer, spending the pool on the first leaf of new rows while the second leaf of rows that
+have already passed waits (california_schools-28, `DISTINCT substr(...) ... LIMIT 5`, found 14 passing rows
+where 5 suffice). There it keeps the cold gate. The flag is set by the LIMIT push-down pass, so with
+`ai_limit = false` no region carries it. Like the ordering above, neither setting changes a result.
+
+The cost is latency: on SWAN 2.0, with the ordering above, 20-row slices bounded at 5 cut calls by another
+4.9% (6.9% against the order before both) with no query worse and identical rows on 31 of 31, and raised
+wall time by 8.8%. Short queries pay most of it, about 10–30 s for the gated start-up rounds, including some
+that save no calls; hence opt-in. The parity test is `test/sql/region/cold_slices_under_limit.test`.
+
 **A worked example.**
 
 ```sql
@@ -396,8 +420,9 @@ Each plan stage has one setting: `ai_inline_ai_ctes` and `ai_lateral_unnest` (th
 `ai_pullup` and `ai_speculative` (2), `ai_reorder` (3, the fold and the run-time ordering it enables),
 `ai_factorize` (4), `ai_join_factorize` (5) and `ai_limit` (0 and 6). Their purpose is the parity tests and
 A/B runs; the defaults are the measured composition. Everything that was
-measured to be right — the ingest slice, the warm gate, the training cadence, the speculative gate,
-connection reuse — is a constant in the code, not a knob. The remaining settings name the
+measured to be right — the warm gate, the training cadence, the speculative gate, connection reuse —
+is a constant in the code, not a knob. The ingest slice and the bound on the cold phase
+(`ai_leaf_slice_rows`, `ai_leaf_cold_slices`, §4) are settings because they trade calls against latency. The remaining settings name the
 endpoints, models, keys and concurrency of the LLM, embedding and TypeSafe backends. Where a
 connection's requests go (endpoint, model, key, retries, prices, TLS) and every optimizer flag are per
 connection, with `SET GLOBAL` for the process default; the request pool, the embedding client and the
