@@ -8,8 +8,8 @@
 #                            MATERIALIZED once
 #                  cte     = the semantic predicate over new_cte, INLINED per reference
 #
-#              This is a design check, not a pass check: nothing here exercises the (unwired)
-#              semantic split. What it establishes is that the target shape reaches the same call
+#              This is a design check, not a pass check: nothing here exercises an optimizer
+#              pass. What it establishes is that the target shape reaches the same call
 #              count and the same rows as today's whole-body inlining, so an implementation that
 #              produces it is aiming at something known to be correct -- after four attempts that
 #              each aimed at something not yet verified.

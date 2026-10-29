@@ -266,6 +266,12 @@ declines otherwise. It also declines a `LEFT JOIN LATERAL`, where an empty list 
 `WITH ORDINALITY`, which an UNNEST expression doesn't number. With it, Q21 and Q23 make 17 and 51
 calls, which is all the joins leave, and the pull-up can lift the predicate above the UNNEST, so a row
 with nothing to unnest is never asked (Q24: 62 calls to 59). The test is `test/sql/semi_reduce/lateral_unnest_reduction.test`.
+**A reducer copy stays in the scope of the CTEs it reads.** Because the reducer looks past a CTE into
+its main query, one join cluster can hold leaves inside a CTE's scope and leaves outside it. A
+reduction copies the reducing leaf into the reduced one, so a leaf that scans a CTE enclosing it
+but not its neighbour is never copied there: outside the definition the scan is invalid ("Referenced
+recursive CTE does not exist"). The planner's decorrelation of a
+lateral join creates such CTEs. Skipping the reduction only leaves that neighbour unpruned by it.
 
 ---
 

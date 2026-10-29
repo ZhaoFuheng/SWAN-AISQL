@@ -82,7 +82,13 @@ private:
 	void GatherCluster(unique_ptr<LogicalOperator> &op,
 	                   vector<std::reference_wrapper<unique_ptr<LogicalOperator>>> &leaves, vector<Edge> &edges);
 	//! Wrap each leaf that is larger than a joined neighbor in a SEMI-join reducer.
-	void InsertReducers(vector<std::reference_wrapper<unique_ptr<LogicalOperator>>> &leaves, const vector<Edge> &edges);
+	//! `scopes[i]`: the materialised CTEs GatherChild looked past on the way to leaf i (a copy of a leaf is in scope
+	//! only where the CTEs it reads are defined).
+	void InsertReducers(vector<std::reference_wrapper<unique_ptr<LogicalOperator>>> &leaves, const vector<Edge> &edges,
+	                    const vector<vector<idx_t>> &scopes);
+	//! While gathering: the materialised CTEs looked past so far, and per leaf the ones enclosing it.
+	vector<idx_t> scope_stack;
+	vector<vector<idx_t>> leaf_scopes;
 };
 
 } // namespace duckdb
