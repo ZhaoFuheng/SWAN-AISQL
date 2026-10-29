@@ -1,0 +1,99 @@
+# name: test/sql/semi_reduce/cte_scope_reduction.test
+# description: The reducer looks past a materialised CTE into its main query, so a join cluster can mix leaves
+# group: [semi_reduce]
+
+#              inside a CTE's scope with leaves outside it. Reducing an outside leaf BY an inside one copies the
+#              inside leaf, CTE scans included, to where that CTE isn't defined: the plan then fails with
+#              "Referenced recursive CTE does not exist" (an earlier DuckDB crashed building its pipelines). The planner's
+#              decorrelation of a lateral join creates such CTEs; with an AI CTE inlined into the lateral's input,
+#              the reducer runs on the cluster. Such a reduction is skipped; every query below returns the rows of
+#              the plan with AI-CTE inlining and the reducer both off.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE biz AS SELECT 'b_'||i::VARCHAR AS id,
+       CASE WHEN i % 7 = 0 THEN NULL WHEN i % 11 = 0 THEN '' ELSE 'cafe, bar, '||(i%3)::VARCHAR END AS cats
+FROM range(100) r(i);
+
+statement ok
+CREATE TABLE hot AS SELECT 'b_'||(i*5)::VARCHAR AS id FROM range(20) r(i);
+
+# === two chained laterals (failed: Referenced recursive CTE does not exist) ===
+statement ok
+CREATE TABLE chained AS
+WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+     tok AS (SELECT s.id, t.v, u.w FROM s, LATERAL UNNEST(string_split(s.cats, ',')) AS t(v),
+                                          LATERAL UNNEST(string_split(t.v, 'a')) AS u(w))
+SELECT tok.id, tok.v, tok.w FROM tok JOIN s USING (id) JOIN hot USING (id);
+
+# === WITH ORDINALITY (failed on an earlier DuckDB; kept as coverage) ===
+statement ok
+CREATE TABLE ordinal AS
+WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+     tok AS (SELECT s.id, t.v, t.n FROM s, LATERAL UNNEST(string_split(s.cats, ',')) WITH ORDINALITY AS t(v, n))
+SELECT tok.id, tok.v, tok.n FROM tok JOIN s USING (id) JOIN hot USING (id);
+
+# === LEFT JOIN LATERAL, chained (failed: Referenced recursive CTE does not exist) ===
+statement ok
+CREATE TABLE left_chained AS
+WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+     tok AS (SELECT s.id, t.v, u.w FROM s LEFT JOIN LATERAL UNNEST(string_split(s.cats, ',')) AS t(v) ON true
+                                          LEFT JOIN LATERAL UNNEST(string_split(t.v, 'a')) AS u(w) ON true)
+SELECT tok.id, tok.v, tok.w FROM tok JOIN s USING (id) JOIN hot USING (id);
+
+# the reference: no AI-CTE inlining, no reducer
+statement ok
+SET ai_inline_ai_ctes = false;
+
+statement ok
+SET ai_semi_reduce = false;
+
+query I
+SELECT count(*) FROM ((SELECT * FROM chained EXCEPT ALL
+  (WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+        tok AS (SELECT s.id, t.v, u.w FROM s, LATERAL UNNEST(string_split(s.cats, ',')) AS t(v),
+                                             LATERAL UNNEST(string_split(t.v, 'a')) AS u(w))
+   SELECT tok.id, tok.v, tok.w FROM tok JOIN s USING (id) JOIN hot USING (id)))
+ UNION ALL
+ ((WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+        tok AS (SELECT s.id, t.v, u.w FROM s, LATERAL UNNEST(string_split(s.cats, ',')) AS t(v),
+                                             LATERAL UNNEST(string_split(t.v, 'a')) AS u(w))
+   SELECT tok.id, tok.v, tok.w FROM tok JOIN s USING (id) JOIN hot USING (id)) EXCEPT ALL SELECT * FROM chained));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM ordinal EXCEPT ALL
+  (WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+        tok AS (SELECT s.id, t.v, t.n FROM s, LATERAL UNNEST(string_split(s.cats, ',')) WITH ORDINALITY AS t(v, n))
+   SELECT tok.id, tok.v, tok.n FROM tok JOIN s USING (id) JOIN hot USING (id)))
+ UNION ALL
+ ((WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+        tok AS (SELECT s.id, t.v, t.n FROM s, LATERAL UNNEST(string_split(s.cats, ',')) WITH ORDINALITY AS t(v, n))
+   SELECT tok.id, tok.v, tok.n FROM tok JOIN s USING (id) JOIN hot USING (id)) EXCEPT ALL SELECT * FROM ordinal));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT * FROM left_chained EXCEPT ALL
+  (WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+        tok AS (SELECT s.id, t.v, u.w FROM s LEFT JOIN LATERAL UNNEST(string_split(s.cats, ',')) AS t(v) ON true
+                                             LEFT JOIN LATERAL UNNEST(string_split(t.v, 'a')) AS u(w) ON true)
+   SELECT tok.id, tok.v, tok.w FROM tok JOIN s USING (id) JOIN hot USING (id)))
+ UNION ALL
+ ((WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] open late? '||id)),
+        tok AS (SELECT s.id, t.v, u.w FROM s LEFT JOIN LATERAL UNNEST(string_split(s.cats, ',')) AS t(v) ON true
+                                             LEFT JOIN LATERAL UNNEST(string_split(t.v, 'a')) AS u(w) ON true)
+   SELECT tok.id, tok.v, tok.w FROM tok JOIN s USING (id) JOIN hot USING (id)) EXCEPT ALL SELECT * FROM left_chained));
+----
+0
+
+# and none of them is trivially empty
+query III
+SELECT (SELECT count(*) > 0 FROM chained), (SELECT count(*) > 0 FROM ordinal), (SELECT count(*) > 0 FROM left_chained);
+----
+true	true	true

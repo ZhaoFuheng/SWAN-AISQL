@@ -15,6 +15,8 @@
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/planner/operator/logical_join.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
+#include "duckdb/planner/operator/logical_cteref.hpp"
+#include "duckdb/planner/operator/logical_materialized_cte.hpp"
 #include "duckdb/planner/expression/bound_cast_expression.hpp"
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
@@ -187,10 +189,13 @@ void SemiJoinReducer::GatherChild(unique_ptr<LogicalOperator> &child,
 		return;
 	}
 	if (child->type == LogicalOperatorType::LOGICAL_MATERIALIZED_CTE && child->children.size() > 1) {
+		scope_stack.push_back(child->Cast<LogicalMaterializedCTE>().table_index.index);
 		GatherChild(child->children[1], leaves, edges);
+		scope_stack.pop_back();
 		return;
 	}
 	leaves.push_back(std::ref(child));
+	leaf_scopes.push_back(scope_stack);
 }
 
 //! Strip AI predicates from a COPIED reducer subtree, leaving its relational skeleton.
@@ -360,8 +365,20 @@ bool AIPlanHasVolatileNonAI(const LogicalOperator &op) {
 	return false;
 }
 
+//! The CTEs `op` reads that it does not define itself.
+static void CollectOpenCTERefs(const LogicalOperator &op, std::set<idx_t> &refs, std::set<idx_t> &defs) {
+	if (op.type == LogicalOperatorType::LOGICAL_CTE_REF) {
+		refs.insert(op.Cast<LogicalCTERef>().cte_index.index);
+	} else if (op.type == LogicalOperatorType::LOGICAL_MATERIALIZED_CTE) {
+		defs.insert(op.Cast<LogicalMaterializedCTE>().table_index.index);
+	}
+	for (auto &child : op.children) {
+		CollectOpenCTERefs(*child, refs, defs);
+	}
+}
+
 void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<LogicalOperator>>> &leaves,
-                                     const vector<Edge> &edges) {
+                                     const vector<Edge> &edges, const vector<vector<idx_t>> &scopes) {
 	if (leaves.size() < 2 || edges.empty()) {
 		return;
 	}
@@ -419,6 +436,17 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 	// spliced BELOW leaf i's ai_filter so the LLM predicate runs only on the reduced rows. Returns true if it
 	// was actually spliced in (false = a safe skip: non-serializable subplan or a binding mismatch).
 	auto apply_reducer = [&](idx_t i, idx_t j, const vector<Edge> &redu_edges) -> bool {
+		// The copy of leaf j lands in leaf i. A CTE that encloses j but not i (a looked-past CTE whose main query
+		// holds j) is not in scope there, and a scan of it outside its definition fails at execution.
+		std::set<idx_t> refs, defs;
+		CollectOpenCTERefs(*leaves[j].get(), refs, defs);
+		for (const auto cte : refs) {
+			const bool encloses_j = std::find(scopes[j].begin(), scopes[j].end(), cte) != scopes[j].end();
+			const bool encloses_i = std::find(scopes[i].begin(), scopes[i].end(), cte) != scopes[i].end();
+			if (!defs.count(cte) && encloses_j && !encloses_i) {
+				return false;
+			}
+		}
 		LogicalOperatorDeepCopy deep_copy(optimizer.binder, nullptr);
 		unique_ptr<LogicalOperator> reducer_side;
 		if (AIPlanHasVolatileNonAI(*leaves[j].get())) {
@@ -690,12 +718,15 @@ void SemiJoinReducer::ReduceTree(unique_ptr<LogicalOperator> &op, bool ai_above)
 		const bool reduce = ai_above || ClusterHasAIFunction(*op);
 		vector<std::reference_wrapper<unique_ptr<LogicalOperator>>> leaves;
 		vector<Edge> edges;
+		leaf_scopes.clear();
+		scope_stack.clear();
 		GatherCluster(op, leaves, edges);
+		const auto scopes = std::move(leaf_scopes);
 		for (auto &leaf : leaves) {
 			ReduceTree(leaf.get(), below_ai); // handle nested clusters first
 		}
 		if (reduce) {
-			InsertReducers(leaves, edges);
+			InsertReducers(leaves, edges, scopes);
 		}
 	} else {
 		// Not reducing here: just keep descending (this is the normal path for AI-free queries).

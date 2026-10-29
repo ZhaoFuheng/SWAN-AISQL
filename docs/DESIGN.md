@@ -252,6 +252,13 @@ specialised around the CTE shape.
 **Pull-up may descend into a CTE's main query, never its body.** Lifting a predicate out of a body
 that other references also read would silently drop the filter for those references.
 
+**A reducer copy stays in the scope of the CTEs it reads.** Because the reducer looks past a CTE into
+its main query, one join cluster can hold leaves inside a CTE's scope and leaves outside it. A
+reduction copies the reducing leaf into the reduced one, so a leaf that scans a CTE enclosing it
+but not its neighbour is never copied there: outside the definition the scan is invalid ("Referenced
+recursive CTE does not exist"). The planner's decorrelation of a
+lateral join creates such CTEs. Skipping the reduction only leaves that neighbour unpruned by it.
+
 ---
 
 ## 6. Duplication safety
