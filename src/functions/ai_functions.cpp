@@ -1,3 +1,4 @@
+#include "duckdb/transaction/meta_transaction.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/function/function_set.hpp"
 #include "duckdb/function/table_function.hpp"
@@ -1404,10 +1405,24 @@ static constexpr double AI_SPECULATIVE_THRESHOLD = 0.5;
 //! bind data's copies, written by the batch's worker threads.
 struct AILeafPriorStats {
 	std::mutex lock;
+	std::atomic<bool> any {false}; //! a verdict has landed in this statement: before that Adjust has nothing to say
+	idx_t statement = 0;           //! the statement the counts belong to (the bind data outlives a prepared statement)
 	vector<idx_t> passes, landed;
 	vector<double> sum_logit_asked;
-	void Add(idx_t n, idx_t l, double p_asked, bool value) {
+	//! Caller holds `lock`. A new statement starts its counts afresh: the leaf's pass rate is this query's.
+	void ForStatement(idx_t active_query) {
+		if (active_query != statement) {
+			statement = active_query;
+			passes.clear();
+			landed.clear();
+			sum_logit_asked.clear();
+			any.store(false);
+		}
+	}
+	void Add(idx_t active_query, idx_t n, idx_t l, double p_asked, bool value) {
 		std::lock_guard<std::mutex> guard(lock);
+		ForStatement(active_query);
+		any.store(true);
 		if (passes.size() < n) {
 			passes.resize(n, 0);
 			landed.resize(n, 0);
@@ -1417,8 +1432,9 @@ struct AILeafPriorStats {
 		landed[l]++;
 		sum_logit_asked[l] += AILeafLogit(p_asked);
 	}
-	void Adjust(vector<double> &p) {
+	void Adjust(idx_t active_query, vector<double> &p) {
 		std::lock_guard<std::mutex> guard(lock);
+		ForStatement(active_query);
 		for (idx_t l = 0; l < p.size(); l++) {
 			p[l] = l < landed.size() ? AILeafOrderingP(p[l], passes[l], landed[l], sum_logit_asked[l]) : p[l];
 		}
@@ -2736,11 +2752,14 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 			}
 			// SET ai_leaf_prior=calibrated: the order uses the model calibrated to the leaf's observed pass rate;
 			// the speculative gate above keeps the model's own estimate.
-			vector<double> p_ord = p_row;
-			if (AIConfig::Get().leaf_prior_calibrated) {
-				bind_data.leaf_prior_stats->Adjust(p_ord);
+			const vector<double> *p_use = &p_row;
+			vector<double> p_ord;
+			if (AIConfig::Get().leaf_prior_calibrated && bind_data.leaf_prior_stats->any.load()) {
+				p_ord = p_row;
+				bind_data.leaf_prior_stats->Adjust(MetaTransaction::Get(context).GetActiveQuery(), p_ord);
+				p_use = &p_ord;
 			}
-			idx_t leaf = warm_pick ? warm_leaf : AIFilterTreeChooseNextLeaf(tree, leaf_values[row], p_ord, eff_cost);
+			idx_t leaf = warm_pick ? warm_leaf : AIFilterTreeChooseNextLeaf(tree, leaf_values[row], *p_use, eff_cost);
 			if (leaf >= n) {
 				// A concurrent waiter routed this row's last unknown leaf between the fold check above and
 				// the pick: nothing left to evaluate. Re-fold and resolve; fall back to the first unknown
@@ -2810,7 +2829,7 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 				if (!any) {
 					break;
 				}
-				const idx_t alt = AIFilterTreeChooseNextLeaf(tree, leaf_values[row], p_ord, masked);
+				const idx_t alt = AIFilterTreeChooseNextLeaf(tree, leaf_values[row], *p_use, masked);
 				if (alt >= n || masked[alt] >= 1e29 || alt == leaf) {
 					break;
 				}
@@ -2889,7 +2908,8 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 				waiters.swap(self->waiters);
 			}
 			if (value_ok) {
-				bind_data.leaf_prior_stats->Add(n, leaf, p_row[leaf], value);
+				bind_data.leaf_prior_stats->Add(MetaTransaction::Get(context).GetActiveQuery(), n, leaf, p_row[leaf],
+				                                value);
 			}
 			completions.fetch_add(1);              // only real calls advance the async trainer's cadence
 			route_row(row, leaf, value, value_ok); // the fetcher's own row

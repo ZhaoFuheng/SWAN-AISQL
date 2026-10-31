@@ -396,6 +396,9 @@ void AILimitPushdown::Visit(unique_ptr<LogicalOperator> &op) {
 	if (op->type != LogicalOperatorType::LOGICAL_LIMIT || op->children.size() != 1) {
 		return;
 	}
+	// every LIMIT's consumer may stop early, whatever its shape (OFFSET, an expression): the regions below keep their
+	// cold gate (LogicalAIRegion::under_limit) unless the push-down below gives them a limit of their own
+	MarkUnderLimit(*op->children[0]);
 	auto &limit = op->Cast<LogicalLimit>();
 	if (limit.limit_val.Type() != LimitNodeType::CONSTANT_VALUE) {
 		return; // only a constant LIMIT k (not a percentage / expression)
@@ -444,7 +447,6 @@ void AILimitPushdown::Visit(unique_ptr<LogicalOperator> &op) {
 		// join's preserved side, where k passers still yield >=k join-output rows.
 		TryPushBelowPreservingJoin(cur.get(), k);
 	}
-	MarkUnderLimit(*op->children[0]);
 }
 
 void AILimitPushdown::MarkUnderLimit(LogicalOperator &op) {

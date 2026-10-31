@@ -439,7 +439,7 @@ void AILeafRegionState::ApplyVerdict(idx_t l, uint32_t rep_id, bool value, bool 
 	if (valid) {
 		observed_n[l]++;
 		observed_true[l] += value ? 1 : 0;
-		sum_logit_pask[l] += AILeafLogit(rep.p);
+		sum_logit_pask[l] += AILeafLogit(rep.p_asked);
 	}
 }
 
@@ -466,6 +466,7 @@ void AILeafRegionState::SubmitRep(idx_t l, uint32_t rep_id) {
 	auto &leaf = leaves[l];
 	auto &rep = leaf.reps[rep_id];
 	rep.state = 2;
+	rep.p_asked = rep.p; // the estimate this rep is asked at: the calibration's reference (as the batch path)
 	if (!dispatcher) {
 		dispatcher = make_uniq<AIAsyncDispatcher>(AIConfig::Get().max_concurrency);
 	}
@@ -523,6 +524,7 @@ void AILeafRegionState::DispatchBounded(idx_t cap) {
 					vector<uint32_t> rows = std::move(rep.waiters);
 					rep.waiters.clear();
 					rep.state = 0;
+					rep.has_hint_row = false; // its rows are re-decided: the write hint's row is chosen afresh
 					RefreshStalePredictions(rows.data(), rows.size());
 					for (const auto row : rows) {
 						DecideRow(row); // may finish the row, move it, or choose this rep again (re-queued)
@@ -666,6 +668,7 @@ void AILeafRegionState::RunInlineWave(idx_t l) {
 			leaf.reps[rep_id].reuse_hint = ReuseHintFor(leaf.reps[rep_id].hint_row, l);
 		}
 		leaf.reps[rep_id].state = 2;
+		leaf.reps[rep_id].p_asked = leaf.reps[rep_id].p; // as SubmitRep
 		wave.reps.push_back(rep_id);
 		wave.texts.prompt.push_back(leaf.texts.prompt[rep_id]);
 		wave.texts.pred_text.push_back(leaf.texts.pred_text[rep_id]);

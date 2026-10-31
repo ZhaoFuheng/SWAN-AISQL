@@ -68,3 +68,69 @@ query I
 SELECT count(*) > 0 FROM r_on;
 ----
 true
+
+# === a list projection that uses regexp_replace (agent_bench Q21's normalized_categories) ===
+# DuckDB registers regexp_replace as able to throw and, unlike regexp_extract, keeps that for a constant
+# pattern; the pull-up treats a constant pattern and replacement as safe, so the lift still happens.
+statement ok
+SET ai_pullup = true;
+
+statement ok
+SELECT ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE r_re AS
+WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] lists several services? '||id)),
+     norm AS (SELECT id, regexp_replace(coalesce(regexp_extract(cats, '^(.*)$', 1), ''), '^cafe, ', '') AS raw FROM s),
+     tok AS (SELECT n.id, trim(t.v) AS category FROM norm n, LATERAL UNNEST(string_split(n.raw, ',')) AS t(v)
+             WHERE trim(t.v) <> '')
+SELECT id, category FROM tok;
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+77
+
+# the global-replace option is a constant too
+statement ok
+SELECT ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE r_re_g AS
+WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] lists several services? '||id)),
+     norm AS (SELECT id, regexp_replace(cats, 'a', 'A', 'g') AS raw FROM s),
+     tok AS (SELECT n.id, trim(t.v) AS category FROM norm n, LATERAL UNNEST(string_split(n.raw, ',')) AS t(v)
+             WHERE trim(t.v) <> '')
+SELECT id, category FROM tok;
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+77
+
+query I
+SELECT count(*) FROM r_re_g WHERE category LIKE '%a%';
+----
+0
+
+# control: a pattern read from a column can throw on a data row, so the predicate stays below the UNNEST
+statement ok
+SELECT ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE r_re_col AS
+WITH s AS (SELECT id, cats FROM biz WHERE ai_filter('[p=60] lists several services? '||id)),
+     norm AS (SELECT id, regexp_replace(cats, cats, '') AS raw FROM s),
+     tok AS (SELECT n.id, trim(t.v) AS category FROM norm n, LATERAL UNNEST(string_split(n.raw, ',')) AS t(v)
+             WHERE trim(t.v) <> '')
+SELECT id, category FROM tok;
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+100
+
+query I
+SELECT count(*) FROM r_re WHERE category = 'cafe';
+----
+0

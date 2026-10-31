@@ -84,7 +84,7 @@ SemBench wrote for it to make a macro, so its numbers stay in the per-query tabl
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.735* | 25,777 | $6.82 | 2,088 s |
 | ThalamusDB 0.1.15 | 0.661* | 19,512 | $2.09 | 8,582 s |
 | PLOP-DP | 1.000 | 13,329 | $0.50 | 1,092 s |
-| **SWAN-AISQL** | **1.000** | **11,172** | **$0.29** | **789 s** |
+| **SWAN-AISQL** | **1.000** | **10,997** | **$0.28** | **784 s** |
 
 SWAN and PLOP consume the same recorded verdict per shared prompt, so both match the ground truth (PLOP's
 un-rewritten execution) by construction; *the other systems' verdicts are independent samples, so their
@@ -99,7 +99,7 @@ every system plans itself)
 | BlendSQL 0.1.27 | 0.761 | 59,620 | $4.95 | 4,608 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.766 | 70,933 | $9.85 | 2,991 s |
 | PLOP-DP | 0.704 | 25,640 | $1.11 | 10,270 s |
-| **SWAN-AISQL** | 0.777 | **20,176** | **$2.20** | **2,143 s** |
+| **SWAN-AISQL** | 0.777 | **19,528** | **$2.12** | **2,092 s** |
 
 Quality is at parity among LOTUS, BlendSQL, Palimpzest and SWAN (the model's verdicts bound it); calls, cost
 and latency are the separation.

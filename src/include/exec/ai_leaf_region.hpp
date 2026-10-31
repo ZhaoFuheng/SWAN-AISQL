@@ -103,8 +103,9 @@ public:
 private:
 	struct Rep {
 		double p = 0.5;
-		uint64_t p_step = 0; //! model training step the prediction was made at (stale once it advances)
-		vector<float> feat;  //! selectivity feature, embedded once at staging; a refresh is a forward pass
+		double p_asked = 0.5; //! p at submission: verdicts are compared with the estimate they were asked at
+		uint64_t p_step = 0;  //! model training step the prediction was made at (stale once it advances)
+		vector<float> feat;   //! selectivity feature, embedded once at staging; a refresh is a forward pass
 		double cost = 1.0;
 		bool valid = true;
 		int8_t verdict = -1;      //! -1 unknown, 0 false, 1 true (meaningful once state == DONE)

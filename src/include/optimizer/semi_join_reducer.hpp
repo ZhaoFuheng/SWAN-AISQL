@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include "duckdb/common/unordered_map.hpp"
 #include "duckdb/optimizer/optimizer.hpp"
 #include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/planner/column_binding.hpp"
@@ -36,6 +37,27 @@ bool AIExpressionHasVolatileNonAI(const Expression &expr);
 bool AIPlanHasVolatileNonAI(const LogicalOperator &op);
 //! The same over one operator's own expression slots only (no descent into its children).
 bool AIOperatorHasVolatileNonAI(const LogicalOperator &op);
+
+//! True iff `expr` holds a non-AI expression that can throw at runtime (a cast that can fail, a fallible function,
+//! a subquery); the AI functions' own failures are excluded, as for volatility. A rewrite that evaluates such an
+//! expression on rows the query would not have evaluated it on (rows a filter rejects) changes a result into an
+//! error.
+bool AIExpressionCanThrowNonAI(const Expression &expr);
+//! The same over every expression an operator holds.
+bool AIOperatorCanThrowNonAI(const LogicalOperator &op);
+//! Make a SEMI-join key safe to evaluate on any row: every cast that can throw becomes a TRY cast (the same value
+//! where the cast succeeds, NULL, so no match, where the query would have thrown). False when the key holds a
+//! fallible function, which has no such form, or an AI call.
+bool AIMakeKeyInfallible(ClientContext &context, unique_ptr<Expression> &expr);
+//! True iff a throwing non-AI expression sits at or above an AI predicate in `op`'s subtree. A copy of such a
+//! subtree with its AI predicates stripped (a reducer, a demand body) evaluates that expression on the rows the
+//! predicate would have removed: CAST(txt AS INTEGER) AS k over WHERE ai_filter(..) throws on the 'bad' row the
+//! filter rejects. Such a subtree is not copied.
+//! `bodies` (the demand reduction's CTE index -> body map) lets the walk follow a CTE reference into the body the
+//! caller is about to inline: its predicate counts as below the reference. Without it a reference is opaque,
+//! which is right for the reducer's copies (they keep the reference; the body is not stripped).
+bool AIPlanThrowsAboveAIPredicate(const LogicalOperator &op,
+                                  const unordered_map<idx_t, LogicalOperator *> *bodies = nullptr);
 
 class SemiJoinReducer {
 public:

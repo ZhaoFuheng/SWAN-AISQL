@@ -25,6 +25,7 @@
 #include "duckdb/planner/logical_operator_visitor.hpp"
 #include "duckdb/planner/operator/logical_sample.hpp"
 #include "duckdb/function/lambda_functions.hpp"
+#include "duckdb/function/scalar/regexp.hpp"
 #include "duckdb/planner/logical_operator_deep_copy.hpp"
 #include "duckdb/common/enums/join_type.hpp"
 
@@ -249,6 +250,25 @@ void SemiJoinReducer::GatherChild(unique_ptr<LogicalOperator> &child,
 //! outer join (a filter above may test IS NULL), EXCEPT's right side, a CTE body (its references may sit
 //! anywhere), or anything whose output depends on the row set as a whole: a LIMIT / TOP_N / SAMPLE, a
 //! window, an aggregate (HAVING, or a key computed by it), DISTINCT ON, a recursive CTE.
+//! The one table of which child a one-sided join keeps every row of (LEFT, SINGLE, ANTI, MARK and SEMI the left,
+//! RIGHT, RIGHT_ANTI and RIGHT_SEMI the right): the stripping superset rule and the reducer's descent read it.
+static bool JoinPreservesChild(JoinType type, idx_t child) {
+	switch (type) {
+	case JoinType::LEFT:
+	case JoinType::SINGLE:
+	case JoinType::ANTI:
+	case JoinType::MARK:
+	case JoinType::SEMI:
+		return child == 0;
+	case JoinType::RIGHT:
+	case JoinType::RIGHT_ANTI:
+	case JoinType::RIGHT_SEMI:
+		return child == 1;
+	default:
+		return false;
+	}
+}
+
 static bool StripKeepsSuperset(const LogicalOperator &op, idx_t child) {
 	switch (op.type) {
 	case LogicalOperatorType::LOGICAL_ASOF_JOIN:
@@ -268,10 +288,9 @@ static bool StripKeepsSuperset(const LogicalOperator &op, idx_t child) {
 		case JoinType::SINGLE:
 		case JoinType::ANTI:
 		case JoinType::MARK:
-			return child == 0;
 		case JoinType::RIGHT:
 		case JoinType::RIGHT_ANTI:
-			return child == 1;
+			return JoinPreservesChild(op.Cast<LogicalJoin>().join_type, child);
 		default:
 			return false; // FULL OUTER, anything new
 		}
@@ -389,6 +408,293 @@ bool AIOperatorHasVolatileNonAI(const LogicalOperator &op) {
 	return found;
 }
 
+// A cast that parses: its source is text (VARCHAR, BLOB, BIT), so whether it fails depends on the row's bytes.
+// Casts between numeric or temporal types are typed as throwable too (BIGINT -> TINYINT can overflow), but the
+// ones a plan carries are almost all DuckDB's own compressed-materialization and statistics narrowings, which
+// cannot fail by construction; gating on them would pin nearly every lift and reduction (agent_bench +840 calls).
+static bool IsIntegralType(const LogicalType &type) {
+	switch (type.id()) {
+	case LogicalTypeId::TINYINT:
+	case LogicalTypeId::SMALLINT:
+	case LogicalTypeId::INTEGER:
+	case LogicalTypeId::BIGINT:
+	case LogicalTypeId::UTINYINT:
+	case LogicalTypeId::USMALLINT:
+	case LogicalTypeId::UINTEGER:
+	case LogicalTypeId::UBIGINT:
+		return true;
+	default:
+		return false;
+	}
+}
+
+// A cast whose failure depends on the row: a parse from text, a float/decimal/huge value into a narrower type,
+// anything but an integer-to-integer narrowing. Those narrowings are where DuckDB's own type pushdown puts the
+// casts it has proven safe (CAST(#0 AS TINYINT) over a range(1, 11) column); a user's CAST(x AS TINYINT) that
+// overflows on a row the AI predicate would have rejected is the accepted residual risk.
+static bool IsDataDependentCast(const BoundFunctionExpression &fn) {
+	const auto source = BoundCastExpression::SourceType(fn);
+	const auto &target = BoundCastExpression::TargetType(fn);
+	if (!BoundCastExpression::CastCanThrow(source, target, BoundCastExpression::IsTryCast(fn))) {
+		return false;
+	}
+	return !(IsIntegralType(source) && IsIntegralType(target));
+}
+
+//! FLOAT or DOUBLE anywhere in `type`: a bare column, a list or array element, a struct field, a map side, a union
+//! member. Equality on such values is not identity (-0.0 = 0.0, NaN = NaN), so f(a) may differ from f(b).
+static bool TypeContainsApproximate(const LogicalType &type) {
+	switch (type.id()) {
+	case LogicalTypeId::FLOAT:
+	case LogicalTypeId::DOUBLE:
+		return true;
+	case LogicalTypeId::LIST:
+		return TypeContainsApproximate(ListType::GetChildType(type));
+	case LogicalTypeId::ARRAY:
+		return TypeContainsApproximate(ArrayType::GetChildType(type));
+	case LogicalTypeId::MAP:
+		return TypeContainsApproximate(MapType::KeyType(type)) || TypeContainsApproximate(MapType::ValueType(type));
+	case LogicalTypeId::STRUCT:
+	case LogicalTypeId::UNION:
+		for (auto &child : StructType::GetChildTypes(type)) {
+			if (TypeContainsApproximate(child.second)) {
+				return true;
+			}
+		}
+		return false;
+	default:
+		return false;
+	}
+}
+
+static bool IsAIFunctionName(const string &name) {
+	return StringUtil::StartsWith(name, "ai_") || name == "speculative_ai_function_with_embed";
+}
+
+// +, - and * are declared fallible for one reason, integer overflow; a key or a prompt-building projection that
+// adds, subtracts or multiplies (rid * 2 AS rkey, price + 1) is treated as safe to evaluate on more rows than
+// the query does. The residual risk is an overflow on a row the AI predicate would have rejected, which the
+// query would not have hit; it is accepted so that the common computed key keeps its reduction.
+static bool IsOverflowOnlyArithmetic(const BoundFunctionExpression &fn) {
+	const string &name = fn.Function().GetName().GetIdentifierName();
+	return name == "+" || name == "-" || name == "*";
+}
+
+// A regular-expression call whose pattern is a constant cannot throw on a data row: the pattern is compiled once
+// (DuckDB's RegexExtractBind already clears the function's error mode in that case, RegexReplaceBind does not),
+// and a constant replacement string is validated here the way RE2 validates it per call. A non-constant
+// pattern or replacement, a non-constant options string, or the byte escape \C (a partial character in the
+// result) keep the function fallible.
+static bool IsConstantPatternRegex(const BoundFunctionExpression &fn) {
+	const string &name = fn.Function().GetName().GetIdentifierName();
+	const bool is_replace = name == "regexp_replace";
+	if (name != "regexp_matches" && name != "regexp_full_match" && name != "regexp_extract" &&
+	    name != "regexp_extract_all" && name != "regexp_split_to_array" && !is_replace) {
+		return false;
+	}
+	const idx_t options_idx = is_replace ? 3 : 2;
+	if (fn.GetChildren().size() < 2 || fn.GetChildren().size() <= options_idx - 1) {
+		return false;
+	}
+	auto constant_string = [&](idx_t i, string &out) {
+		if (i >= fn.GetChildren().size()) {
+			out.clear();
+			return true; // absent: the default
+		}
+		if (fn.GetChildren()[i]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
+			return false;
+		}
+		auto &value = fn.GetChildren()[i]->Cast<BoundConstantExpression>().GetValue();
+		if (value.IsNull() || value.type().id() != LogicalTypeId::VARCHAR) {
+			return false;
+		}
+		out = StringValue::Get(value);
+		return true;
+	};
+	string pattern, replacement, options_str;
+	if (!constant_string(1, pattern) || pattern.find("\\C") != string::npos) {
+		return false;
+	}
+	if (is_replace && !constant_string(2, replacement)) {
+		return false;
+	}
+	if (name == "regexp_extract" || name == "regexp_extract_all") {
+		// the group argument is an integer or a constant list; the options string sits one further
+		if (fn.GetChildren().size() > 2 &&
+		    fn.GetChildren()[2]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
+			return false;
+		}
+		if (!constant_string(3, options_str)) {
+			return false;
+		}
+	} else if (!constant_string(options_idx, options_str)) {
+		return false;
+	}
+	duckdb_re2::RE2::Options options;
+	options.set_log_errors(false);
+	bool global_replace = false; // 'g' is valid for regexp_replace only; the parser throws on it otherwise
+	try {
+		regexp_util::ParseRegexOptions(options_str, options, is_replace ? &global_replace : nullptr);
+	} catch (...) {
+		return false;
+	}
+	duckdb_re2::RE2 re(pattern, options);
+	if (!re.ok()) {
+		return false;
+	}
+	if (is_replace) {
+		string error;
+		if (!re.CheckRewriteString(replacement, &error)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool AIExpressionCanThrowNonAI(const Expression &expr) {
+	switch (expr.GetExpressionClass()) {
+	case ExpressionClass::BOUND_FUNCTION: {
+		auto &fn = expr.Cast<BoundFunctionExpression>();
+		if (BoundCastExpression::IsCast(fn)) {
+			if (IsDataDependentCast(fn)) {
+				return true;
+			}
+		} else {
+			if (IsAIFunctionName(fn.Function().GetName().GetIdentifierName())) {
+				// the call moves or is stripped as a whole, arguments included: nothing inside it is evaluated
+				// anywhere it was not (its own request failures are not the query's business here)
+				return false;
+			}
+			// functions are infallible unless they declare otherwise (SetFallible)
+			if (fn.Function().GetErrorMode() == FunctionErrors::CAN_THROW_RUNTIME_ERROR &&
+			    !IsOverflowOnlyArithmetic(fn) && !IsConstantPatternRegex(fn)) {
+				return true;
+			}
+			if (fn.Function().HasBindLambdaCallback() && fn.BindInfo()) {
+				auto body = fn.BindInfo()->Cast<LambdaFunctionData>().GetLambdaExpression();
+				if (body && AIExpressionCanThrowNonAI(*body)) {
+					return true;
+				}
+			}
+		}
+		break;
+	}
+	case ExpressionClass::BOUND_SUBQUERY:
+		return true;
+	default:
+		break;
+	}
+	bool found = false;
+	ExpressionIterator::EnumerateChildren(expr, [&](const Expression &child) {
+		if (!found && AIExpressionCanThrowNonAI(child)) {
+			found = true;
+		}
+	});
+	return found;
+}
+
+bool AIMakeKeyInfallible(ClientContext &context, unique_ptr<Expression> &expr) {
+	if (expr->GetExpressionClass() == ExpressionClass::BOUND_FUNCTION) {
+		auto &fn = expr->Cast<BoundFunctionExpression>();
+		if (BoundCastExpression::IsCast(fn)) {
+			auto &child = BoundCastExpression::ChildMutable(fn);
+			if (!AIMakeKeyInfallible(context, child)) {
+				return false;
+			}
+			const auto target = BoundCastExpression::TargetType(fn);
+			if (BoundCastExpression::CastCanThrow(BoundCastExpression::SourceType(fn), target,
+			                                      BoundCastExpression::IsTryCast(fn))) {
+				auto inner = std::move(child);
+				expr = BoundCastExpression::AddCastToType(context, std::move(inner), target, /*try_cast=*/true);
+			}
+			return true;
+		}
+		if (IsAIFunctionName(fn.Function().GetName().GetIdentifierName()) ||
+		    (fn.Function().GetErrorMode() == FunctionErrors::CAN_THROW_RUNTIME_ERROR &&
+		     !IsOverflowOnlyArithmetic(fn))) {
+			return false; // an AI call is never a key; a fallible function has no TRY form
+		}
+	} else if (expr->GetExpressionClass() == ExpressionClass::BOUND_SUBQUERY) {
+		return false;
+	}
+	bool ok = true;
+	ExpressionIterator::EnumerateChildren(*expr, [&](unique_ptr<Expression> &child) {
+		if (ok && !AIMakeKeyInfallible(context, child)) {
+			ok = false;
+		}
+	});
+	return ok;
+}
+
+bool AIOperatorCanThrowNonAI(const LogicalOperator &op) {
+	bool found = false;
+	LogicalOperatorVisitor::EnumerateExpressions(op, [&](const unique_ptr<Expression> *e) {
+		if (!found && *e && AIExpressionCanThrowNonAI(**e)) {
+			found = true;
+		}
+	});
+	return found;
+}
+
+// Post-order: does the subtree hold an AI predicate, and is a throwing non-AI expression evaluated at or above one?
+static bool SubtreeHasAIThroughCTEs(const LogicalOperator &op, const unordered_map<idx_t, LogicalOperator *> *bodies,
+                                    idx_t depth) {
+	if (op.type == LogicalOperatorType::LOGICAL_CTE_REF && bodies && depth < 16) {
+		auto it = bodies->find(op.Cast<LogicalCTERef>().cte_index.index);
+		if (it != bodies->end() && SubtreeHasAIThroughCTEs(*it->second, bodies, depth + 1)) {
+			return true;
+		}
+	}
+	bool here = false;
+	LogicalOperatorVisitor::EnumerateExpressions(op, [&](const unique_ptr<Expression> *e) {
+		if (!here && *e && ExpressionHasAIFunction(**e)) {
+			here = true;
+		}
+	});
+	if (here) {
+		return true;
+	}
+	for (auto &child : op.children) {
+		if (SubtreeHasAIThroughCTEs(*child, bodies, depth)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool ThrowsAboveAIPredicate(const LogicalOperator &op, bool &ai_below,
+                                   const unordered_map<idx_t, LogicalOperator *> *bodies) {
+	bool ai_in_children = false;
+	// a reference to a CTE the caller will resolve into its body (the demand reduction inlines it, stripped): the
+	// predicate hidden in that body counts as below this operator
+	if (op.type == LogicalOperatorType::LOGICAL_CTE_REF && bodies) {
+		auto it = bodies->find(op.Cast<LogicalCTERef>().cte_index.index);
+		ai_in_children = it != bodies->end() && SubtreeHasAIThroughCTEs(*it->second, bodies, 0);
+	}
+	for (auto &child : op.children) {
+		bool child_ai = false;
+		if (ThrowsAboveAIPredicate(*child, child_ai, bodies)) {
+			return true;
+		}
+		ai_in_children = ai_in_children || child_ai;
+	}
+	bool ai_here = false;
+	LogicalOperatorVisitor::EnumerateExpressions(op, [&](const unique_ptr<Expression> *e) {
+		if (!ai_here && *e && ExpressionHasAIFunction(**e)) {
+			ai_here = true;
+		}
+	});
+	ai_below = ai_in_children || ai_here;
+	// at the predicate's own operator too: WHERE ai_filter(..) AND CAST(txt AS INTEGER) > 3 keeps the cast once the
+	// AI conjunct is stripped
+	return ai_below && AIOperatorCanThrowNonAI(op);
+}
+
+bool AIPlanThrowsAboveAIPredicate(const LogicalOperator &op, const unordered_map<idx_t, LogicalOperator *> *bodies) {
+	bool ai_below = false;
+	return ThrowsAboveAIPredicate(op, ai_below, bodies);
+}
+
 bool AIPlanHasVolatileNonAI(const LogicalOperator &op) {
 	if (AIOperatorHasVolatileNonAI(op)) {
 		return true;
@@ -472,6 +778,12 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 	// spliced BELOW leaf i's ai_filter so the LLM predicate runs only on the reduced rows. Returns true if it
 	// was actually spliced in (false = a safe skip: non-serializable subplan or a binding mismatch).
 	auto apply_reducer = [&](idx_t i, idx_t j, const vector<Edge> &redu_edges) -> bool {
+		// The copy keeps leaf j's relational skeleton with its AI predicates stripped: an expression above one of
+		// them that can throw (CAST(txt AS INTEGER) AS k over WHERE ai_filter(..)) would run on the rows the
+		// predicate rejects ('bad'), which the query never casts. No reduction by such a leaf.
+		if (AIPlanThrowsAboveAIPredicate(*leaves[j].get())) {
+			return false;
+		}
 		// The copy of leaf j lands in leaf i. A CTE that encloses j but not i (a looked-past CTE whose main query
 		// holds j) is not in scope there, and a scan of it outside its definition fails at execution.
 		std::set<idx_t> refs, defs;
@@ -587,10 +899,17 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 			auto in_side = [&](const ColumnBinding &b) {
 				return std::find(side_bindings.begin(), side_bindings.end(), b) != side_bindings.end();
 			};
+			const Expression *root = expr.get();
 			std::function<void(unique_ptr<Expression> &)> rewrite = [&](unique_ptr<Expression> &e) {
 				if (e->GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
 					auto &colref = e->Cast<BoundColumnRefExpression>();
 					if (in_side(colref.Binding())) {
+						return;
+					}
+					// Inside a COMPUTED key, equal is not interchangeable for an approximate column: -0.0 = 0.0 and NaN
+					// = NaN, but their texts (k::VARCHAR) differ, so f(a) can miss what f(b) matched. A bare key
+					// column swaps freely: the SEMI then compares it with =, exactly as the join does.
+					if (e.get() != root && TypeContainsApproximate(colref.GetReturnType())) {
 						return;
 					}
 					for (auto &cond : join.conditions) {
@@ -725,12 +1044,7 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 						if (pass == 0 && !SubtreeHasAIFunction(*node.children[k])) {
 							continue;
 						}
-						const bool preserved =
-						    join_type == JoinType::INNER ||
-						    (k == 0 && (join_type == JoinType::LEFT || join_type == JoinType::SEMI ||
-						                join_type == JoinType::ANTI)) ||
-						    (k == 1 && (join_type == JoinType::RIGHT || join_type == JoinType::RIGHT_SEMI ||
-						                join_type == JoinType::RIGHT_ANTI));
+						const bool preserved = join_type == JoinType::INNER || JoinPreservesChild(join_type, k);
 						if (!preserved) {
 							continue;
 						}
@@ -784,6 +1098,15 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 				}
 			}
 			if (!keys_available(next, node.children[0]->GetColumnBindings())) {
+				break;
+			}
+			// A key that became fallible on the way down (k = CAST(txt AS INTEGER) in a projection) is computed
+			// natively only on the rows that reach that projection; a SEMI below the AI predicate would compute it on
+			// the rows it rejects ('bad' throws). Its casts become TRY casts -- the same value where the cast
+			// succeeds, NULL (so no match) where the query would have thrown -- and a fallible function ends the
+			// descent, the SEMI landing above.
+			if (std::any_of(next.begin(), next.end(),
+			                [&](unique_ptr<Expression> &e) { return !AIMakeKeyInfallible(optimizer.context, e); })) {
 				break;
 			}
 			lhs_exprs = std::move(next);

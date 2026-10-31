@@ -206,6 +206,12 @@ static bool Commutes(const LogicalOperator &op, idx_t child_idx, bool &reduces) 
 	if (AIOperatorHasVolatileNonAI(op)) {
 		return false;
 	}
+	// an operator whose own expressions can throw (a projection's CAST(txt AS INTEGER), an unnest argument, a
+	// join condition) evaluates them on every row it sees: lifted above it, the predicate would let the rows it
+	// rejects reach them first -- plain DuckDB computes a SELECT list only on the rows WHERE kept
+	if (AIOperatorCanThrowNonAI(op)) {
+		return false;
+	}
 	switch (op.type) {
 	case LogicalOperatorType::LOGICAL_FILTER:
 		// a relational conjunct above the predicate's site removes rows before it runs

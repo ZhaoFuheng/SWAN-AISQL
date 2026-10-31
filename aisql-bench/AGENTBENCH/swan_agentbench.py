@@ -61,11 +61,17 @@ def main():
     per_query = {}
     for name in which:
         sql = open(os.path.join(HERE, QUERY_DIR, name + ".sql")).read()
-        script = (f"SET ai_endpoint='{PROXY}';\n{EXTRA_SET}\n.mode csv\n.headers on\n" + sql +
+        # .bail on: a rejected SET ends the shell (no usage marker -> error) instead of running on defaults
+        script = (f".bail on\nSET ai_endpoint='{PROXY}';\n{EXTRA_SET}\n.mode csv\n.headers on\n" + sql +
                   f"\n.print {MARK}\n"
                   "SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT AS chat, sum(cache_hits)::BIGINT AS hits,"
                   " sum(total_tokens)::BIGINT AS tok, round(sum(cost_usd),5) AS cost,"
                   " sum(hedged_calls)::BIGINT AS hedged FROM ai_usage();\n")
+        # Remove the previous run's rows first: a failed run (rejected SET, crash) writes no CSV, and the
+        # scorer would otherwise read the stale file and score the failure as the earlier success.
+        csv_path = os.path.join(HERE, "results", TAG, name + ".csv")
+        if os.path.exists(csv_path):
+            os.remove(csv_path)
         t0 = time.time()
         p = subprocess.run([BIN], input=script, env=ENV, text=True, capture_output=True, cwd=HERE)
         dt = time.time() - t0
@@ -89,7 +95,7 @@ def main():
             # the setup statements are DDL.
             result_csv = result_part.strip("\n")
             rows = max(0, csv_row_count(result_csv))
-            open(os.path.join(HERE, "results", TAG, name + ".csv"), "w").write(result_csv + "\n")
+            open(csv_path, "w").write(result_csv + "\n")
         elif not err:
             err = "no usage marker in output"
         rec = {"latency_s": round(dt, 1), "llm_calls": chat, "local_hits": hits, "tokens": tok,

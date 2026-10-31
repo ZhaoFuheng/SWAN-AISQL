@@ -1,0 +1,177 @@
+# name: test/sql/pullup/fallible_expressions.test
+# description: An expression that can throw (CAST(txt AS INTEGER) on 'bad') is evaluated natively only on the rows
+# group: [pullup]
+
+#              the WHERE kept. Neither the semi-join reducer (a key translated into the cast) nor the pull-up (lifting
+#              the AI predicate above the projection holding it) may evaluate it on the rows the AI predicate rejects.
+#              Also: a lateral unnest of an ARRAY argument, and a DOUBLE column swapped inside a computed key.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+# [p=50] k34 rejects exactly the 'bad' row (id 2) and keeps 1, 3, 4
+statement ok
+CREATE TABLE t AS SELECT i AS id, 'd' || i AS body, CASE WHEN i = 2 THEN 'bad' ELSE i::VARCHAR END AS txt FROM range(1, 5) r(i);
+
+statement ok
+CREATE TABLE nb AS SELECT * FROM (VALUES (1), (2), (3)) v(id);
+
+query I
+SELECT list(id ORDER BY id) FROM t WHERE ai_filter('[p=50] k34 ' || body);
+----
+[1, 3, 4]
+
+# (a) the join key is the cast: the reducer's SEMI stays above the AI predicate instead of casting 'bad' below it
+query I
+SELECT count(*) FROM (SELECT CAST(txt AS INTEGER) AS k, body FROM t WHERE ai_filter('[p=50] k34 ' || body)) a JOIN nb ON nb.id = a.k;
+----
+2
+
+# (b) the pull-up does not lift the predicate above the projection that computes the cast
+statement ok
+SET ai_semi_reduce = false;
+
+query I
+SELECT count(*) FROM (SELECT CAST(txt AS INTEGER) AS k, body FROM t WHERE ai_filter('[p=50] k34 ' || body)) a JOIN nb ON nb.id = a.k;
+----
+2
+
+statement ok
+SET ai_speculative = false;
+
+query I
+SELECT count(*) FROM (SELECT CAST(txt AS INTEGER) AS k, body FROM t WHERE ai_filter('[p=50] k34 ' || body)) a JOIN nb ON nb.id = a.k;
+----
+2
+
+# (c) ... and not above a lateral unnest whose argument casts
+query I
+WITH s AS (SELECT * FROM t WHERE ai_filter('[p=50] k34 ' || body))
+SELECT count(*) FROM s, LATERAL UNNEST(string_split(CAST(s.txt AS INTEGER)::VARCHAR, ',')) AS u(v) JOIN nb ON nb.id = s.id;
+----
+2
+
+statement ok
+RESET ai_speculative;
+
+statement ok
+RESET ai_semi_reduce;
+
+# (c2) the demand reduction's copy of an AI CTE body is gated the same way
+statement ok
+SET ai_inline_ai_ctes = false;
+
+query I
+WITH cands AS (SELECT CAST(txt AS INTEGER) AS k, body FROM t WHERE ai_filter('[p=50] k34 ' || body))
+SELECT count(*) FROM cands JOIN nb ON nb.id = cands.k;
+----
+2
+
+statement ok
+RESET ai_inline_ai_ctes;
+
+# (d) a lateral unnest of an ARRAY argument through the rewrite (it used to crash the process): 20 kept businesses,
+# two elements each, same with the rewrite off
+statement ok
+CREATE TABLE biz AS SELECT i AS id, 'c' || (i % 3)::VARCHAR || ',bar' AS cats, 'b' || i AS body FROM range(100) r(i);
+
+statement ok
+CREATE TABLE keep AS SELECT i AS id FROM range(0, 100, 5) r(i);
+
+query II
+WITH sc AS (SELECT * FROM biz WHERE ai_filter('[p=100] arr ' || body)),
+     tok AS (SELECT sc.id, t.v FROM sc, LATERAL UNNEST(array_value(sc.id, sc.id + 1000)) AS t(v))
+SELECT count(*), sum(v) FROM tok JOIN sc ON sc.id = tok.id JOIN keep k ON k.id = tok.id;
+----
+40	21900
+
+statement ok
+SET ai_lateral_unnest = false;
+
+query II
+WITH sc AS (SELECT * FROM biz WHERE ai_filter('[p=100] arr ' || body)),
+     tok AS (SELECT sc.id, t.v FROM sc, LATERAL UNNEST(array_value(sc.id, sc.id + 1000)) AS t(v))
+SELECT count(*), sum(v) FROM tok JOIN sc ON sc.id = tok.id JOIN keep k ON k.id = tok.id;
+----
+40	21900
+
+statement ok
+RESET ai_lateral_unnest;
+
+# (e) a DOUBLE column inside a computed key is not swapped for its join partner: -0.0 = 0.0, but '-0.0' <> '0.0'
+statement ok
+CREATE TABLE lhs AS SELECT * FROM (VALUES (-0.0::DOUBLE, 'x1'), (1.0::DOUBLE, 'x2'), (2.0::DOUBLE, 'x3')) v(k, body);
+
+statement ok
+CREATE TABLE rhs AS SELECT * FROM (VALUES (0.0::DOUBLE), (1.0::DOUBLE), (2.0::DOUBLE)) v(k);
+
+statement ok
+CREATE TABLE outerk AS SELECT * FROM (VALUES ('0.0'), ('1.0')) v(ks);
+
+query I
+WITH cte AS (SELECT DISTINCT r.k, l.body FROM lhs l JOIN rhs r ON r.k = l.k WHERE ai_filter('[p=100] dbl ' || l.body))
+SELECT list(body ORDER BY body) FROM cte JOIN outerk o ON o.ks = cte.k::VARCHAR;
+----
+[x1, x2]
+
+statement ok
+SET ai_semi_reduce = false;
+
+query I
+WITH cte AS (SELECT DISTINCT r.k, l.body FROM lhs l JOIN rhs r ON r.k = l.k WHERE ai_filter('[p=100] dbl ' || l.body))
+SELECT list(body ORDER BY body) FROM cte JOIN outerk o ON o.ks = cte.k::VARCHAR;
+----
+[x1, x2]
+
+# (f) the same for a DOUBLE inside a container: equal lists [-0.0] and [0.0] print differently
+statement ok
+CREATE TABLE lhsl AS SELECT * FROM (VALUES ([-0.0::DOUBLE], 'y1'), ([1.0::DOUBLE], 'y2'), ([2.0::DOUBLE], 'y3')) v(k, body);
+
+statement ok
+CREATE TABLE rhsl AS SELECT * FROM (VALUES ([0.0::DOUBLE]), ([1.0::DOUBLE]), ([2.0::DOUBLE])) v(k);
+
+statement ok
+CREATE TABLE outerkl AS SELECT * FROM (VALUES ('[0.0]'), ('[1.0]')) v(ks);
+
+statement ok
+RESET ai_semi_reduce;
+
+query I
+WITH cte AS (SELECT DISTINCT r.k, l.body FROM lhsl l JOIN rhsl r ON r.k = l.k WHERE ai_filter('[p=100] dbll ' || l.body))
+SELECT list(body ORDER BY body) FROM cte JOIN outerkl o ON o.ks = cte.k::VARCHAR;
+----
+[y1, y2]
+
+# (g) a cast from a non-integral type is data dependent too: CAST(1e12 AS INTEGER) on the rejected row
+statement ok
+CREATE TABLE td AS SELECT i AS id, 'd' || i AS body, CASE WHEN i = 2 THEN 1e12 ELSE i::DOUBLE END AS d FROM range(1, 5) r(i);
+
+statement ok
+SET ai_speculative = false;
+
+query I
+SELECT count(*) FROM (SELECT CAST(d AS INTEGER) AS k, id FROM td WHERE ai_filter('[p=50] k34 ' || body)) a JOIN nb ON nb.id = a.id;
+----
+2
+
+statement ok
+RESET ai_speculative;
+
+# (h) the demand reduction follows a CTE reference: the predicate hidden in inner_c protects the cast above it
+statement ok
+SET ai_inline_ai_ctes = false;
+
+query I
+WITH inner_c AS (SELECT id, txt FROM t WHERE ai_filter('[p=50] k34 ' || body)),
+     cands AS (SELECT CAST(txt AS INTEGER) AS k FROM inner_c)
+SELECT count(*) FROM cands JOIN nb ON nb.id = cands.k;
+----
+2
+
+statement ok
+RESET ai_inline_ai_ctes;
+
+statement ok
+CALL ai_mock_stop();

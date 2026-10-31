@@ -62,12 +62,21 @@ def ensure_db():
                        env=ENV, text=True, capture_output=True, cwd=HERE)
 
 def run_sql(query):
-    script = (".mode json\n.once %s\n%s\n.once %s\n"
+    # extra SET statements for config A/Bs (e.g. SWAN_EXTRA_SET="SET ai_leaf_prior='mlp';")
+    # .bail on: a rejected SET (or any failing statement) ends the shell with a nonzero exit instead of running
+    # the query on default settings and reporting it as a success
+    for stale in (OUTF, USEF):
+        if os.path.exists(stale):
+            os.remove(stale)
+    script = ".bail on\n" + os.environ.get("SWAN_EXTRA_SET", "") + "\n" + (".mode json\n.once %s\n%s\n.once %s\n"
               "SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT AS llm_calls, sum(cache_hits)::BIGINT AS cache_hits, "
               "sum(input_tokens)::BIGINT AS input_tokens, sum(output_tokens)::BIGINT AS output_tokens, "
               "sum(reasoning_tokens)::BIGINT AS reasoning_tokens, sum(total_tokens)::BIGINT AS total_tokens, "
               "sum(cost_usd) AS cost_usd FROM ai_usage();\n" % (OUTF, query, USEF))
     p = subprocess.run([BIN, DB], input=script, env=ENV, text=True, capture_output=True, cwd=HERE)
+    if p.returncode != 0:
+        last = (p.stderr.strip().splitlines() or ["(no message)"])[-1]
+        return [], {}, p.stderr.rstrip() + f"\nduckdb exited with code {p.returncode}: {last}"
     try:
         rows = json.load(open(OUTF))
     except Exception:

@@ -2,6 +2,7 @@
 #include "optimizer/semi_join_reducer.hpp"
 
 #include "duckdb/optimizer/column_binding_replacer.hpp"
+#include "duckdb/planner/expression/bound_cast_expression.hpp"
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "duckdb/planner/expression/bound_unnest_expression.hpp"
 #include "duckdb/planner/expression_binder.hpp"
@@ -226,7 +227,10 @@ static bool RewriteOne(Binder &binder, unique_ptr<LogicalOperator> &root, unique
 		}
 		if (binding.table_index == get_index) {
 			auto unnest_expr = make_uniq<BoundUnnestExpression>(type);
-			unnest_expr->ChildMutable() = std::move(expr);
+			// an UNNEST expression unnests a LIST; an ARRAY argument (array_value(..), an INTEGER[2] column) is cast
+			// to one first, as DuckDB's own rewriter does -- the physical unnest reads a list vector and an array
+			// vector in its place is a crash
+			unnest_expr->ChildMutable() = BoundCastExpression::AddArrayCastToList(binder.context, std::move(expr));
 			const auto pos = ColumnBinding::PushExpression(unnest->expressions, std::move(unnest_expr));
 			replacer.replacement_bindings.emplace_back(binding, ColumnBinding(unnest->unnest_index, pos), type);
 		} else if (binding.table_index == arg_proj.table_index) {
@@ -250,19 +254,28 @@ static bool RewriteOne(Binder &binder, unique_ptr<LogicalOperator> &root, unique
 	return true;
 }
 
+// One rewrite per pass: a rewrite frees the dedup CTE node (and the aggregate under it), which `bodies` may still
+// name as another domain's body, so the caller re-collects the bodies before the next pass.
 static bool RewriteTree(Binder &binder, unique_ptr<LogicalOperator> &root, unique_ptr<LogicalOperator> &op,
                         const std::unordered_map<idx_t, LogicalOperator *> &bodies) {
-	bool changed = false;
 	for (auto &child : op->children) {
-		changed = RewriteTree(binder, root, child, bodies) || changed;
+		if (RewriteTree(binder, root, child, bodies)) {
+			return true;
+		}
 	}
-	return RewriteOne(binder, root, op, bodies) || changed;
+	return RewriteOne(binder, root, op, bodies);
 }
 
 bool AIRewriteLateralUnnests(Binder &binder, unique_ptr<LogicalOperator> &plan) {
-	std::unordered_map<idx_t, LogicalOperator *> bodies;
-	CollectCTEBodies(*plan, bodies);
-	const bool changed = RewriteTree(binder, plan, plan, bodies);
+	bool changed = false;
+	for (;;) {
+		std::unordered_map<idx_t, LogicalOperator *> bodies;
+		CollectCTEBodies(*plan, bodies);
+		if (!RewriteTree(binder, plan, plan, bodies)) {
+			break;
+		}
+		changed = true;
+	}
 	if (changed) {
 		plan->ResolveOperatorTypes();
 	}

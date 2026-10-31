@@ -42,6 +42,14 @@ make test_reldebug                                      # every sqllogictest und
 build/reldebug/test/unittest "*test/sql/region/*"       # one group
 ```
 
+One case pins a DuckDB optimizer off: the DISTINCT ON barrier in `test/sql/pullup/semi_reduce_barriers.test` runs
+with `SET disabled_optimizers = 'join_filter_pushdown'`. DuckDB v2.0.0's join filter pushdown routes a hash join's
+runtime filter through a `DISTINCT ON` onto the probe side's scan, and the scan applies it only when the join's
+build finishes before the scan starts, so a `DISTINCT ON` subquery joined on its result can return a different
+representative from run to run (0.5-6% of runs at 8 threads for the 10-row table in that test on a from-source
+build, load dependent; no AI function is involved, the test's comment has the plain-SQL repro). Upstream main fixed it on 2026-10-29 (commit 782a53071c66, the
+`LOGICAL_DISTINCT` case now recurses only for a plain `DISTINCT`); the v2.0 LTS branch does not carry it yet.
+
 **Code quality.** CI runs DuckDB's checks on every push. Locally, `make format-check` (or `format-fix`) needs
 clang-format 11.0.1 (`pip install clang-format==11.0.1`) and a Python new enough for its tooling
 (`PYTHON=/path/to/python3.11+ make format-check` when the default `python3` is older), and `make tidy-check`

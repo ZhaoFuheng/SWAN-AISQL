@@ -247,6 +247,10 @@ static bool ResolveCTERefs(Binder &binder, unique_ptr<LogicalOperator> &op,
 			return Decline(
 			    "resolve: the referenced CTE's body has a volatile expression: a copy would draw other keys");
 		}
+		if (AIPlanThrowsAboveAIPredicate(*entry->second, &bodies)) {
+			return Decline("resolve: the referenced CTE's body evaluates a throwing expression above its AI "
+			               "predicate: stripped, the copy would evaluate it on the rows the predicate rejects");
+		}
 		unique_ptr<LogicalOperator> body_copy;
 		{
 			LogicalOperatorDeepCopy deep_copy(binder, nullptr);
@@ -295,6 +299,11 @@ static unique_ptr<LogicalOperator> BuildDemandUnion(Binder &binder, const vector
 	for (auto &demand : demands) {
 		if (AIPlanHasVolatileNonAI(**demand.neighbour)) {
 			Decline("union: the key source has a volatile expression (nextval, random): a copy would draw other keys");
+			return nullptr;
+		}
+		if (AIPlanThrowsAboveAIPredicate(**demand.neighbour, &bodies)) {
+			Decline("union: the key source evaluates a throwing expression above an AI predicate: stripped, the copy "
+			        "would evaluate it on the rows the predicate rejects");
 			return nullptr;
 		}
 		LogicalOperatorDeepCopy deep_copy(binder, nullptr);
