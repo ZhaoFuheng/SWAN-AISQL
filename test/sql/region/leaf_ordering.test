@@ -21,6 +21,14 @@ CALL ai_mock_start();
 statement ok
 SET threads=1;
 
+# the cold phase these counts were measured under: 100-row slices, unbounded (the defaults, 20-row slices bounded
+# at one, end it after one batch and move the calibrated count to 2,680-2,700, past its bound on some machines)
+statement ok
+SET ai_leaf_slice_rows = 100;
+
+statement ok
+SET ai_leaf_cold_slices = 0;
+
 statement ok
 CREATE TABLE t AS SELECT i AS k FROM range(2000) r(i);
 
@@ -100,10 +108,16 @@ RESET ai_leaf_prior;
 statement ok
 RESET ai_leaf_lookahead;
 
-query II
-SELECT current_setting('ai_leaf_prior'), current_setting('ai_leaf_lookahead');
+statement ok
+RESET ai_leaf_slice_rows;
+
+statement ok
+RESET ai_leaf_cold_slices;
+
+query IIII
+SELECT current_setting('ai_leaf_prior'), current_setting('ai_leaf_lookahead'), current_setting('ai_leaf_slice_rows'), current_setting('ai_leaf_cold_slices');
 ----
-calibrated	1
+calibrated	1	20	1
 
 statement ok
 SELECT ai_selectivity_reset(), ai_training_reset(), ai_local_cache_clear();
