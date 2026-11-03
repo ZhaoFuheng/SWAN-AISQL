@@ -1,1 +1,0 @@
-p_partkey,p_name,p_type,p_container,l_orderkey,l_suppkey,l_quantity,l_extendedprice,l_discount,l_shipmode,o_orderdate,o_orderpriority,o_totalprice,c_custkey,c_name,c_mktsegment,c_acctbal,s_suppkey,s_name,s_address,s_nationkey,s_phone,s_acctbal,s_comment

@@ -116,13 +116,13 @@ struct AIConfig {
 	//!               query, by landed / (landed + 20): keeps the model's ranking within a leaf, fixes its level
 	bool leaf_prior_calibrated = true;
 	//! Leaf region: once warm (and on flush), keep at most this many x ai_concurrency calls outstanding and
-	//! re-decide a pending rep's rows when it is submitted (SET ai_leaf_lookahead; 0 = submit all at once).
-	idx_t leaf_lookahead = 2;
-	//! Leaf region: rows ingested per slice (SET ai_leaf_slice_rows; default 100)
-	idx_t leaf_slice_rows = 100;
+	//! re-decide a pending rep's rows when it is submitted (SET ai_leaf_lookahead; default 1, 0 = submit all at once).
+	idx_t leaf_lookahead = 1;
+	//! Leaf region: rows ingested per slice (SET ai_leaf_slice_rows; default 20)
+	idx_t leaf_slice_rows = 20;
 	//! Leaf region: warm after this many ingested slices even if some leaf has few verdicts, so a rarely
-	//! asked leaf can't keep the region cold for the whole query (SET ai_leaf_cold_slices; 0 = unbounded).
-	idx_t leaf_cold_slices = 0;
+	//! asked leaf can't keep the region cold for the whole query (SET ai_leaf_cold_slices; default 1, 0 = unbounded).
+	idx_t leaf_cold_slices = 1;
 	//! Local cache (layer 1): process-global response caches (chat + embed) serving repeats
 	//! within and across queries in this process. In-batch single-flight dedup is unaffected.
 	bool local_cache = true;

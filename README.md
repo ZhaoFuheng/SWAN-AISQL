@@ -56,7 +56,7 @@ protocol behind each table, and how to rerun every system, is in [aisql-bench/RE
 | BlendSQL 0.1.27 | 0.763 | 18.7k | $1.44 | 1,188 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.776 | 68.5k | $17.89 | 4,865 s |
 | PLOP-DP | 0.726 | 19.1k | $1.69 | 1,665 s |
-| **SWAN-AISQL** | **0.818** | 18.9k | $2.26 | 1,802 s |
+| **SWAN-AISQL** | **0.818** | 18.8k | $2.25 | 1,770 s |
 
 **SemBench ECOMM** (14 queries over fashion product listings with photos) and **MMQA** (11 queries over
 tables that mix text and images). BlendSQL and PLOP take no images; ThalamusDB covers too few of the queries
@@ -66,13 +66,13 @@ SemBench wrote for it to make a macro, so its numbers stay in the per-query tabl
 |---|---|---|---|---|
 | LOTUS 1.2.4 | 0.637 | 17.8k | $6.40 | 1,990 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.679 | 18.2k | $16.85 | 1,555 s |
-| **SWAN-AISQL** | **0.832** | 15.8k | $6.75 | 1,513 s |
+| **SWAN-AISQL** | **0.832** | 15.8k | $6.74 | 1,446 s |
 
 | MMQA | quality | calls | cost | latency |
 |---|---|---|---|---|
 | LOTUS 1.2.4 | 0.449 | 19.0k | $2.43 | 1,720 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.687 | 46.3k | $13.79 | 3,284 s |
-| **SWAN-AISQL** | **0.648** | 16.6k | $2.41 | 1,351 s |
+| **SWAN-AISQL** | **0.648** | 16.5k | $2.41 | 1,346 s |
 
 **Hybrid bench** (the 30 agent_bench queries of the PLOP paper, from the authors' public fork
 [Morrila](https://github.com/DMoRanSky/Morrila): relational plans with semantic operators)
@@ -84,7 +84,7 @@ SemBench wrote for it to make a macro, so its numbers stay in the per-query tabl
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.735* | 25,777 | $6.82 | 2,088 s |
 | ThalamusDB 0.1.15 | 0.661* | 19,512 | $2.09 | 8,582 s |
 | PLOP-DP | 1.000 | 13,329 | $0.50 | 1,092 s |
-| **SWAN-AISQL** | **1.000** | **10,997** | **$0.28** | **784 s** |
+| **SWAN-AISQL** | **1.000** | **10,998** | **$0.28** | **767 s** |
 
 SWAN and PLOP consume the same recorded verdict per shared prompt, so both match the ground truth (PLOP's
 un-rewritten execution) by construction; *the other systems' verdicts are independent samples, so their
@@ -99,7 +99,7 @@ every system plans itself)
 | BlendSQL 0.1.27 | 0.761 | 59,620 | $4.95 | 4,608 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.766 | 70,933 | $9.85 | 2,991 s |
 | PLOP-DP | 0.704 | 25,640 | $1.11 | 10,270 s |
-| **SWAN-AISQL** | 0.777 | **19,528** | **$2.12** | **2,092 s** |
+| **SWAN-AISQL** | 0.777 | **18,770** | **$2.01** | **1,971 s** |
 
 Quality is at parity among LOTUS, BlendSQL, Palimpzest and SWAN (the model's verdicts bound it); calls, cost
 and latency are the separation.

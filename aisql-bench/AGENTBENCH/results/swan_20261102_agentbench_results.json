@@ -1,7 +1,7 @@
 {
  "per_query": {
   "Q1": {
-   "latency_s": 2.4,
+   "latency_s": 2.5,
    "llm_calls": 5,
    "local_hits": 6,
    "tokens": 911,
@@ -9,21 +9,21 @@
    "hedged": 0,
    "rows": 5,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q2": {
-   "latency_s": 2.0,
+   "latency_s": 2.1,
    "llm_calls": 3,
-   "local_hits": 6,
+   "local_hits": 2,
    "tokens": 441,
    "cost_usd": 0.00025,
    "hedged": 0,
    "rows": 3,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q3": {
-   "latency_s": 14.6,
+   "latency_s": 14.7,
    "llm_calls": 4,
    "local_hits": 0,
    "tokens": 388,
@@ -31,54 +31,54 @@
    "hedged": 0,
    "rows": 4,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q4": {
-   "latency_s": 12.1,
-   "llm_calls": 141,
+   "latency_s": 10.3,
+   "llm_calls": 127,
    "local_hits": 0,
-   "tokens": 75070,
-   "cost_usd": 0.02059,
+   "tokens": 68905,
+   "cost_usd": 0.01862,
    "hedged": 0,
    "rows": 338,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q5": {
-   "latency_s": 2.4,
+   "latency_s": 1.4,
    "llm_calls": 1,
    "local_hits": 0,
-   "tokens": 374,
+   "tokens": 217,
    "cost_usd": 5e-05,
    "hedged": 0,
    "rows": 4,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q6": {
-   "latency_s": 6.4,
+   "latency_s": 2.0,
    "llm_calls": 9,
-   "local_hits": 4,
-   "tokens": 13074,
+   "local_hits": 0,
+   "tokens": 10028,
    "cost_usd": 0.00206,
    "hedged": 0,
    "rows": 1,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q7": {
-   "latency_s": 10.1,
+   "latency_s": 2.0,
    "llm_calls": 19,
-   "local_hits": 105,
-   "tokens": 17622,
+   "local_hits": 0,
+   "tokens": 11165,
    "cost_usd": 0.00234,
    "hedged": 0,
    "rows": 4,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q8": {
-   "latency_s": 1.2,
+   "latency_s": 1.1,
    "llm_calls": 1,
    "local_hits": 0,
    "tokens": 1461,
@@ -86,131 +86,131 @@
    "hedged": 0,
    "rows": 1,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q9": {
-   "latency_s": 2.5,
+   "latency_s": 1.3,
    "llm_calls": 1,
    "local_hits": 0,
-   "tokens": 1613,
+   "tokens": 960,
    "cost_usd": 0.0002,
    "hedged": 0,
    "rows": 1,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q10": {
-   "latency_s": 5.0,
+   "latency_s": 5.1,
    "llm_calls": 22,
    "local_hits": 6,
-   "tokens": 3311,
+   "tokens": 2986,
    "cost_usd": 0.00076,
    "hedged": 0,
    "rows": 5,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q11": {
    "latency_s": 2.4,
    "llm_calls": 13,
    "local_hits": 5,
-   "tokens": 1954,
+   "tokens": 1690,
    "cost_usd": 0.0004,
    "hedged": 0,
    "rows": 5,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q12": {
-   "latency_s": 1.8,
+   "latency_s": 1.9,
    "llm_calls": 9,
-   "local_hits": 4,
-   "tokens": 1333,
+   "local_hits": 5,
+   "tokens": 1119,
    "cost_usd": 0.00027,
    "hedged": 0,
    "rows": 2,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q13": {
    "latency_s": 1.6,
    "llm_calls": 2,
-   "local_hits": 0,
-   "tokens": 314,
+   "local_hits": 1,
+   "tokens": 241,
    "cost_usd": 6e-05,
    "hedged": 0,
    "rows": 0,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q14": {
-   "latency_s": 1.4,
+   "latency_s": 1.5,
    "llm_calls": 2,
    "local_hits": 1,
-   "tokens": 328,
+   "tokens": 227,
    "cost_usd": 5e-05,
    "hedged": 0,
    "rows": 1,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q15": {
-   "latency_s": 10.4,
+   "latency_s": 9.3,
    "llm_calls": 103,
-   "local_hits": 403,
-   "tokens": 11485,
+   "local_hits": 111,
+   "tokens": 11302,
    "cost_usd": 0.00275,
    "hedged": 0,
    "rows": 120,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q16": {
-   "latency_s": 8.3,
+   "latency_s": 7.1,
    "llm_calls": 3,
-   "local_hits": 324,
-   "tokens": 644,
+   "local_hits": 311,
+   "tokens": 432,
    "cost_usd": 8e-05,
    "hedged": 0,
    "rows": 0,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q17": {
-   "latency_s": 32.3,
-   "llm_calls": 237,
-   "local_hits": 3031,
-   "tokens": 54354,
-   "cost_usd": 0.01927,
+   "latency_s": 24.6,
+   "llm_calls": 147,
+   "local_hits": 2435,
+   "tokens": 22762,
+   "cost_usd": 0.00764,
    "hedged": 0,
    "rows": 0,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q18": {
-   "latency_s": 8.2,
+   "latency_s": 6.6,
    "llm_calls": 69,
-   "local_hits": 355,
-   "tokens": 7566,
+   "local_hits": 83,
+   "tokens": 7137,
    "cost_usd": 0.00182,
    "hedged": 0,
    "rows": 1300,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q19": {
-   "latency_s": 577.4,
+   "latency_s": 577.0,
    "llm_calls": 9537,
-   "local_hits": 28798,
-   "tokens": 780070,
+   "local_hits": 9546,
+   "tokens": 733295,
    "cost_usd": 0.2083,
    "hedged": 0,
    "rows": 137634,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q20": {
-   "latency_s": 1.1,
+   "latency_s": 1.2,
    "llm_calls": 3,
    "local_hits": 0,
    "tokens": 1243,
@@ -218,98 +218,98 @@
    "hedged": 0,
    "rows": 55,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q21": {
-   "latency_s": 8.0,
-   "llm_calls": 100,
-   "local_hits": 323,
-   "tokens": 22433,
-   "cost_usd": 0.00467,
+   "latency_s": 3.4,
+   "llm_calls": 17,
+   "local_hits": 81,
+   "tokens": 5355,
+   "cost_usd": 0.00115,
    "hedged": 0,
    "rows": 2712,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q22": {
-   "latency_s": 10.4,
+   "latency_s": 2.5,
    "llm_calls": 10,
-   "local_hits": 117,
-   "tokens": 5038,
+   "local_hits": 53,
+   "tokens": 3913,
    "cost_usd": 0.00083,
    "hedged": 0,
    "rows": 270,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q23": {
-   "latency_s": 9.1,
-   "llm_calls": 100,
-   "local_hits": 734,
-   "tokens": 26676,
-   "cost_usd": 0.00524,
+   "latency_s": 5.2,
+   "llm_calls": 51,
+   "local_hits": 206,
+   "tokens": 12690,
+   "cost_usd": 0.00287,
    "hedged": 0,
    "rows": 649,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q24": {
-   "latency_s": 4.8,
-   "llm_calls": 62,
-   "local_hits": 57,
-   "tokens": 14463,
-   "cost_usd": 0.00325,
+   "latency_s": 5.2,
+   "llm_calls": 59,
+   "local_hits": 0,
+   "tokens": 13870,
+   "cost_usd": 0.00314,
    "hedged": 0,
    "rows": 866,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q25": {
-   "latency_s": 15.9,
-   "llm_calls": 178,
-   "local_hits": 755,
-   "tokens": 17285,
-   "cost_usd": 0.00428,
+   "latency_s": 13.3,
+   "llm_calls": 162,
+   "local_hits": 311,
+   "tokens": 15813,
+   "cost_usd": 0.00395,
    "hedged": 0,
    "rows": 120,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q26": {
-   "latency_s": 34.8,
+   "latency_s": 29.4,
    "llm_calls": 391,
-   "local_hits": 1379,
-   "tokens": 52326,
+   "local_hits": 445,
+   "tokens": 48382,
    "cost_usd": 0.01191,
    "hedged": 0,
    "rows": 125,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q27": {
-   "latency_s": 25.1,
+   "latency_s": 20.7,
    "llm_calls": 172,
-   "local_hits": 364,
-   "tokens": 22463,
+   "local_hits": 133,
+   "tokens": 20920,
    "cost_usd": 0.00663,
    "hedged": 0,
    "rows": 83,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q28": {
-   "latency_s": 6.7,
+   "latency_s": 5.8,
    "llm_calls": 42,
-   "local_hits": 144,
-   "tokens": 4415,
+   "local_hits": 42,
+   "tokens": 4084,
    "cost_usd": 0.00111,
    "hedged": 0,
    "rows": 10,
    "error": null,
-   "ran_at": "2026-09-25 16:53:40 CDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q29": {
-   "latency_s": 2.1,
+   "latency_s": 1.8,
    "llm_calls": 7,
    "local_hits": 0,
    "tokens": 659,
@@ -317,10 +317,10 @@
    "hedged": 0,
    "rows": 28,
    "error": null,
-   "ran_at": "2026-10-15 22:21:17 MDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   },
   "Q30": {
-   "latency_s": 4.4,
+   "latency_s": 4.0,
    "llm_calls": 7,
    "local_hits": 7,
    "tokens": 814,
@@ -328,18 +328,18 @@
    "hedged": 0,
    "rows": 0,
    "error": null,
-   "ran_at": "2026-10-15 22:21:17 MDT"
+   "ran_at": "2026-11-02 21:54:54 MST"
   }
  },
  "model": "gpt-5.6-luna",
  "concurrency": "20",
- "updated": "2026-10-15 22:21:17 MDT",
+ "updated": "2026-11-02 21:54:54 MST",
  "total": {
   "n_queries": 30,
-  "latency_s": 824.9,
-  "llm_calls": 11253,
-  "cost_usd": 0.2988,
-  "tokens": 1140128,
+  "latency_s": 767.0,
+  "llm_calls": 10998,
+  "cost_usd": 0.2789,
+  "tokens": 1003410,
   "errors": 0
  }
 }

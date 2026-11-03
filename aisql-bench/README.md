@@ -86,7 +86,7 @@ Committed: every query (SWAN, PLOP, PLOP ground-truth, LOTUS), the harnesses, go
 suite databases (`ECOMM/ecomm.db`, `MOVIE/movie.db`, `MMQA/mmqa.db`), the agent_bench datasets
 (`AGENTBENCH/dataset/`, TPC-H sf0.005 parquet + book_review/yelp/googlelocal/stockindex), the per-run
 summaries (`*_results.json`, comparison `.md`) and the result rows of the cited runs
-(`AGENTBENCH/results/{plop,plop_gt,plop_none,lotus,blendsql,swan_leaf2,swan_gate2}`; the 52MB Q19 outputs are gzipped and
+(`AGENTBENCH/results/{plop,plop_gt,plop_none,lotus,blendsql,swan_20261102}`; the 52MB Q19 outputs are gzipped and
 the scorer reads `.csv.gz`).
 
 Not committed (images, raw sources, caches):
@@ -136,7 +136,7 @@ recorded prompts replays answers, latency and cost for free; a first run with a 
 the provider.
 
 **SemBench MOVIE** (10 queries over 2,000 Rotten Tomatoes reviews; data, queries, gold answers and every
-system's recorded results are in the repo). SWAN (about 30 minutes replayed; $2.26 recorded):
+system's recorded results are in the repo). SWAN (about 30 minutes replayed; $2.25 recorded):
 
 ```sh
 cd aisql-bench/MOVIE

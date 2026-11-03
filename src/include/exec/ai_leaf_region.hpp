@@ -48,7 +48,7 @@ public:
 	//! An un-pushed LIMIT above: ai_leaf_cold_slices doesn't apply (warming early makes the region go broad).
 	bool under_limit = false;
 
-	//! Fold a child chunk in slices of ai_leaf_slice_rows rows (default 100): each slice is deduped, its new
+	//! Fold a child chunk in slices of ai_leaf_slice_rows rows (default 20): each slice is deduped, its new
 	//! reps get texts + predictions (one batched embed per leaf), and each new row picks its first leaf.
 	//! Between slices, landed verdicts
 	//! are applied and pending reps dispatched (or, under a LIMIT, floor-sized waves are evaluated inline), so
@@ -167,7 +167,8 @@ private:
 	//! Every leaf has a batch of verdicts and the model has trained on them (always true for one leaf), or
 	//! ai_leaf_cold_slices slices are in.
 	bool Warm() const;
-	static constexpr idx_t GATE_LABELS = 20; //! verdicts per leaf before the model counts as warm
+	//! Verdicts per leaf before the model counts as warm (20; AI_LEAF_GATE_LABELS overrides for experiments).
+	static idx_t GateLabels();
 	//! Apply every verdict that has landed, without blocking.
 	void ReapLanded();
 	//! The P(true) DecideRow orders leaf `l` by for a rep the model predicted `p_mlp` for (ai_leaf_prior).

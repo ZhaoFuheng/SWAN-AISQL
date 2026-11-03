@@ -12,3 +12,17 @@ q6b   lat=  16.4s calls=  176 fresh= 176 tok=  36594 $0.0230  n=1/1  P=1.0 R=1.0
 q6c   lat=  16.4s calls=  176 fresh= 176 tok=  37199 $0.0237  n=5/5  P=1.0 R=1.0 F1=1.0
 q7    lat=1062.5s calls=13187 fresh=13187 tok=6434072 $1.9134  n=222/5  P=0.03 R=1.0 F1=0.059
 TOTAL(11q)  latency=1350.6s  cost=$2.4093  tokens=7871751  macro-F1=0.648
+
+=== 2026-11-02 23:16:32 MST  SWAN gpt-5.6-luna via http://localhost:4001  concurrency=20  queries=['q1', 'q2a', 'q2b', 'q3a', 'q3f', 'q4', 'q5', 'q6a', 'q6b', 'q6c', 'q7'] ===
+q1    lat=   2.1s calls=    1 fresh=   0 tok=    133 $0.0000  n=1/1  P=1.0 R=1.0 F1=1.0
+q2a   lat=  97.9s calls= 1200 fresh=   0 tok= 608617 $0.1902  n=94/5  P=0.053 R=1.0 F1=0.101
+q2b   lat=  99.0s calls= 1210 fresh=   0 tok= 609535 $0.1904  n=94/5  P=0.053 R=1.0 F1=0.101
+q3a   lat=  17.6s calls=  200 fresh=   0 tok=  49894 $0.0215  n=23/13  P=0.565 R=1.0 F1=0.722
+q3f   lat=  16.3s calls=  200 fresh=   0 tok=  49888 $0.0215  n=4/3  P=0.75 R=1.0 F1=0.857
+q4    lat=   3.3s calls=   24 fresh=   0 tok=   6453 $0.0022  n=76/39  P=0.474 R=0.923 F1=0.626
+q5    lat=   1.7s calls=    1 fresh=   0 tok=   2981 $0.0006  n=1/1  P=1.0 R=1.0 F1=1.0
+q6a   lat=  16.3s calls=  176 fresh=   0 tok=  36385 $0.0227  n=3/1  P=0.5 R=1.0 F1=0.667
+q6b   lat=  16.3s calls=  176 fresh=   0 tok=  36594 $0.0230  n=1/1  P=1.0 R=1.0 F1=1.0
+q6c   lat=  16.3s calls=  176 fresh=   0 tok=  37199 $0.0237  n=5/5  P=1.0 R=1.0 F1=1.0
+q7    lat=1059.3s calls=13184 fresh=   0 tok=6433327 $1.9130  n=222/5  P=0.03 R=1.0 F1=0.059
+TOTAL(11q)  latency=1346.1s  cost=$2.409  tokens=7871006  macro-F1=0.648

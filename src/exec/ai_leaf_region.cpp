@@ -10,12 +10,22 @@
 #include "optimizer/ai_filter_tree_build.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <chrono>
 
 namespace duckdb {
 
 //! Weight of the model's prediction against observed verdicts in the prefix-cache write decision (answers).
 static constexpr double PASS_RATE_PRIOR = 4.0;
+
+idx_t AILeafRegionState::GateLabels() {
+	static const idx_t labels = [] {
+		const char *env = std::getenv("AI_LEAF_GATE_LABELS");
+		const int64_t n = env ? std::atoll(env) : 0;
+		return n > 0 ? static_cast<idx_t>(n) : static_cast<idx_t>(20);
+	}();
+	return labels;
+}
 
 AILeafRegionState::AILeafRegionState(ClientContext &context, const BoundFunctionExpression &eval_call,
                                      const vector<LogicalType> &child_types_p, int64_t limit,
@@ -130,7 +140,7 @@ idx_t AILeafRegionState::Append(DataChunk &chunk, idx_t limit_floor, bool &limit
 	// calls start after the first slice's features instead of the chunk's (500 CLIP image embeds are ~80 s
 	// of ingest time), and lets this query's own verdicts order the later rows: text regions too (agent_bench
 	// Q17 237 -> 156 calls for +4-7 s).
-	// SET ai_leaf_slice_rows (default 100). A smaller slice commits fewer rows to their first leaf while cold.
+	// SET ai_leaf_slice_rows (default 20). A smaller slice commits fewer rows to their first leaf while cold.
 	const idx_t kSliceRows = MaxValue<idx_t>(AIConfig::Get().leaf_slice_rows, 1);
 	for (idx_t begin = 0; begin < count;) {
 		const idx_t slice = MinValue<idx_t>(kSliceRows, count - begin);
@@ -455,7 +465,7 @@ bool AILeafRegionState::Warm() const {
 		return false;
 	}
 	for (idx_t l = 0; l < n; l++) {
-		if (landed[l] < GATE_LABELS) {
+		if (landed[l] < GateLabels()) {
 			return false;
 		}
 	}

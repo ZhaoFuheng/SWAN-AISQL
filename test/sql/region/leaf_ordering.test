@@ -93,7 +93,7 @@ SELECT count(*) FROM ((SELECT k FROM res_lookahead EXCEPT ALL SELECT k FROM ref)
 ----
 0
 
-# the defaults: calibrated, lookahead 2, with the same answer
+# the defaults: calibrated, lookahead 1, with the same answer
 statement ok
 RESET ai_leaf_prior;
 
@@ -103,7 +103,7 @@ RESET ai_leaf_lookahead;
 query II
 SELECT current_setting('ai_leaf_prior'), current_setting('ai_leaf_lookahead');
 ----
-calibrated	2
+calibrated	1
 
 statement ok
 SELECT ai_selectivity_reset(), ai_training_reset(), ai_local_cache_clear();

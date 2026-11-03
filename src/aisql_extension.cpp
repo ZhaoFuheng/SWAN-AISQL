@@ -201,16 +201,16 @@ static const vector<AIConfigSetting> &AIConfigSettings() {
 		t.push_back(
 		    {"ai_leaf_lookahead",
 		     "Leaf region: calls outstanding at most k x ai_concurrency, rows re-decided at submission (0 = off)",
-		     LogicalType::UBIGINT, Value::UBIGINT(2), [](AIConfig &c, const Value &v) {
+		     LogicalType::UBIGINT, Value::UBIGINT(1), [](AIConfig &c, const Value &v) {
 			     c.leaf_lookahead = v.GetValue<uint64_t>();
 		     }});
 		t.push_back({"ai_leaf_slice_rows",
 		             "Leaf region: rows ingested per slice (each cold slice waits for the calls out)",
-		             LogicalType::UBIGINT, Value::UBIGINT(100), [](AIConfig &c, const Value &v) {
+		             LogicalType::UBIGINT, Value::UBIGINT(20), [](AIConfig &c, const Value &v) {
 			             c.leaf_slice_rows = MaxValue<idx_t>(v.GetValue<uint64_t>(), 1);
 		             }});
 		t.push_back({"ai_leaf_cold_slices", "Leaf region: leave the cold phase after k ingested slices (0 = unbounded)",
-		             LogicalType::UBIGINT, Value::UBIGINT(0), [](AIConfig &c, const Value &v) {
+		             LogicalType::UBIGINT, Value::UBIGINT(1), [](AIConfig &c, const Value &v) {
 			             c.leaf_cold_slices = v.GetValue<uint64_t>();
 		             }});
 		t.push_back({"ai_debug_log", "Debug logging channels (csv: region,spec,yann)", LogicalType::VARCHAR, Value(""),

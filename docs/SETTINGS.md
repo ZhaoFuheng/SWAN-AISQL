@@ -61,9 +61,9 @@ local cache, TypeSafe routing, logging) apply to the whole process however they 
 | `ai_join_factorize` | `off` / `pushdown` / `factor` | `factor` | AI-condition joins: expand / push the region below the join / factor graph over the pair domain (`DUCKDB_AI_GROUP_JOIN`) |
 | `ai_limit` | `true` / `false` | `true` | LIMIT push-down into AI evaluation (early stop) (`DUCKDB_AI_LIMIT`) |
 | `ai_leaf_prior` | `mlp` / `calibrated` | `calibrated` | the P(true) a leaf is ordered by: `mlp` the selectivity model's prediction; `calibrated` the same with its logit shifted toward the leaf's pass rate observed in the query, by landed / (landed + 20) |
-| `ai_leaf_slice_rows` | integer ≥ 1 | `100` | rows the leaf region ingests per slice; while cold, each slice's rows commit to their first leaf and the next slice waits for the calls already out. `20` (= `ai_concurrency`) commits fewer rows blind: fewer calls, more cold rounds |
-| `ai_leaf_cold_slices` | integer ≥ 0 | `0` | the region counts as warm after this many slices even if a leaf has few verdicts, so a leaf asked last can't keep it cold; not applied below a LIMIT the push-down couldn't place in the region (EXPLAIN `Unpushed Limit Above`); `0` = unbounded |
-| `ai_leaf_lookahead` | integer ≥ 0 | `2` | a warm region keeps at most k × `ai_concurrency` calls outstanding and re-decides the rows behind an input just before it is submitted; `0` submits every pending input at once |
+| `ai_leaf_slice_rows` | integer ≥ 1 | `20` | rows the leaf region ingests per slice; while cold, each slice's rows commit to their first leaf and the next slice waits for the calls already out. The default is one `ai_concurrency`-wide batch; a larger slice (`100`) commits more rows blind: more calls, fewer cold rounds |
+| `ai_leaf_cold_slices` | integer ≥ 0 | `1` | the region counts as warm after this many slices even if a leaf has few verdicts, so a leaf asked last can't keep it cold; not applied below a LIMIT the push-down couldn't place in the region (EXPLAIN `Unpushed Limit Above`); the default leaves the cold phase after the first slice; `0` = unbounded |
+| `ai_leaf_lookahead` | integer ≥ 0 | `1` | a warm region keeps at most k × `ai_concurrency` calls outstanding and re-decides the rows behind an input just before it is submitted; `0` submits every pending input at once |
 
 **Debug / experiment knobs** (`ai_debug_*`) — stable but not part of the user contract
 
@@ -71,6 +71,7 @@ local cache, TypeSafe routing, logging) apply to the whole process however they 
 |---|---|---|---|
 | `ai_debug_log` | csv of `region`, `dispatch`, `spec`, `yann`, `leaftexts`, `mock` | *(empty)* | stderr diagnostics per subsystem (`region` prints the leaf-region timers, `dispatch` each batch of calls the region hands to its request pool) |
 | (env) `AI_MLP_FIFO` / `AI_MLP_MIN_TRAIN` / `AI_MLP_TRAIN_EVERY` | integer | `256` / `16` / 3 × `ai_concurrency` | the selectivity model's training window (most recent labelled examples), the examples a step needs, and the calls between two full-batch training steps |
+| (env) `AI_LEAF_GATE_LABELS` | integer | `20` | verdicts every leaf needs before the region counts as warm by its model; the cold phase ends at this or at `ai_leaf_cold_slices`, whichever comes first |
 | `ai_debug_prompt_variant` | `strict` / `soft` / `plain` | `strict` | `ai_filter` system prompt; `plain` sends the bare prompt (cross-engine, prompt-identical comparisons) |
 
 Embedding-server environment (`serve/ai_embed_server.py`): `AI_EMBED_MODEL` (text model), `AI_EMBED_IMAGE_MODEL`

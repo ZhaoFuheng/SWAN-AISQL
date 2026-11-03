@@ -219,7 +219,7 @@ under-corrected; re-predicting the answered inputs after every training step mea
 against −2.2% on SWAN 2.0's 31 multi-leaf queries). The speculative gate keeps the model's own estimate,
 and the per-row batch is ordered the same way. `mlp` orders by the model alone.
 
-**A queued call is not a committed one** (`ai_leaf_lookahead`, default 2). A warm region used to hand
+**A queued call is not a committed one** (`ai_leaf_lookahead`, default 1). A warm region used to hand
 every pending input to the request pool at once: in superhero-08 it queued one leaf for 399 rows within
 0.3 s of warming, 538 calls behind a 20-wide pool, and the estimates that improved over the next seconds
 could change none of them. With lookahead k, at most k × `ai_concurrency` calls are outstanding, and the
@@ -234,16 +234,17 @@ still the tree's Kleene value over the verdicts it asked for. On SWAN 2.0 togeth
 and wall time by 3%, with no query worse and identical rows on 31 of 31 (replayed offline from a fixed
 cache, three runs per arm); the parity test is `test/sql/region/leaf_ordering.test`.
 
-**A shorter, bounded cold phase** (`ai_leaf_slice_rows`, `ai_leaf_cold_slices`; opt-in). While the region
+**A short, boundable cold phase** (`ai_leaf_slice_rows`, `ai_leaf_cold_slices`). While the region
 is cold, each slice's rows choose their first leaf before any verdict of theirs can teach the order, so the
-slice size is how many rows commit blind. With the default 100-row slices this commitment is most of what
+slice size is how many rows commit blind. With 100-row slices this commitment is most of what
 is left: replaying SWAN 2.0's traces offline, it explains about 610 of the 800 calls between the region and
 an idealised dispatcher that re-decides at every submission, and 20-row slices (one `ai_concurrency`-wide
-batch) recover it. A smaller slice alone stalls, though. A cold slice waits for the calls already out, and
+batch, the default) recover it. A smaller slice can stall, though. A cold slice waits for the calls already out, and
 the region stays cold until every leaf has a batch of verdicts; a leaf that is always asked last can stay
 below that for the whole query (california_schools-11's last leaf, pass rate 0.93, is asked about 7 times),
 so 563 rows became 28 sequential rounds and the query took 4× as long. `ai_leaf_cold_slices = k` declares
-the region warm after k slices, whatever the leaves have seen; 5 × 20 rows is the default's first slice.
+the region warm after k slices, whatever the leaves have seen; the default is `1`: one slice commits blind, then the
+model orders the rest. `0` leaves the cold phase unbounded.
 
 The bound is not applied under a LIMIT the push-down could not place in the region: a region below a
 constant LIMIT that kept no limit of its own (EXPLAIN: `Unpushed Limit Above: true`, e.g. a DISTINCT on a
@@ -253,10 +254,10 @@ have already passed waits (california_schools-28, `DISTINCT substr(...) ... LIMI
 where 5 suffice). There it keeps the cold gate. The flag is set by the LIMIT push-down pass, so with
 `ai_limit = false` no region carries it. Like the ordering above, neither setting changes a result.
 
-The cost is latency: on SWAN 2.0, with the ordering above, 20-row slices bounded at 5 cut calls by another
-4.9% (6.9% against the order before both) with no query worse and identical rows on 31 of 31, and raised
-wall time by 8.8%. Short queries pay most of it, about 10–30 s for the gated start-up rounds, including some
-that save no calls; hence opt-in. The parity test is `test/sql/region/cold_slices_under_limit.test`.
+Measured on SWAN 2.0 against 100-row slices with an unbounded cold phase and lookahead 2, the defaults (20-row
+slices, one cold slice, lookahead 1) cut calls by 4.0% and wall time by 6.0% at identical quality; on the hybrid
+benchmark calls are unchanged and wall time is 3% lower; SemBench is identical per query (all replayed from the
+fixed cache, converged to zero fresh prompts). The parity test is `test/sql/region/cold_slices_under_limit.test`.
 
 **A worked example.**
 
@@ -452,7 +453,7 @@ environment variables, is [SETTINGS.md](SETTINGS.md).
 
 All numbers are from the recorded runs in `aisql-bench/` (chat model `gpt-5.6-luna`; the Jev column routes
 ai_filter, ai_classify and, on MOVIE, the bounded ai_score of q9/q10 to System One). †The SWAN column was
-recorded fresh on 2026-10-23 on DuckDB 2.0.0 under `ai_api = auto` (the prompts the calibrated leaf order reaches were added on 2026-10-30; the rows are replays of that cache) (Chat Completions for a plain request, the Responses API for a prefix-cache write or warm read; SemBench one query at a time); the LOTUS and Jev recordings
+recorded fresh on 2026-10-23 on DuckDB 2.0.0 under `ai_api = auto` (the prompts the calibrated leaf order reaches were added on 2026-10-30 and those the leaf region defaults of 2026-11-02 reach on 2026-11-01/02; the rows are replays of that cache) (Chat Completions for a plain request, the Responses API for a prefix-cache write or warm read; SemBench one query at a time); the LOTUS and Jev recordings
 are from 2026-09-23/25 and PLOP's and BlendSQL's from 2026-10-02 (agent_bench LOTUS and BlendSQL: 2026-10-02/03),
 so the SemBench and agent_bench latencies compare recordings from different days. On SWAN 2.0 the baselines
 were recorded in one session (2026-10-03/05) and SWAN on 2026-10-23/30, so its latency column compares days as
@@ -460,11 +461,11 @@ well. Quality, calls and cost are comparable throughout.
 
 | benchmark | SWAN | SWAN + Jev (ai_filter/ai_classify on TypeSafe) | LOTUS / PLOP / BlendSQL |
 |---|---|---|---|
-| SemBench MOVIE (10q) | **0.818**, 18.9k calls, $2.26, 1,802s† | 0.795, 18.8k, **$0.39**, 511s | LOTUS 0.780, 201k, $14.45, 10,654s; BlendSQL 0.763, 18.7k, $1.44, 1,188s; Palimpzest 1.5.3 (Abacus optimizer) 0.776, 68.5k, $17.89, 4,865s; ThalamusDB 0.841 on 8 of 10, 1.0k, $0.52, 3,661s; PLOP-DP 0.726, 19.1k, $1.69, 1,665s |
-| SemBench ECOMM (14q) | **0.832**, 15.8k, $6.75, 1,513s† | 0.688, 16.6k, $7.39, 826s | LOTUS 0.637, 17.8k, $6.40, 1,990s; Palimpzest 0.679, 18.2k, $16.85, 1,555s (q14 is our program, SemBench wrote none); ThalamusDB 0.596 on 5 of 14, 2.8k, $3.45, 12,305s |
-| SemBench MMQA (11q) | **0.648**, 16.6k, $2.41, 1,351s† | 0.603, 14.1k, $1.53, 884s | LOTUS 0.449, 19.0k, $2.43, 1,720s; Palimpzest 0.687, 46.3k, $13.79, 3,284s; ThalamusDB 0.327 on 7 of 11, 1.3k, $0.52, 2,191s |
-| agent_bench Q1–Q30 | **1.000**, 10,997 calls, $0.28, 784s | — | LOTUS 0.632*, 25,741, $2.90, 1,807s†; BlendSQL 0.758*, 24,631, $2.76, 1,965s†; Palimpzest 1.5.3 (Abacus optimizer) 0.735*, 25,777, $6.82, 2,088s†; ThalamusDB 0.661*, 19,512, $2.09, 8,582s† (Q19 at the 6,000 s cap); PLOP-DP (public Morrila fork) 1.000, 13,329, $0.50, 1,092s |
-| SWAN 2.0 (120q, 4 BIRD databases) | 0.777, **19,528** calls, **$2.12**, **2,092s** | — | LOTUS 0.760, 69,204, $4.04, 4,101s; BlendSQL 0.761, 59,620, $4.95, 4,608s; Palimpzest (Abacus optimizer) 0.766, 70,933, $9.85, 2,991s; ThalamusDB 0.404 (0.703 on the 69 questions its filters express), 160,527, $12.98, 38,375s; PLOP-DP 0.704, 25,640, $1.11, 10,270s |
+| SemBench MOVIE (10q) | **0.818**, 18.8k calls, $2.25, 1,770s† | 0.795, 18.8k, **$0.39**, 511s | LOTUS 0.780, 201k, $14.45, 10,654s; BlendSQL 0.763, 18.7k, $1.44, 1,188s; Palimpzest 1.5.3 (Abacus optimizer) 0.776, 68.5k, $17.89, 4,865s; ThalamusDB 0.841 on 8 of 10, 1.0k, $0.52, 3,661s; PLOP-DP 0.726, 19.1k, $1.69, 1,665s |
+| SemBench ECOMM (14q) | **0.832**, 15.8k, $6.74, 1,446s† | 0.688, 16.6k, $7.39, 826s | LOTUS 0.637, 17.8k, $6.40, 1,990s; Palimpzest 0.679, 18.2k, $16.85, 1,555s (q14 is our program, SemBench wrote none); ThalamusDB 0.596 on 5 of 14, 2.8k, $3.45, 12,305s |
+| SemBench MMQA (11q) | **0.648**, 16.5k, $2.41, 1,346s† | 0.603, 14.1k, $1.53, 884s | LOTUS 0.449, 19.0k, $2.43, 1,720s; Palimpzest 0.687, 46.3k, $13.79, 3,284s; ThalamusDB 0.327 on 7 of 11, 1.3k, $0.52, 2,191s |
+| agent_bench Q1–Q30 | **1.000**, 10,998 calls, $0.28, 767s | — | LOTUS 0.632*, 25,741, $2.90, 1,807s†; BlendSQL 0.758*, 24,631, $2.76, 1,965s†; Palimpzest 1.5.3 (Abacus optimizer) 0.735*, 25,777, $6.82, 2,088s†; ThalamusDB 0.661*, 19,512, $2.09, 8,582s† (Q19 at the 6,000 s cap); PLOP-DP (public Morrila fork) 1.000, 13,329, $0.50, 1,092s |
+| SWAN 2.0 (120q, 4 BIRD databases) | 0.777, **18,770** calls, **$2.01**, **1,971s** | — | LOTUS 0.760, 69,204, $4.04, 4,101s; BlendSQL 0.761, 59,620, $4.95, 4,608s; Palimpzest (Abacus optimizer) 0.766, 70,933, $9.85, 2,991s; ThalamusDB 0.404 (0.703 on the 69 questions its filters express), 160,527, $12.98, 38,375s; PLOP-DP 0.704, 25,640, $1.11, 10,270s |
 
 Quality is each suite's own metric (F1 / ARI / row-multiset F1; agent_bench uses the deterministic
 LIMIT-free PLOP ground truth, generated by the public fork's un-rewritten execution; Q29/Q30's inner LIMITs are ordered by key in every system's copy). PLOP and BlendSQL do not support images, so ECOMM and MMQA are not run for
@@ -480,7 +481,7 @@ comparable. Per-query tables: `aisql-bench/AGENTBENCH/results/agentbench_compari
 SWAN 2.0 is the benchmark in github.com/ZhaoFuheng/SWANBench: one AISQL query per question that every system
 plans itself, with scaled and duplicated databases; its results folder holds the four systems' answers.
 Its row is the replay, from the published cache, of each system's fresh recording through an empty cache
-(LOTUS and PLOP from the session of 2026-10-03; BlendSQL and Palimpzest re-recorded on 2026-10-05, SWAN on 2026-10-23 with the calibrated leaf order's prompts added on 2026-10-30), so
+(LOTUS and PLOP from the session of 2026-10-03; BlendSQL and Palimpzest re-recorded on 2026-10-05, SWAN on 2026-10-23 with the calibrated leaf order's prompts added on 2026-10-30 and the leaf region defaults' on 2026-11-01/02), so
 the numbers reproduce; SWAN, BlendSQL, LOTUS and Palimpzest are at parity on quality (the model's verdicts
 bound it: five fresh SWAN recordings scored 0.775 / 0.757 / 0.763 / 0.755 / 0.777, BlendSQL's two 0.773 / 0.761,
 Palimpzest's two 0.769 / 0.766) and calls, cost and latency separate them.
