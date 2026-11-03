@@ -13,7 +13,7 @@ protocol. Rules, in order of how often they were broken:
 2. **Back-to-back recording for any latency claim.** Record the compared systems per query, LOTUS then
    SWAN (and PLOP / BlendSQL where they run), into a fresh store through a second proxy (`CACHE_PROXY_PORT=4011 CACHE_DB=<new file>`,
    alias OFF, the conda `swan-ai-sql` python -- `/usr/local/bin/python3` has no duckdb), then merge
-   with `_pre_rerecord_20260923/merge_cache.py` (migrates `recorded_at`, upserts, self-verifies).
+   with `serve/merge_cache.py` (migrates `recorded_at`, upserts, self-verifies).
    The proxy inserts `ON CONFLICT DO NOTHING`, so the main cache cannot be "repopulated" in place.
 3. **Back up the results files first.** Every runner overwrites its `*_results.json` per query.
 4. **Check `pmset -g log` for a laptop sleep** across the run; find recordings that overlap it with
@@ -103,8 +103,7 @@ Runners default to `../../build/release/duckdb`; set `DUCKDB_BIN` to use another
 
 Runners: `MOVIE/swan_movie.py --serial`, `ECOMM/swan_ecomm.py --serial`, `MMQA/swan_mmqa.py`;
 `*/lotus_*.py`; `AGENTBENCH/swan_agentbench.py` + `eval_agentbench.py` (deterministic GT). Each takes
-query ids as arguments. The 2026-09-23 re-record's driver, log, notes and cache-merge script are in
-`_pre_rerecord_20260923/`.
+query ids as arguments.
 
 LOTUS's SemBench runners (`lotus_movie.py`, `lotus_ecomm.py`, `lotus_mmqa.py`) replay their recordings only under
 the environment that made them, lotus-ai 1.2.4 with litellm 1.92.0 (the conda `swan-ai-sql` python): a newer litellm
