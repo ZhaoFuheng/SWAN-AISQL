@@ -7,11 +7,13 @@ testext
 test/python/__pycache__/
 .Rhistory
 
-# SWAN AI-SQL: local secrets, LLM caches, run logs, python caches
+# SWAN AI-SQL: local run logs, python caches
 .env
 serve/.llm_cache*
 serve/replay/
 serve/*.log
+serve/.backup_*/
+serve/*.bak_*
 aisql-bench/**/*.log
 aisql-bench/ECOMM/data/sf_500/images/
 aisql-bench/MMQA/files/mmqa/source_data/
@@ -27,9 +29,10 @@ duckdb_unittest_tempdir/
 .cache/
 build_*.log
 
-# private working notes (gaps / todo), not part of the published design
+# private working notes
 docs/BACKLOG.md
 docs/ENGINEERING_NOTES.md
+docs/codex-*
 
 # python virtual environments
 .venv/
