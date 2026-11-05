@@ -465,8 +465,12 @@ static void GetRowKeys(DataChunk &args, const AIKeyBindData &bind_data, idx_t ro
 	keys.clear();
 	for (idx_t j = 0; j < bind_data.key_count; j++) {
 		Value value = args.data[bind_data.key_start + j].GetValue(row);
-		if (!value.IsNull()) {
-			keys.push_back(AIValueKeyText(value));
+		if (value.IsNull()) {
+			continue;
+		}
+		string key = AIValueKeyText(value);
+		if (!key.empty()) { // an empty text (coalesce(description, '')) says nothing about the input
+			keys.push_back(std::move(key));
 		}
 	}
 }
@@ -477,7 +481,12 @@ static void GetRowKeys(DataChunk &args, const AIKeyBindData &bind_data, idx_t ro
 static void AIFilterFunction(DataChunk &args, ExpressionState &state, Vector &result) {
 	const idx_t count = args.size();
 	auto &bind_data = state.expr.Cast<BoundFunctionExpression>().BindInfo()->Cast<AIKeyBindData>();
-	const bool history_on = AIHistoryEnabled() && bind_data.key_count > 0;
+	// SET ai_history: the region driving this evaluation hands the thread its scope; a scalar outside any region
+	// gathers from every finished operator and records nothing
+	AIHistoryView history_view;
+	AIHistoryScope history_storage;
+	const AIHistoryScope *history =
+	    bind_data.key_count > 0 ? AIHistoryScalarScope(state.GetContext(), history_view, history_storage) : nullptr;
 
 	UnifiedVectorFormat prompt_format;
 	args.data[0].ToUnifiedFormat(prompt_format);
@@ -486,6 +495,7 @@ static void AIFilterFunction(DataChunk &args, ExpressionState &state, Vector &re
 	vector<AIRequest> requests(count);
 	vector<bool> valid(count, false);
 	vector<vector<string>> row_keys(count);
+	vector<string> row_prompt(count);
 	const AIConfig scalar_config = AIConfigForContext(state.GetContext()); // once per chunk, not per row
 	for (idx_t i = 0; i < count; i++) {
 		auto idx = prompt_format.sel->get_index(i);
@@ -503,9 +513,11 @@ static void AIFilterFunction(DataChunk &args, ExpressionState &state, Vector &re
 		                      AIImagePrefixSpan(requests[i].prompt), -1.0);
 		requests[i].schema_name = "ai_filter";
 		AIMarkFilterQuestion(requests[i], bind_data.pred_text);
-		if (history_on) {
+		if (history) {
 			GetRowKeys(args, bind_data, i, row_keys[i]);
-			requests[i].history = AIHistoryGather(row_keys[i]);
+			AIHistoryAttach(requests[i], *history, row_keys[i]);
+			row_prompt[i] = requests[i].prompt_prefix + requests[i].prompt; // the round's prompt: as built
+			AIHistoryFinalize(requests[i]);
 		}
 	}
 
@@ -517,8 +529,8 @@ static void AIFilterFunction(DataChunk &args, ExpressionState &state, Vector &re
 		bool value;
 		if (valid[i] && responses[i].success && AIReadFilterVerdict(responses[i].content, value)) {
 			out[i] = value;
-			if (history_on) {
-				AIHistoryRecord(row_keys[i], requests[i].prompt, responses[i].content);
+			if (history) {
+				AIHistoryRecordRound(*history, row_keys[i], row_prompt[i], responses[i].content);
 			}
 		} else {
 			out_validity.SetInvalid(i);
@@ -532,7 +544,12 @@ static void AIFilterFunction(DataChunk &args, ExpressionState &state, Vector &re
 static void AIClassifyFunction(DataChunk &args, ExpressionState &state, Vector &result) {
 	const idx_t count = args.size();
 	auto &bind_data = state.expr.Cast<BoundFunctionExpression>().BindInfo()->Cast<AIKeyBindData>();
-	const bool history_on = AIHistoryEnabled() && bind_data.key_count > 0;
+	// SET ai_history: the region driving this evaluation hands the thread its scope; a scalar outside any region
+	// gathers from every finished operator and records nothing
+	AIHistoryView history_view;
+	AIHistoryScope history_storage;
+	const AIHistoryScope *history =
+	    bind_data.key_count > 0 ? AIHistoryScalarScope(state.GetContext(), history_view, history_storage) : nullptr;
 	const bool has_instruction = bind_data.key_start >= 3;
 
 	UnifiedVectorFormat input_format;
@@ -558,6 +575,7 @@ static void AIClassifyFunction(DataChunk &args, ExpressionState &state, Vector &
 	vector<AIRequest> requests(count);
 	vector<bool> valid(count, false);
 	vector<vector<string>> row_keys(count);
+	vector<string> row_prompt(count);
 	for (idx_t i = 0; i < count; i++) {
 		auto input_idx = input_format.sel->get_index(i);
 		auto cats_idx = cats_format.sel->get_index(i);
@@ -607,9 +625,11 @@ static void AIClassifyFunction(DataChunk &args, ExpressionState &state, Vector &
 			}
 		}
 		AIMarkClassifyQuestion(requests[i], inputs[input_idx].GetString(), std::move(options), extra_instruction);
-		if (history_on) {
+		if (history) {
 			GetRowKeys(args, bind_data, i, row_keys[i]);
-			requests[i].history = AIHistoryGather(row_keys[i]);
+			AIHistoryAttach(requests[i], *history, row_keys[i]);
+			row_prompt[i] = requests[i].prompt_prefix + requests[i].prompt; // the round's prompt: as built
+			AIHistoryFinalize(requests[i]);
 		}
 	}
 
@@ -621,8 +641,8 @@ static void AIClassifyFunction(DataChunk &args, ExpressionState &state, Vector &
 		string label;
 		if (valid[i] && responses[i].success && AIParseStringField(responses[i].content, "result", label)) {
 			out[i] = StringVector::AddString(result, label);
-			if (history_on) {
-				AIHistoryRecord(row_keys[i], requests[i].prompt, responses[i].content);
+			if (history) {
+				AIHistoryRecordRound(*history, row_keys[i], row_prompt[i], responses[i].content);
 			}
 		} else {
 			out_validity.SetInvalid(i);
@@ -640,7 +660,12 @@ static void AIClassifyFunction(DataChunk &args, ExpressionState &state, Vector &
 static void AIClassifyStructFunction(DataChunk &args, ExpressionState &state, Vector &result) {
 	const idx_t count = args.size();
 	auto &bind_data = state.expr.Cast<BoundFunctionExpression>().BindInfo()->Cast<AIKeyBindData>();
-	const bool history_on = AIHistoryEnabled() && bind_data.key_count > 0;
+	// SET ai_history: the region driving this evaluation hands the thread its scope; a scalar outside any region
+	// gathers from every finished operator and records nothing
+	AIHistoryView history_view;
+	AIHistoryScope history_storage;
+	const AIHistoryScope *history =
+	    bind_data.key_count > 0 ? AIHistoryScalarScope(state.GetContext(), history_view, history_storage) : nullptr;
 	auto &cats_vec = args.data[1];
 	if (cats_vec.GetType().id() != LogicalTypeId::STRUCT) {
 		throw InvalidInputException("ai_classify: the categories argument must be a STRUCT of {label: description}");
@@ -672,6 +697,7 @@ static void AIClassifyStructFunction(DataChunk &args, ExpressionState &state, Ve
 	vector<AIRequest> requests(count);
 	vector<bool> valid(count, false);
 	vector<vector<string>> row_keys(count);
+	vector<string> row_prompt(count);
 	for (idx_t i = 0; i < count; i++) {
 		auto input_idx = input_format.sel->get_index(i);
 		if (!input_format.validity.RowIsValid(input_idx)) {
@@ -703,9 +729,11 @@ static void AIClassifyStructFunction(DataChunk &args, ExpressionState &state, Ve
 		requests[i].json_schema = schema;
 		requests[i].schema_name = "ai_classify";
 		AIMarkClassifyQuestion(requests[i], inputs[input_idx].GetString(), std::move(options), string());
-		if (history_on) {
+		if (history) {
 			GetRowKeys(args, bind_data, i, row_keys[i]);
-			requests[i].history = AIHistoryGather(row_keys[i]);
+			AIHistoryAttach(requests[i], *history, row_keys[i]);
+			row_prompt[i] = requests[i].prompt_prefix + requests[i].prompt; // the round's prompt: as built
+			AIHistoryFinalize(requests[i]);
 		}
 	}
 
@@ -717,8 +745,8 @@ static void AIClassifyStructFunction(DataChunk &args, ExpressionState &state, Ve
 		string label;
 		if (valid[i] && responses[i].success && AIParseStringField(responses[i].content, "result", label)) {
 			out[i] = StringVector::AddString(result, label);
-			if (history_on) {
-				AIHistoryRecord(row_keys[i], requests[i].prompt, responses[i].content);
+			if (history) {
+				AIHistoryRecordRound(*history, row_keys[i], row_prompt[i], responses[i].content);
 			}
 		} else {
 			out_validity.SetInvalid(i);
@@ -823,7 +851,12 @@ static void AIScoreFunction(DataChunk &args, ExpressionState &state, Vector &res
 	const idx_t count = args.size();
 	auto &func_expr = state.expr.Cast<BoundFunctionExpression>();
 	auto &bind_data = func_expr.BindInfo()->Cast<AIScoreBindData>();
-	const bool history_on = AIHistoryEnabled() && bind_data.key_count > 0;
+	// SET ai_history: the region driving this evaluation hands the thread its scope; a scalar outside any region
+	// gathers from every finished operator and records nothing
+	AIHistoryView history_view;
+	AIHistoryScope history_storage;
+	const AIHistoryScope *history =
+	    bind_data.key_count > 0 ? AIHistoryScalarScope(state.GetContext(), history_view, history_storage) : nullptr;
 	const bool has_criteria = bind_data.key_start >= 2;
 	const bool has_range = bind_data.has_range;
 
@@ -841,6 +874,7 @@ static void AIScoreFunction(DataChunk &args, ExpressionState &state, Vector &res
 	vector<AIRequest> requests(count);
 	vector<bool> valid(count, false);
 	vector<vector<string>> row_keys(count);
+	vector<string> row_prompt(count);
 	for (idx_t i = 0; i < count; i++) {
 		auto input_idx = input_format.sel->get_index(i);
 		if (!input_format.validity.RowIsValid(input_idx)) {
@@ -862,9 +896,11 @@ static void AIScoreFunction(DataChunk &args, ExpressionState &state, Vector &res
 			AIMarkScoreQuestion(requests[i], inputs[input_idx].GetString(), criteria_text, bind_data.lo, bind_data.hi,
 			                    bind_data.is_int);
 		}
-		if (history_on) {
+		if (history) {
 			GetRowKeys(args, bind_data, i, row_keys[i]);
-			requests[i].history = AIHistoryGather(row_keys[i]);
+			AIHistoryAttach(requests[i], *history, row_keys[i]);
+			row_prompt[i] = requests[i].prompt_prefix + requests[i].prompt; // the round's prompt: as built
+			AIHistoryFinalize(requests[i]);
 		}
 	}
 
@@ -885,8 +921,8 @@ static void AIScoreFunction(DataChunk &args, ExpressionState &state, Vector &res
 			} else {
 				out_dbl[i] = value;
 			}
-			if (history_on) {
-				AIHistoryRecord(row_keys[i], requests[i].prompt, responses[i].content);
+			if (history) {
+				AIHistoryRecordRound(*history, row_keys[i], row_prompt[i], responses[i].content);
 			}
 		} else {
 			out_validity.SetInvalid(i);
@@ -1066,7 +1102,12 @@ static void AIAggFunction(DataChunk &args, ExpressionState &state, Vector &resul
 static void AIPromptFunction(DataChunk &args, ExpressionState &state, Vector &result) {
 	const idx_t count = args.size();
 	auto &bind_data = state.expr.Cast<BoundFunctionExpression>().BindInfo()->Cast<AIKeyBindData>();
-	const bool history_on = AIHistoryEnabled() && bind_data.key_count > 0;
+	// SET ai_history: the region driving this evaluation hands the thread its scope; a scalar outside any region
+	// gathers from every finished operator and records nothing
+	AIHistoryView history_view;
+	AIHistoryScope history_storage;
+	const AIHistoryScope *history =
+	    bind_data.key_count > 0 ? AIHistoryScalarScope(state.GetContext(), history_view, history_storage) : nullptr;
 	const bool has_schema = bind_data.key_start >= 2; // 2nd user arg is the JSON schema
 
 	UnifiedVectorFormat prompt_format;
@@ -1083,6 +1124,7 @@ static void AIPromptFunction(DataChunk &args, ExpressionState &state, Vector &re
 	vector<AIRequest> requests(count);
 	vector<bool> valid(count, false);
 	vector<vector<string>> row_keys(count);
+	vector<string> row_prompt(count);
 	const AIConfig scalar_config = AIConfigForContext(state.GetContext()); // once per chunk, not per row
 	for (idx_t i = 0; i < count; i++) {
 		auto prompt_idx = prompt_format.sel->get_index(i);
@@ -1102,9 +1144,11 @@ static void AIPromptFunction(DataChunk &args, ExpressionState &state, Vector &re
 				requests[i].json_schema = schemas[schema_idx].GetString();
 			}
 		}
-		if (history_on) {
+		if (history) {
 			GetRowKeys(args, bind_data, i, row_keys[i]);
-			requests[i].history = AIHistoryGather(row_keys[i]);
+			AIHistoryAttach(requests[i], *history, row_keys[i]);
+			row_prompt[i] = requests[i].prompt_prefix + requests[i].prompt; // the round's prompt: as built
+			AIHistoryFinalize(requests[i]);
 		}
 	}
 
@@ -1115,8 +1159,8 @@ static void AIPromptFunction(DataChunk &args, ExpressionState &state, Vector &re
 	for (idx_t i = 0; i < count; i++) {
 		if (valid[i] && responses[i].success) {
 			out[i] = StringVector::AddString(result, responses[i].content);
-			if (history_on) {
-				AIHistoryRecord(row_keys[i], requests[i].prompt, responses[i].content);
+			if (history) {
+				AIHistoryRecordRound(*history, row_keys[i], row_prompt[i], responses[i].content);
 			}
 		} else {
 			out_validity.SetInvalid(i);
@@ -1255,26 +1299,6 @@ static void AIHistoryResetFunction(DataChunk &args, ExpressionState &state, Vect
 	auto out = FlatVector::GetDataMutable<int64_t>(result);
 	for (idx_t i = 0; i < count; i++) {
 		out[i] = cleared;
-	}
-}
-
-// ai_history_mode(BOOLEAN) -> BOOLEAN : enable/disable implicit history; echoes the value.
-static void AIHistoryModeFunction(DataChunk &args, ExpressionState &state, Vector &result) {
-	const idx_t count = args.size();
-	UnifiedVectorFormat format;
-	args.data[0].ToUnifiedFormat(format);
-	auto enabled = UnifiedVectorFormat::GetData<bool>(format);
-	result.SetVectorType(VectorType::FLAT_VECTOR);
-	auto out = FlatVector::GetDataMutable<bool>(result);
-	auto &out_validity = FlatVector::ValidityMutable(result);
-	for (idx_t i = 0; i < count; i++) {
-		auto idx = format.sel->get_index(i);
-		if (format.validity.RowIsValid(idx)) {
-			AIHistorySetEnabled(enabled[idx]);
-			out[i] = enabled[idx];
-		} else {
-			out_validity.SetInvalid(i);
-		}
 	}
 }
 
@@ -2152,7 +2176,10 @@ static bool AILeafOutcome(ClientContext &context, const AILeafMeta &m, const str
 static bool AIEvalLeaf(ClientContext &context, const AILeafMeta &m, const string &prompt, const string &query_text,
                        bool &ok, const string *prefix = nullptr, double expected_reads = 0.0,
                        const string *pred_text = nullptr, const AIConfig *config = nullptr,
-                       const string *lead_span = nullptr, const string *head = nullptr, double head_reads = 0.0) {
+                       const string *lead_span = nullptr, const string *head = nullptr, double head_reads = 0.0,
+                       const AIHistoryScope *history = nullptr, const vector<string> *history_keys = nullptr,
+                       const vector<std::pair<string, string>> *extra_turns = nullptr,
+                       std::pair<string, string> *round_out = nullptr) {
 	vector<AIRequest> one;
 	if (prefix && !prefix->empty()) {
 		// Build from the full text (a Choice leaf recovers its options from the baked frame), then
@@ -2169,8 +2196,23 @@ static bool AIEvalLeaf(ClientContext &context, const AILeafMeta &m, const string
 		AIDeclareLeadingSpans(one[0], config ? *config : AIConfig::Get(), head ? *head : string(), head_reads,
 		                      lead_span ? *lead_span : AIImagePrefixSpan(prompt), expected_reads);
 	}
+	const bool with_history = history && history_keys && !history_keys->empty();
+	const string full_prompt = one[0].prompt_prefix + one[0].prompt; // the round's prompt: as built
+	if (with_history) {
+		AIHistoryAttach(one[0], *history, *history_keys); // the rounds below this operator on these inputs
+	}
+	if (extra_turns && !extra_turns->empty()) {
+		AIHistoryAppendTurns(one[0], *extra_turns); // a factor graph's member rounds
+	}
+	AIHistoryFinalize(one[0]);
 	auto r = AIBatchComplete(one, query_text, /*force_fixed=*/true, config);
 	ok = !r.empty() && r[0].success;
+	if (ok && with_history) {
+		AIHistoryRecordRound(*history, *history_keys, full_prompt, r[0].content);
+	}
+	if (ok && round_out) {
+		*round_out = std::make_pair(AIHistoryTurnText(full_prompt), r[0].content);
+	}
 	if (!ok) {
 		if (m.wrapper) {
 			// A failed call is a NULL answer to the wrapper: IS NULL is true for it, coalesce decides, and a
@@ -2189,9 +2231,15 @@ static bool AIEvalLeaf(ClientContext &context, const AILeafMeta &m, const string
 //! never spend a call the k-bounded evaluation above may not need.
 static bool AIEvalLeafCached(ClientContext &context, const AILeafMeta &m, const string &prompt,
                              const string &query_text, bool &value, const string *pred_text = nullptr,
-                             const AIConfig *config = nullptr) {
+                             const AIConfig *config = nullptr, const AIHistoryScope *history = nullptr,
+                             const vector<string> *history_keys = nullptr) {
 	AIResult cached;
-	if (!AICacheProbe(AILeafRequest(m, prompt, pred_text), query_text, cached, config) || !cached.success) {
+	AIRequest request = AILeafRequest(m, prompt, pred_text);
+	if (history && history_keys && !history_keys->empty()) {
+		AIHistoryAttach(request, *history, *history_keys); // the probe keys exactly like the call would
+		AIHistoryFinalize(request);
+	}
+	if (!AICacheProbe(request, query_text, cached, config) || !cached.success) {
 		return false;
 	}
 	bool ok = false;
@@ -2253,9 +2301,16 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
                                   const vector<vector<double>> *reuse_hint = nullptr,
                                   const vector<vector<string>> *lead_span = nullptr,
                                   const BoundFunctionExpression *eval_call_for_heads = nullptr,
-                                  const string *single_head = nullptr,
-                                  const vector<vector<char>> *leaf_valid = nullptr) {
+                                  const string *single_head = nullptr, const vector<vector<char>> *leaf_valid = nullptr,
+                                  const vector<vector<vector<string>>> *history_keys = nullptr,
+                                  const AIHistoryScope *history = nullptr) {
 	const AIConfig batch_config = AIConfigForContext(context); // this connection's endpoint/model/key for the batch
+	// SET ai_history: the keys of row `row`'s inputs for leaf `l`, when the caller materialised them
+	auto hkeys = [&](idx_t row, idx_t l) -> const vector<string> * {
+		return history && history_keys && row < history_keys->size() && l < (*history_keys)[row].size()
+		           ? &(*history_keys)[row][l]
+		           : nullptr;
+	};
 	const auto &tree = *bind_data.tree;
 	// each leaf's constant head (instruction / few-shot text before the row's input), declared as its own span
 	vector<string> leaf_head(bind_data.leaf_count);
@@ -2555,7 +2610,7 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 					}
 					bool v = false;
 					if (AIEvalLeafCached(context, leaf_meta[l], prompt[row][l], query_text, v, &pred_text[row][l],
-					                     &batch_config)) {
+					                     &batch_config, history, hkeys(row, l))) {
 						leaf_values[row][l] = v ? AITriState::TRI_TRUE : AITriState::TRI_FALSE;
 					}
 				}
@@ -2884,7 +2939,7 @@ static void AIFilterEvaluateBatch(ClientContext &context, const AIFilterWithEmbe
 			}
 			const bool value = AIEvalLeaf(context, leaf_meta[leaf], prompt[row][leaf], query_text, value_ok, nullptr,
 			                              image_reads, &pred_text[row][leaf], &batch_config, &mine, &leaf_head[leaf],
-			                              static_cast<double>(count) - 1.0);
+			                              static_cast<double>(count) - 1.0, history, hkeys(row, leaf));
 			ema_update(llm_lat_us,
 			           std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - llm_t0)
 			               .count());
@@ -3164,10 +3219,43 @@ vector<idx_t> AILeafKeyCols(const BoundFunctionExpression &eval_call, idx_t leaf
 	return vector<idx_t>(cols.begin(), cols.end());
 }
 
+//! The history keys of one row of `rows` for the key columns `key_cols`: AIValueKeyText per column, NULL and
+//! empty texts skipped (the scalar path's GetRowKeys rule, so every path shares one key space).
+static vector<string> AIRowHistoryKeys(DataChunk &rows, const vector<idx_t> &key_cols, idx_t row) {
+	vector<string> keys;
+	for (const idx_t kc : key_cols) {
+		const Value v = rows.data[kc].GetValue(row);
+		if (v.IsNull()) {
+			continue;
+		}
+		string key = AIValueKeyText(v);
+		if (!key.empty()) {
+			keys.push_back(std::move(key));
+		}
+	}
+	return keys;
+}
+
+void AILeafHistoryKeys(const BoundFunctionExpression &eval_call, DataChunk &rows, vector<vector<vector<string>>> &out) {
+	const idx_t n = AILeafCount(eval_call);
+	vector<vector<idx_t>> key_cols(n);
+	for (idx_t l = 0; l < n; l++) {
+		key_cols[l] = AILeafKeyCols(eval_call, l);
+	}
+	const idx_t base = out.size();
+	out.resize(base + rows.size(), vector<vector<string>>(n));
+	for (idx_t i = 0; i < rows.size(); i++) {
+		for (idx_t l = 0; l < n; l++) {
+			out[base + i][l] = AIRowHistoryKeys(rows, key_cols[l], i);
+		}
+	}
+}
+
 void AILeafBuildTexts(ClientContext &context, const BoundFunctionExpression &eval_call, idx_t leaf, DataChunk &rows,
                       AILeafTexts &out) {
 	const idx_t n = AILeafCount(eval_call);
 	auto &children = eval_call.GetChildren();
+	const vector<idx_t> key_cols = AILeafKeyCols(eval_call, leaf);
 	ExpressionExecutor executor(context);
 	vector<LogicalType> types;
 	for (const idx_t pos : {1 + leaf, 1 + n + leaf, 1 + 2 * n + leaf}) {
@@ -3204,6 +3292,7 @@ void AILeafBuildTexts(ClientContext &context, const BoundFunctionExpression &eva
 		const auto &prompt = out.prompt.back();
 		out.cost.push_back(
 		    pv.IsNull() ? 1.0 : (AITextHasImage(prompt) ? AIImageLeafCost(prompt) : AIEstimatePromptCost(prompt)));
+		out.keys.push_back(AIRowHistoryKeys(rows, key_cols, i));
 	}
 }
 
@@ -3351,7 +3440,7 @@ uint64_t AISelectivityTrainSteps() {
 
 void AILeafEvaluate(ClientContext &context, const BoundFunctionExpression &eval_call, idx_t leaf,
                     const AILeafTexts &texts, const string &query_text, vector<char> &out_result,
-                    vector<char> &out_valid) {
+                    vector<char> &out_valid, const AIHistoryScope *history) {
 	auto &node = eval_call.BindInfo()->Cast<AIFilterWithEmbedBindData>();
 	// The leaf's own meta segment (';'-separated, one per leaf; empty = plain ai_filter everywhere).
 	string meta;
@@ -3376,6 +3465,7 @@ void AILeafEvaluate(ClientContext &context, const BoundFunctionExpression &eval_
 	vector<vector<double>> cost(count, vector<double>(1, 1.0));
 	vector<vector<double>> hint(count, vector<double>(1, -1.0));
 	vector<vector<string>> lead(count, vector<string>(1));
+	vector<vector<vector<string>>> keys(count, vector<vector<string>>(1));
 	vector<char> valid(count, 1);
 	for (idx_t i = 0; i < count; i++) {
 		prompt[i][0] = texts.prompt[i];
@@ -3385,9 +3475,12 @@ void AILeafEvaluate(ClientContext &context, const BoundFunctionExpression &eval_
 		valid[i] = texts.valid[i];
 		hint[i][0] = i < texts.reuse_hint.size() ? texts.reuse_hint[i] : -1.0;
 		lead[i][0] = i < texts.lead_span.size() ? texts.lead_span[i] : string();
+		if (i < texts.keys.size()) {
+			keys[i][0] = texts.keys[i];
+		}
 	}
 	AIFilterEvaluateBatch(context, one, count, prompt, pred, input, cost, valid, query_text, out_result, -1, nullptr,
-	                      &hint, &lead, nullptr, &texts.head);
+	                      &hint, &lead, nullptr, &texts.head, nullptr, history ? &keys : nullptr, history);
 	out_valid = valid;
 	AINullResultsInvalid(out_result, out_valid);
 }
@@ -3437,18 +3530,20 @@ AITriState AILeafUnitEvaluator::NullOutcome(ClientContext &context, idx_t leaf) 
 
 Value AILeafUnitEvaluator::Evaluate(ClientContext &context, idx_t leaf, const string &prompt, const string &pred_text,
                                     const vector<float> &feature, const string &query_text, double reuse_hint,
-                                    const string *lead_span, const string *head, double head_reads) const {
+                                    const string *lead_span, const string *head, double head_reads,
+                                    const vector<string> *history_keys, const AIHistoryScope *history) const {
 	const auto &meta = impl->metas[leaf];
 	if (impl->speculative) {
 		// A speculative leaf only prunes what is already known false; an unknown input passes through.
 		bool v = false;
-		return Value::BOOLEAN(
-		    !AIEvalLeafCached(context, meta, prompt, query_text, v, &pred_text, &impl->Config(context)) || v);
+		return Value::BOOLEAN(!AIEvalLeafCached(context, meta, prompt, query_text, v, &pred_text,
+		                                        &impl->Config(context), history, history_keys) ||
+		                      v);
 	}
 	bool ok = false;
 	const AIConfig &config = impl->Config(context);
 	const bool value = AIEvalLeaf(context, meta, prompt, query_text, ok, nullptr, reuse_hint, &pred_text, &config,
-	                              lead_span, head, head_reads);
+	                              lead_span, head, head_reads, history, history_keys);
 	if (ok && !feature.empty()) {
 		AIRecordTrainingExample(prompt, feature, value);
 		AISelectivityModel::Global().AddExample(feature, value);
@@ -3532,7 +3627,7 @@ void AIDedupFireWaveScalar(ClientContext &context, const BoundFunctionExpression
 // no CDC scan loop (the AI currency's cardinality floor keeps a chunk <= STANDARD_VECTOR_SIZE).
 void AIDedupFireWaveFactorized(ClientContext &context, const BoundFunctionExpression &eval_call, DataChunk &factorized,
                                const string &query_text, int64_t remaining_limit, vector<char> &out_result,
-                               vector<char> &out_valid) {
+                               vector<char> &out_valid, const AIHistoryScope *history) {
 	auto &bind_data = eval_call.BindInfo()->Cast<AIFilterWithEmbedBindData>();
 	const idx_t n = bind_data.leaf_count;
 	const idx_t count_col = factorized.ColumnCount() - 1; // trailing `__count`
@@ -3556,8 +3651,13 @@ void AIDedupFireWaveFactorized(ClientContext &context, const BoundFunctionExpres
 	AIFilterAppendArgs(arg_chunk, n, prompt, pred_text, input_text, cost, out_valid, leaf_valid);
 	vector<vector<string>> lead;
 	AIFilterAppendLeadSpans(context, eval_call, factorized, lead);
+	vector<vector<vector<string>>> keys;
+	if (history) {
+		AILeafHistoryKeys(eval_call, factorized, keys);
+	}
 	AIFilterEvaluateBatch(context, bind_data, prompt.size(), prompt, pred_text, input_text, cost, out_valid, query_text,
-	                      out_result, remaining_limit, &weights, nullptr, &lead, &eval_call, nullptr, &leaf_valid);
+	                      out_result, remaining_limit, &weights, nullptr, &lead, &eval_call, nullptr, &leaf_valid,
+	                      history ? &keys : nullptr, history);
 	AINullResultsInvalid(out_result, out_valid);
 }
 
@@ -3779,8 +3879,6 @@ void RegisterAIFunctions(ExtensionLoader &loader) {
 	// History mode
 	loader.RegisterFunction(
 	    MakeVolatile(ScalarFunction("ai_history_reset", {}, LogicalType::BIGINT, AIHistoryResetFunction)));
-	loader.RegisterFunction(MakeVolatile(
-	    ScalarFunction("ai_history_mode", {LogicalType::BOOLEAN}, LogicalType::BOOLEAN, AIHistoryModeFunction)));
 
 	// Turbo mode: adaptive (AIMD) concurrency
 	loader.RegisterFunction(
@@ -3864,7 +3962,10 @@ static bool AIConstantConcatText(const Expression &expr, string &out) {
 
 bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub_node,
                       const vector<string> &leaf_prompts, const string &query_text, bool &valid,
-                      const vector<string> *leaf_prefixes, double expected_reads, const vector<char> *leaf_null) {
+                      const vector<string> *leaf_prefixes, double expected_reads, const vector<char> *leaf_null,
+                      const vector<vector<string>> *leaf_keys, const AIHistoryScope *history,
+                      const vector<std::pair<string, string>> *member_turns,
+                      vector<std::pair<string, string>> *rounds_out) {
 	const AIConfig unit_config = AIConfigForContext(context);
 	auto &bind_data = sub_node.BindInfo()->Cast<AIFilterWithEmbedBindData>();
 	const auto metas = AIParseLeafMeta(bind_data.meta, bind_data.leaf_count, bind_data.wrappers);
@@ -3922,8 +4023,19 @@ bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub
 			pred.clear();
 		}
 		// A wrapper that raises on the answer propagates: the graph's pool hands the error to its driver.
+		const vector<string> *keys = leaf_keys && l < leaf_keys->size() ? &(*leaf_keys)[l] : nullptr;
+		std::pair<string, string> round;
 		const bool value =
-		    AIEvalLeaf(context, metas[l], leaf_prompts[l], query_text, ok, prefix, expected_reads, &pred, &unit_config);
+		    AIEvalLeaf(context, metas[l], leaf_prompts[l], query_text, ok, prefix, expected_reads, &pred, &unit_config,
+		               nullptr, nullptr, 0.0, history, keys, member_turns, rounds_out ? &round : nullptr);
+		if (rounds_out) {
+			if (rounds_out->size() < n) {
+				rounds_out->resize(n); // aligned with the leaves: an unanswered leaf leaves an empty entry
+			}
+			if (ok) {
+				(*rounds_out)[l] = std::move(round);
+			}
+		}
 		values[l] = !ok ? AITriState::TRI_NULL : value ? AITriState::TRI_TRUE : AITriState::TRI_FALSE;
 	}
 }

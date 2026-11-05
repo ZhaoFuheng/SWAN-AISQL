@@ -134,8 +134,15 @@ InsertionOrderPreservingMap<string> PhysicalAIFactorGraph::ParamsToString() cons
 //===--------------------------------------------------------------------===//
 class FactorGraphSinkState : public GlobalSinkState {
 public:
-	explicit FactorGraphSinkState(idx_t k) : sides(k) {
+	FactorGraphSinkState(ClientContext &context, const PhysicalAIFactorGraph &op) : sides(op.side_widths.size()) {
+		history_view.scope = context.GetCurrentQuery();
+		history_view.op_id = op.history_op_id;
+		history_view.upstream_ops = op.history_upstream;
+		history.view = &history_view;
 	}
+	//! SET ai_history: what this operator's calls may see and the id they record under.
+	AIHistoryView history_view;
+	AIHistoryScope history;
 
 	struct Side {
 		vector<vector<Value>> reps;
@@ -154,8 +161,8 @@ public:
 	idx_t side;
 };
 
-unique_ptr<GlobalSinkState> PhysicalAIFactorGraph::GetGlobalSinkState(ClientContext &) const {
-	return make_uniq<FactorGraphSinkState>(children.size());
+unique_ptr<GlobalSinkState> PhysicalAIFactorGraph::GetGlobalSinkState(ClientContext &context) const {
+	return make_uniq<FactorGraphSinkState>(context, *this);
 }
 
 unique_ptr<LocalSinkState> PhysicalAIFactorGraph::GetLocalSinkState(ExecutionContext &context) const {
@@ -254,7 +261,8 @@ unique_ptr<GlobalSourceState> PhysicalAIFactorGraph::GetGlobalSourceState(Client
 //! appends one 0/1 result per row to `out_pass` (invalid/NULL counts as false — filter semantics).
 template <class FILL>
 static void EvaluateDomain(ClientContext &context, const Expression &sub_node, const vector<LogicalType> &chunk_types,
-                           idx_t row_count, const string &query_text, FILL fill, vector<char> &out_pass) {
+                           idx_t row_count, const string &query_text, FILL fill, vector<char> &out_pass,
+                           const AIHistoryScope *history) {
 	auto &fn = sub_node.Cast<BoundFunctionExpression>();
 	DataChunk chunk;
 	chunk.Initialize(BufferAllocator::Get(context), chunk_types);
@@ -267,7 +275,7 @@ static void EvaluateDomain(ClientContext &context, const Expression &sub_node, c
 			fill(chunk, j, done + j);
 		}
 		vector<char> result, valid;
-		AIDedupFireWaveFactorized(context, fn, chunk, query_text, /*remaining_limit=*/-1, result, valid);
+		AIDedupFireWaveFactorized(context, fn, chunk, query_text, /*remaining_limit=*/-1, result, valid, history);
 		for (idx_t j = 0; j < batch; j++) {
 			out_pass.push_back(j < result.size() && (j >= valid.size() || valid[j]) && result[j] ? 1 : 0);
 		}
@@ -367,7 +375,9 @@ struct GraphStreamPool {
 		idx_t domain;
 		idx_t a;
 		idx_t b;
-		idx_t expected_reuse = 0; // fan-out hint for the client's prefix-cache write policy
+		idx_t expected_reuse = 0;    // fan-out hint for the client's prefix-cache write policy
+		vector<vector<string>> keys; // SET ai_history: per leaf, the history keys of the unit's inputs
+		vector<std::pair<string, string>> member_turns; // SET ai_history: a pair's two members' own unary rounds
 	};
 	struct Done {
 		string key;
@@ -376,6 +386,8 @@ struct GraphStreamPool {
 		idx_t a;
 		idx_t b;
 		bool value;
+		vector<std::pair<string, string>> rounds; // SET ai_history: the unit's answered (prompt, answer) per leaf
+		vector<vector<string>> keys;              // SET ai_history: the unit's history keys per leaf (from the task)
 	};
 
 	std::mutex m;
@@ -388,6 +400,8 @@ struct GraphStreamPool {
 	vector<std::thread> threads;
 	string query_text;
 	optional_ptr<ClientContext> context;
+	//! SET ai_history: the operator's scope (nullptr = off); every unit gathers from and records into it.
+	const AIHistoryScope *history = nullptr;
 	//! The first exception a unit raised (a wrapper that cannot read an answer, a failed prompt expression);
 	//! rethrown to the driver by Drain, so the query fails exactly as the scalar evaluation would.
 	ErrorData error;
@@ -415,10 +429,14 @@ struct GraphStreamPool {
 					bool valid = false;
 					bool value = false;
 					ErrorData failure;
+					vector<std::pair<string, string>> rounds;
 					try {
 						value = AIFactorEvalUnit(*context, task.sub_node->Cast<BoundFunctionExpression>(), task.prompts,
 						                         query_text, valid, task.prefixes.empty() ? nullptr : &task.prefixes,
-						                         static_cast<double>(task.expected_reuse), &task.nulls) &&
+						                         static_cast<double>(task.expected_reuse), &task.nulls,
+						                         history && !task.keys.empty() ? &task.keys : nullptr, history,
+						                         history && !task.member_turns.empty() ? &task.member_turns : nullptr,
+						                         history && task.is_unary ? &rounds : nullptr) &&
 						        valid;
 					} catch (std::exception &ex) {
 						failure = ErrorData(ex);
@@ -428,7 +446,8 @@ struct GraphStreamPool {
 						if (failure.HasError() && !error.HasError()) {
 							error = std::move(failure);
 						}
-						done.push_back(Done {std::move(task.key), task.is_unary, task.domain, task.a, task.b, value});
+						done.push_back(Done {std::move(task.key), task.is_unary, task.domain, task.a, task.b, value,
+						                     std::move(rounds), std::move(task.keys)});
 					}
 					done_cv.notify_all();
 				}
@@ -509,6 +528,8 @@ struct GraphUnitBaker {
 	vector<vector<const Expression *>> cache_ops;
 	vector<idx_t> cache_split;
 	vector<char> cache_group_s; // group axis: 1 = edge.s owns the prefix, 0 = edge.t
+	//! SET ai_history: per domain, per leaf, the leaf's key columns in the domain's row layout (lazily built).
+	vector<vector<vector<idx_t>>> side_key_cols, edge_key_cols;
 
 	GraphUnitBaker(ClientContext &context_p, const PhysicalAIFactorGraph &op_p,
 	               const PhysicalAIFactorGraph::TermPlan &plan_p, FactorGraphSinkState &sink_p)
@@ -715,6 +736,45 @@ struct GraphUnitBaker {
 		return prompts;
 	}
 
+	//! SET ai_history: the history keys of the unit's inputs per leaf, read from the domain's row chunk as the
+	//! last Bake left it (AIValueKeyText of each key column; NULL and empty texts skipped, as everywhere).
+	vector<vector<string>> Keys(bool is_unary, idx_t domain) {
+		auto &sub = is_unary ? side_sub[domain] : edge_sub[domain];
+		auto &row = is_unary ? side_row[domain] : edge_row[domain];
+		auto &cols_by_domain = is_unary ? side_key_cols : edge_key_cols;
+		if (cols_by_domain.size() <= domain) {
+			cols_by_domain.resize(domain + 1);
+		}
+		auto &cols = cols_by_domain[domain];
+		auto &fn_sub = sub->Cast<BoundFunctionExpression>();
+		const idx_t nleaf = AILeafCount(fn_sub);
+		if (cols.empty()) {
+			for (idx_t l = 0; l < nleaf; l++) {
+				cols.push_back(AILeafKeyCols(fn_sub, l));
+			}
+		}
+		vector<vector<string>> keys(nleaf);
+		if (!row) {
+			return keys;
+		}
+		for (idx_t l = 0; l < nleaf; l++) {
+			for (const idx_t kc : cols[l]) {
+				if (kc >= row->ColumnCount()) {
+					continue;
+				}
+				const Value v = row->data[kc].GetValue(0);
+				if (v.IsNull()) {
+					continue;
+				}
+				string key = AIValueKeyText(v);
+				if (!key.empty()) {
+					keys[l].push_back(std::move(key));
+				}
+			}
+		}
+		return keys;
+	}
+
 	//! One unit's prompts (+ prefixes when the pair prompt is cache-split) and its single-flight key:
 	//! prefix+prompt concatenated, so cached and plain forms of the same pair share one flight. The key
 	//! ends with the factor's signature (tree + leaf meta): the flight shares the factor's VERDICT, so two
@@ -872,6 +932,58 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 
 	// Member unary state: 0 pending, 1 confirmed-true, 2 false. Sides without unary leaves confirm.
 	vector<vector<char>> uval(k1);
+	// SET ai_history: per side, per member, the member's own unary rounds (known before any pair on it is asked),
+	// each with the sorted keys of the inputs it was asked about
+	struct MemberRound {
+		vector<string> keys;
+		string prompt;
+		string content;
+	};
+	vector<vector<vector<MemberRound>>> member_rounds(k1);
+	auto keep_member_rounds = [&](const GraphStreamPool::Done &done, idx_t domain, idx_t a) {
+		if (!done.is_unary || done.rounds.empty() || domain >= member_rounds.size()) {
+			return;
+		}
+		if (member_rounds[domain].size() <= a) {
+			member_rounds[domain].resize(a + 1);
+		}
+		auto &slot = member_rounds[domain][a];
+		slot.clear();
+		for (idx_t l = 0; l < done.rounds.size(); l++) {
+			if (done.rounds[l].first.empty()) {
+				continue; // unanswered leaf
+			}
+			vector<string> keys = l < done.keys.size() ? done.keys[l] : vector<string>();
+			std::sort(keys.begin(), keys.end());
+			slot.push_back(MemberRound {std::move(keys), done.rounds[l].first, done.rounds[l].second});
+		}
+	};
+	// A pair carries a member's round only when the round's inputs are all among the pair call's own inputs (the
+	// subset rule every other path applies): a round that also read a column the pair prompt does not mention
+	// would make identical pair questions differ by their note, defeating the prompt dedup (MMQA q7: airline rows
+	// that share a name but not a destination list, 13,008 -> 17,400 calls) and answering one question two ways.
+	auto member_turns_for = [&](idx_t e, idx_t a, idx_t b, const vector<vector<string>> &call_keys) {
+		vector<std::pair<string, string>> turns;
+		vector<string> all_keys;
+		for (const auto &k : call_keys) {
+			all_keys.insert(all_keys.end(), k.begin(), k.end());
+		}
+		std::sort(all_keys.begin(), all_keys.end());
+		const auto &edge = plan.edges[e];
+		auto add = [&](idx_t side, idx_t m) {
+			if (side >= member_rounds.size() || m >= member_rounds[side].size()) {
+				return;
+			}
+			for (const auto &round : member_rounds[side][m]) {
+				if (std::includes(all_keys.begin(), all_keys.end(), round.keys.begin(), round.keys.end())) {
+					turns.emplace_back(round.prompt, round.content);
+				}
+			}
+		};
+		add(edge.s, a);
+		add(edge.t, b);
+		return turns;
+	};
 	for (idx_t s = 0; s < k1; s++) {
 		uval[s].assign(sink.sides[s].reps.size(), plan.unary_leaves[s].empty() ? 1 : 0);
 	}
@@ -1259,6 +1371,7 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 	// bake per unit through per-domain executors (vectorized expression evaluation over a
 	// one-row chunk); identical prompt vectors share one call via the single-flight table.
 	GraphStreamPool pool;
+	pool.history = AIConfig::Get().history ? &sink.history : nullptr;
 	pool.Start(context, batch_cap, query_text);
 	std::unordered_map<string, vector<GraphStreamPool::Done>> parked; // key -> units awaiting the winner
 	auto submit_unit = [&](bool is_unary, idx_t domain, idx_t a, idx_t b) {
@@ -1285,9 +1398,23 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 			return; // identical prompt already in flight: park, the winner's value routes here
 		}
 		parked.emplace(key, vector<GraphStreamPool::Done> {});
-		pool.Submit(GraphStreamPool::Task {is_unary ? side_sub[domain].get() : edge_sub[domain].get(),
-		                                   std::move(prompts), std::move(prefixes), std::move(nulls), std::move(key),
-		                                   is_unary, domain, a, b, expected_reuse});
+		GraphStreamPool::Task task {is_unary ? side_sub[domain].get() : edge_sub[domain].get(),
+		                            std::move(prompts),
+		                            std::move(prefixes),
+		                            std::move(nulls),
+		                            std::move(key),
+		                            is_unary,
+		                            domain,
+		                            a,
+		                            b,
+		                            expected_reuse};
+		if (pool.history) {
+			task.keys = baker.Keys(is_unary, domain);
+			if (!is_unary) {
+				task.member_turns = member_turns_for(domain, a, b, task.keys);
+			}
+		}
+		pool.Submit(std::move(task));
 	};
 	auto apply_value = [&](bool is_unary, idx_t domain, idx_t a, idx_t b, bool value) {
 		if (is_unary) {
@@ -1317,10 +1444,12 @@ static void LazyFactorGraphEvaluation(ClientContext &context, const PhysicalAIFa
 		vector<GraphStreamPool::Done> dones;
 		pool.Drain(dones, blocking);
 		for (auto &done : dones) {
+			keep_member_rounds(done, done.domain, done.a);
 			apply_value(done.is_unary, done.domain, done.a, done.b, done.value);
 			auto it = parked.find(done.key);
 			if (it != parked.end()) {
 				for (auto &waiter : it->second) {
+					keep_member_rounds(done, waiter.domain, waiter.a); // the same prompt: the same round
 					apply_value(waiter.is_unary, waiter.domain, waiter.a, waiter.b, done.value);
 				}
 				parked.erase(it);
@@ -1601,6 +1730,58 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 
 	// Member unary state: 0 pending, 1 confirmed-true, 2 false, 3 dispatched.
 	vector<vector<char>> uval(k1);
+	// SET ai_history: per side, per member, the member's own unary rounds (known before any pair on it is asked),
+	// each with the sorted keys of the inputs it was asked about
+	struct MemberRound {
+		vector<string> keys;
+		string prompt;
+		string content;
+	};
+	vector<vector<vector<MemberRound>>> member_rounds(k1);
+	auto keep_member_rounds = [&](const GraphStreamPool::Done &done, idx_t domain, idx_t a) {
+		if (!done.is_unary || done.rounds.empty() || domain >= member_rounds.size()) {
+			return;
+		}
+		if (member_rounds[domain].size() <= a) {
+			member_rounds[domain].resize(a + 1);
+		}
+		auto &slot = member_rounds[domain][a];
+		slot.clear();
+		for (idx_t l = 0; l < done.rounds.size(); l++) {
+			if (done.rounds[l].first.empty()) {
+				continue; // unanswered leaf
+			}
+			vector<string> keys = l < done.keys.size() ? done.keys[l] : vector<string>();
+			std::sort(keys.begin(), keys.end());
+			slot.push_back(MemberRound {std::move(keys), done.rounds[l].first, done.rounds[l].second});
+		}
+	};
+	// A pair carries a member's round only when the round's inputs are all among the pair call's own inputs (the
+	// subset rule every other path applies): a round that also read a column the pair prompt does not mention
+	// would make identical pair questions differ by their note, defeating the prompt dedup (MMQA q7: airline rows
+	// that share a name but not a destination list, 13,008 -> 17,400 calls) and answering one question two ways.
+	auto member_turns_for = [&](idx_t e, idx_t a, idx_t b, const vector<vector<string>> &call_keys) {
+		vector<std::pair<string, string>> turns;
+		vector<string> all_keys;
+		for (const auto &k : call_keys) {
+			all_keys.insert(all_keys.end(), k.begin(), k.end());
+		}
+		std::sort(all_keys.begin(), all_keys.end());
+		const auto &edge = plan.edges[e];
+		auto add = [&](idx_t side, idx_t m) {
+			if (side >= member_rounds.size() || m >= member_rounds[side].size()) {
+				return;
+			}
+			for (const auto &round : member_rounds[side][m]) {
+				if (std::includes(all_keys.begin(), all_keys.end(), round.keys.begin(), round.keys.end())) {
+					turns.emplace_back(round.prompt, round.content);
+				}
+			}
+		};
+		add(edge.s, a);
+		add(edge.t, b);
+		return turns;
+	};
 	vector<idx_t> live_count(k1, 0);
 	for (idx_t s = 0; s < k1; s++) {
 		uval[s].assign(sink.sides[s].reps.size(), plan.unary_leaves[s].empty() ? 1 : 0);
@@ -1970,6 +2151,7 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 	// Streaming driver (see the dense scheduler): persistent pool, single-flight, dispatch marking.
 	GraphUnitBaker baker(context, op, plan, sink);
 	GraphStreamPool pool;
+	pool.history = AIConfig::Get().history ? &sink.history : nullptr;
 	pool.Start(context, batch_cap, query_text);
 	std::unordered_map<string, vector<GraphStreamPool::Done>> parked;
 	auto submit_unit = [&](bool is_unary, idx_t domain, idx_t a, idx_t b) {
@@ -1995,8 +2177,23 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 			return;
 		}
 		parked.emplace(key, vector<GraphStreamPool::Done> {});
-		pool.Submit(GraphStreamPool::Task {baker.SubNode(is_unary, domain), std::move(prompts), std::move(prefixes),
-		                                   std::move(nulls), std::move(key), is_unary, domain, a, b, expected_reuse});
+		GraphStreamPool::Task task {baker.SubNode(is_unary, domain),
+		                            std::move(prompts),
+		                            std::move(prefixes),
+		                            std::move(nulls),
+		                            std::move(key),
+		                            is_unary,
+		                            domain,
+		                            a,
+		                            b,
+		                            expected_reuse};
+		if (pool.history) {
+			task.keys = baker.Keys(is_unary, domain);
+			if (!is_unary) {
+				task.member_turns = member_turns_for(domain, a, b, task.keys);
+			}
+		}
+		pool.Submit(std::move(task));
 	};
 	auto apply_value = [&](bool is_unary, idx_t domain, idx_t a, idx_t b, bool value) {
 		if (is_unary) {
@@ -2055,10 +2252,12 @@ static void SparseLazyFactorGraphEvaluation(ClientContext &context, const Physic
 		vector<GraphStreamPool::Done> dones;
 		pool.Drain(dones, blocking);
 		for (auto &done : dones) {
+			keep_member_rounds(done, done.domain, done.a);
 			apply_value(done.is_unary, done.domain, done.a, done.b, done.value);
 			auto it = parked.find(done.key);
 			if (it != parked.end()) {
 				for (auto &waiter : it->second) {
+					keep_member_rounds(done, waiter.domain, waiter.a); // the same prompt: the same round
 					apply_value(waiter.is_unary, waiter.domain, waiter.a, waiter.b, done.value);
 				}
 				parked.erase(it);
@@ -2396,7 +2595,7 @@ static void RunTerm(ClientContext &context, const PhysicalAIFactorGraph &op,
 				    }
 				    chunk.data[op.side_widths[s]].SetValue(j, Value::BIGINT(NumericCast<int64_t>(side.counts[row])));
 			    },
-			    pass);
+			    pass, AIConfig::Get().history ? &sink.history : nullptr);
 			for (idx_t r = 0; r < side.reps.size(); r++) {
 				live[s][r] = pass[r];
 			}
@@ -2467,7 +2666,7 @@ static void RunTerm(ClientContext &context, const PhysicalAIFactorGraph &op,
 				    }
 				    chunk.data[op.side_widths[edge.s] + op.side_widths[edge.t]].SetValue(j, Value::BIGINT(1));
 			    },
-			    pass);
+			    pass, AIConfig::Get().history ? &sink.history : nullptr);
 			for (idx_t p = 0; p < pairs.size(); p++) {
 				if (pass[p]) {
 					edge_pass[best].push_back(pairs[p]);

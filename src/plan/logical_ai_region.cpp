@@ -71,6 +71,8 @@ PhysicalOperator &LogicalAIRegion::CreatePlan(ClientContext &context, PhysicalPl
 	auto &region =
 	    planner.Make<PhysicalAIRegion>(std::move(types), std::move(expressions[0]), card, limit, limit_distinct_cols);
 	region.Cast<PhysicalAIRegion>().under_limit = under_limit;
+	region.Cast<PhysicalAIRegion>().history_op_id = history_op_id;
+	region.Cast<PhysicalAIRegion>().history_upstream = history_upstream;
 	region.children.push_back(child);
 	return region;
 }

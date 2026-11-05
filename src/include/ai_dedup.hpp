@@ -15,6 +15,8 @@
 
 namespace duckdb {
 
+struct AIHistoryScope; // ai_client.hpp
+
 class ClientContext;
 class ColumnDataCollection;
 class DataChunk;
@@ -77,7 +79,7 @@ void AIDedupFireWaveScalar(ClientContext &context, const BoundFunctionExpression
 //! output rows already passed (-1 = none). Weights are read from the trailing `__count` column.
 void AIDedupFireWaveFactorized(ClientContext &context, const BoundFunctionExpression &eval_call, DataChunk &factorized,
                                const string &query_text, int64_t remaining_limit, vector<char> &out_result,
-                               vector<char> &out_valid);
+                               vector<char> &out_valid, const AIHistoryScope *history = nullptr);
 
 //! Scalar path: run the scalar AI function over the factorized chunk's rep rows (`__count` ignored).
 void AIDedupFireWaveScalarFactorized(ClientContext &context, const BoundFunctionExpression &eval_call,
@@ -128,10 +130,17 @@ void AIFactorPromptOperands(const Expression &call_prompt, vector<const Expressi
 //! the client (query cache, single-flight, hedging, the global concurrency gate). `valid` false
 //! on a failed call. `leaf_null[l]`: leaf l's prompt is NULL -- its answer is NULL and its wrapper decides
 //! over that (no call). Backs the streaming graph executor's worker tasks.
+//! SET ai_history: `leaf_keys[l]` are the history keys of leaf l's inputs; `member_turns` are the unit's members'
+//! own unary rounds (a pair is asked only once both members are confirmed, so they are known), appended after the
+//! gathered turns; `rounds_out` (sized to the leaves) receives each answered leaf's (prompt, answer), an unanswered
+//! leaf an empty entry, so the graph can keep a member's rounds with their leaf keys.
 bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub_node,
                       const vector<string> &leaf_prompts, const string &query_text, bool &valid,
                       const vector<string> *leaf_prefixes = nullptr, double expected_reads = 0.0,
-                      const vector<char> *leaf_null = nullptr);
+                      const vector<char> *leaf_null = nullptr, const vector<vector<string>> *leaf_keys = nullptr,
+                      const AIHistoryScope *history = nullptr,
+                      const vector<std::pair<string, string>> *member_turns = nullptr,
+                      vector<std::pair<string, string>> *rounds_out = nullptr);
 
 //! Clone a conjunctive folded node restricted to `leaf_ids`, remapping every column reference
 //! through `index_map` (combined layout -> evaluation-chunk layout). The clone is a plain
@@ -164,6 +173,8 @@ struct AILeafTexts {
 	//! The leaf's constant head: the text of the foldable operands the prompt starts with (instruction,
 	//! few-shot examples), the same for every rep; empty when the prompt starts with a row-varying operand.
 	string head;
+	//! Per rep: the history keys of its inputs (AIValueKeyText of each key column, NULL and empty skipped).
+	vector<vector<string>> keys;
 	idx_t Size() const {
 		return prompt.size();
 	}
@@ -203,7 +214,9 @@ double AILeafLogit(double p);
 //! speculative gate and MLP training as the per-row batch. out_valid[i] = 0 -> no verdict (NULL).
 void AILeafEvaluate(ClientContext &context, const BoundFunctionExpression &eval_call, idx_t leaf,
                     const AILeafTexts &texts, const string &query_text, vector<char> &out_result,
-                    vector<char> &out_valid);
+                    vector<char> &out_valid, const AIHistoryScope *history = nullptr);
+//! The history keys of each row's inputs per leaf (`out[row][leaf]`), from the leaf's key columns over `rows`.
+void AILeafHistoryKeys(const BoundFunctionExpression &eval_call, DataChunk &rows, vector<vector<vector<string>>> &out);
 
 //! Evaluates ONE distinct input of one leaf of a folded node, for the region's asynchronous dispatcher. It
 //! asks exactly what AILeafEvaluate asks for that input: the leaf's call and its comparison or wrapper, or,
@@ -219,9 +232,11 @@ public:
 	//! `reuse_hint`: expected later reads of the prompt's leading span (0 = none known); `lead_span`: that
 	//! span's text (nullptr = derive the leading image from the prompt, or declare nothing); `head`: the
 	//! leaf's constant head with `head_reads` the leaf's other reps (declared instead when it clears the gate).
+	//! `history_keys` + `history`: SET ai_history, the input's keys and the region's scope.
 	Value Evaluate(ClientContext &context, idx_t leaf, const string &prompt, const string &pred_text,
 	               const vector<float> &feature, const string &query_text, double reuse_hint = -1.0,
-	               const string *lead_span = nullptr, const string *head = nullptr, double head_reads = 0.0) const;
+	               const string *lead_span = nullptr, const string *head = nullptr, double head_reads = 0.0,
+	               const vector<string> *history_keys = nullptr, const AIHistoryScope *history = nullptr) const;
 	//! The leaf's function kind ('F' = ai_filter; classify/score/complete otherwise), from its meta.
 	char LeafKind(idx_t leaf) const;
 	//! The leaf's verdict when its prompt is NULL (the call answers NULL): its wrapper over NULL, else NULL.

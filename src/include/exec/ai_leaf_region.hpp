@@ -47,6 +47,8 @@ public:
 	~AILeafRegionState();
 	//! An un-pushed LIMIT above: ai_leaf_cold_slices doesn't apply (warming early makes the region go broad).
 	bool under_limit = false;
+	//! SET ai_history: the region's scope (set by the operator before the first slice); nullptr = off.
+	const AIHistoryScope *history = nullptr;
 
 	//! Fold a child chunk in slices of ai_leaf_slice_rows rows (default 20): each slice is deduped, its new
 	//! reps get texts + predictions (one batched embed per leaf), and each new row picks its first leaf.

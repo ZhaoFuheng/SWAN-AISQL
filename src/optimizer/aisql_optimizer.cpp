@@ -11,6 +11,8 @@
 //   [2] AILimitPushdown (last; region half inert until Stage 3)     (this stage)
 //===----------------------------------------------------------------------===//
 #include "duckdb/planner/operator/logical_materialized_cte.hpp"
+#include "plan/logical_ai_factor_graph.hpp"
+#include "plan/logical_ai_region.hpp"
 #include "optimizer/aisql_optimizer.hpp"
 #include "optimizer/ai_topn_pushdown.hpp"
 
@@ -36,6 +38,8 @@
 #include "duckdb/optimizer/column_lifetime_analyzer.hpp"
 #include "duckdb/optimizer/remove_unused_columns.hpp"
 #include "duckdb/planner/binder.hpp"
+
+#include <algorithm>
 
 namespace duckdb {
 
@@ -112,8 +116,62 @@ static bool MarkAICTEsInline(LogicalOperator &op) {
 	return changed;
 }
 
+//! SET ai_history: number the AI operators (regions, factor graphs) in post-order and give each the set of AI
+//! operators strictly below it in the plan: the rounds its calls may carry. Siblings (the sides of a join, the
+//! branches of a union, the CTEs feeding one consumer) are not below each other, so their rounds are invisible
+//! to each other whatever order they finish in; a materialized CTE's operators are below every reader of it.
+//! Returns the ids contained in `op`'s subtree. Plain scalar AI calls outside a region are not operators here.
+struct AIHistoryOpRef {
+	LogicalAIRegion *region = nullptr;
+	LogicalAIFactorGraph *graph = nullptr;
+	idx_t id = 0;
+	vector<idx_t> upstream;
+};
+
+static vector<idx_t> AIAssignHistoryIds(LogicalOperator &op, const vector<idx_t> &ambient, idx_t &next_id,
+                                        vector<AIHistoryOpRef> &refs) {
+	vector<idx_t> contained;
+	auto merge = [](vector<idx_t> &into, const vector<idx_t> &from) {
+		into.insert(into.end(), from.begin(), from.end());
+	};
+	if (op.type == LogicalOperatorType::LOGICAL_MATERIALIZED_CTE && op.children.size() == 2) {
+		// children[0] defines the CTE, children[1] reads it: the definition's operators are below every reader
+		merge(contained, AIAssignHistoryIds(*op.children[0], ambient, next_id, refs));
+		vector<idx_t> inner(ambient);
+		merge(inner, contained);
+		merge(contained, AIAssignHistoryIds(*op.children[1], inner, next_id, refs));
+		return contained;
+	}
+	for (auto &child : op.children) {
+		merge(contained, AIAssignHistoryIds(*child, ambient, next_id, refs));
+	}
+	auto *region = LogicalAIRegion::TryCast(op);
+	auto *graph = region ? nullptr : LogicalAIFactorGraph::TryCast(op);
+	if (region || graph) {
+		AIHistoryOpRef ref;
+		ref.region = region;
+		ref.graph = graph;
+		ref.upstream = ambient;
+		merge(ref.upstream, contained);
+		std::sort(ref.upstream.begin(), ref.upstream.end());
+		ref.upstream.erase(std::unique(ref.upstream.begin(), ref.upstream.end()), ref.upstream.end());
+		ref.id = next_id++;
+		if (region) {
+			region->history_op_id = ref.id;
+			region->history_upstream = ref.upstream;
+		} else {
+			graph->history_op_id = ref.id;
+			graph->history_upstream = ref.upstream;
+		}
+		contained.push_back(ref.id);
+		refs.push_back(std::move(ref));
+	}
+	return contained;
+}
+
 static void AisqlPreOptimizePlan(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
 	AINoteQuery(input.context.GetCurrentQuery());
+	AIHistoryBeginQuery(input.context.GetCurrentQuery()); // SET ai_history: a query starts with no rounds
 	if (!plan || !PlanHasAIFunction(*plan)) {
 		return;
 	}
@@ -207,6 +265,13 @@ static void AisqlOptimizePlan(OptimizerExtensionInput &input, unique_ptr<Logical
 	{
 		AILimitPushdown ai_limit_pushdown(optimizer);
 		plan = ai_limit_pushdown.Optimize(std::move(plan));
+	}
+
+	// SET ai_history: which AI operator is below which, on the final shape of the plan.
+	{
+		idx_t next_id = 1;
+		vector<AIHistoryOpRef> refs;
+		AIAssignHistoryIds(*plan, vector<idx_t>(), next_id, refs);
 	}
 }
 

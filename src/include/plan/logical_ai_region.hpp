@@ -32,6 +32,9 @@ public:
 	//! A constant LIMIT sits above this region but couldn't be pushed into it (limit stays -1): the consumer
 	//! may stop early, so the region keeps its cold gate (ignores ai_leaf_cold_slices) instead of going broad.
 	bool under_limit = false;
+	//! SET ai_history: this AI operator's id and the ids of the AI operators strictly below it (AIAssignHistoryIds).
+	idx_t history_op_id = 0;
+	vector<idx_t> history_upstream;
 
 public:
 	//! Downcast helper replacing the fork's enum check: matches on the verification identifier,

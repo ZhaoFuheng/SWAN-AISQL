@@ -258,6 +258,15 @@ static std::atomic<int64_t> &MockResponsesRequests() {
 	static std::atomic<int64_t> value {0};
 	return value;
 }
+//! SET ai_history tests: requests that carried prior turns, and the prior turns over all of them.
+static std::atomic<int64_t> &MockHistoryRequests() {
+	static std::atomic<int64_t> value {0};
+	return value;
+}
+static std::atomic<int64_t> &MockHistoryTurns() {
+	static std::atomic<int64_t> value {0};
+	return value;
+}
 //! Spans the mock "holds": the request text up to its breakpoint (system/instructions and the prefix
 //! blocks). The first breakpoint request on a span is its write (usage reports cache_write_tokens), every
 //! later one a read (cached_tokens) -- the provider's accounting, so ai_usage() is exact under the mock.
@@ -392,9 +401,18 @@ void HandlePost(const aisql_http::Request &req, aisql_http::Response &res) {
 			MockExplicitRequests().fetch_add(1);
 		}
 		string seed;
+		int64_t prior_turns = 0; // user messages before the last one: the history turns (SET ai_history)
 		yyjson_val *msgs = root ? yyjson_obj_get(root, "messages") : nullptr;
 		if (msgs && yyjson_is_arr(msgs)) {
 			size_t n = yyjson_arr_size(msgs);
+			for (size_t i = 0; i < n; i++) {
+				yyjson_val *m = yyjson_arr_get(msgs, i);
+				yyjson_val *role = m ? yyjson_obj_get(m, "role") : nullptr;
+				if (role && yyjson_is_str(role) && string(yyjson_get_str(role)) == "user") {
+					prior_turns++;
+				}
+			}
+			prior_turns = prior_turns > 0 ? prior_turns - 1 : 0;
 			for (size_t i = n; i > 0; i--) {
 				yyjson_val *m = yyjson_arr_get(msgs, i - 1);
 				yyjson_val *role = m ? yyjson_obj_get(m, "role") : nullptr;
@@ -446,6 +464,15 @@ void HandlePost(const aisql_http::Request &req, aisql_http::Response &res) {
 				seed = string(yyjson_get_str(input), yyjson_get_len(input));
 			} else if (input && yyjson_is_arr(input)) {
 				size_t n = yyjson_arr_size(input);
+				prior_turns = 0;
+				for (size_t i = 0; i < n; i++) {
+					yyjson_val *it = yyjson_arr_get(input, i);
+					yyjson_val *role = it ? yyjson_obj_get(it, "role") : nullptr;
+					if (role && yyjson_is_str(role) && string(yyjson_get_str(role)) == "user") {
+						prior_turns++;
+					}
+				}
+				prior_turns = prior_turns > 0 ? prior_turns - 1 : 0;
 				for (size_t i = n; i > 0; i--) {
 					yyjson_val *it = yyjson_arr_get(input, i - 1);
 					yyjson_val *role = it ? yyjson_obj_get(it, "role") : nullptr;
@@ -499,6 +526,13 @@ void HandlePost(const aisql_http::Request &req, aisql_http::Response &res) {
 				}
 				yyjson_mut_doc_free(chat_doc);
 			}
+		}
+		// SET ai_history: prior turns are counted (ai_mock_history()) and folded into the seed, so an answer given
+		// with history can differ from the same prompt asked bare (the knobs in the last message still apply).
+		if (prior_turns > 0) {
+			MockHistoryRequests().fetch_add(1);
+			MockHistoryTurns().fetch_add(prior_turns);
+			seed += "\n[history=" + std::to_string(prior_turns) + "]";
 		}
 		// test knob: a '[sleep=NN]' marker anywhere in the seed delays this answer by NN ms,
 		// letting scheduler tests inject realistic per-prompt latency deterministically.
@@ -628,6 +662,8 @@ int AIMockStart() {
 	MockBreakpointRequests().store(0);
 	MockExplicitRequests().store(0);
 	MockResponsesRequests().store(0);
+	MockHistoryRequests().store(0);
+	MockHistoryTurns().store(0);
 	{
 		std::lock_guard<std::mutex> lock(MockSpanMutex());
 		MockSpansHeld().clear();
@@ -757,7 +793,28 @@ static void AIMockBreakpointsFunction(ClientContext &, TableFunctionInput &data,
 	output.data[2].SetValue(0, Value::BIGINT(MockResponsesRequests().load()));
 }
 
+static unique_ptr<FunctionData> AIMockHistoryBind(ClientContext &, TableFunctionBindInput &,
+                                                  vector<LogicalType> &return_types, vector<Identifier> &names) {
+	return_types.emplace_back(LogicalType::BIGINT);
+	names.emplace_back("history_requests");
+	return_types.emplace_back(LogicalType::BIGINT);
+	names.emplace_back("history_turns");
+	return make_uniq<AIMockBindData>();
+}
+
+static void AIMockHistoryFunction(ClientContext &, TableFunctionInput &data, DataChunk &output) {
+	auto &bind = data.bind_data->CastNoConst<AIMockBindData>();
+	if (bind.done) {
+		return;
+	}
+	bind.done = true;
+	output.SetChildCardinality(1);
+	output.data[0].SetValue(0, Value::BIGINT(MockHistoryRequests().load()));
+	output.data[1].SetValue(0, Value::BIGINT(MockHistoryTurns().load()));
+}
+
 void RegisterAIMockFunctions(ExtensionLoader &loader) {
+	loader.RegisterFunction(TableFunction("ai_mock_history", {}, AIMockHistoryFunction, AIMockHistoryBind));
 	loader.RegisterFunction(TableFunction("ai_mock_start", {}, AIMockStartFunction, AIMockBind));
 	loader.RegisterFunction(TableFunction("ai_mock_stop", {}, AIMockStopFunction, AIMockBind));
 	loader.RegisterFunction(TableFunction("ai_mock_breakpoints", {}, AIMockBreakpointsFunction, AIMockBreakpointsBind));

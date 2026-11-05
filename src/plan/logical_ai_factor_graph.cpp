@@ -108,6 +108,8 @@ PhysicalOperator &LogicalAIFactorGraph::CreatePlan(ClientContext &context, Physi
 	}
 	auto &graph = planner.Make<PhysicalAIFactorGraph>(std::move(types), std::move(expressions[0]),
 	                                                  std::move(side_widths), limit, existential_side, card);
+	graph.Cast<PhysicalAIFactorGraph>().history_op_id = history_op_id;
+	graph.Cast<PhysicalAIFactorGraph>().history_upstream = history_upstream;
 	for (auto &plan : plans) {
 		graph.children.push_back(plan);
 	}

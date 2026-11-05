@@ -493,11 +493,15 @@ void AILeafRegionState::SubmitRep(idx_t l, uint32_t rep_id) {
 	const AILeafUnitEvaluator &eval = *evaluator;
 	ClientContext &ctx = context;
 	const string &qt = query_text;
+	const AIHistoryScope *hist = history;
+	vector<string> hkeys = hist && rep_id < leaf.texts.keys.size() ? leaf.texts.keys[rep_id] : vector<string>();
 	dispatcher->Submit((static_cast<idx_t>(l) << 32) | rep_id,
 	                   [&eval, &ctx, &qt, l, prompt = leaf.texts.prompt[rep_id], pred = leaf.texts.pred_text[rep_id],
 	                    feat = rep.feat, hint = rep.reuse_hint, lead = leaf.texts.lead_span[rep_id],
-	                    head = leaf.texts.head, head_reads = static_cast<double>(leaf.reps.size()) - 1.0]() {
-		                   return eval.Evaluate(ctx, l, prompt, pred, feat, qt, hint, &lead, &head, head_reads);
+	                    head = leaf.texts.head, head_reads = static_cast<double>(leaf.reps.size()) - 1.0, hist,
+	                    hkeys = std::move(hkeys)]() {
+		                   return eval.Evaluate(ctx, l, prompt, pred, feat, qt, hint, &lead, &head, head_reads,
+		                                        hist ? &hkeys : nullptr, hist);
 	                   });
 }
 
@@ -687,6 +691,9 @@ void AILeafRegionState::RunInlineWave(idx_t l) {
 		wave.texts.valid.push_back(leaf.texts.valid[rep_id]);
 		wave.texts.reuse_hint.push_back(leaf.reps[rep_id].reuse_hint);
 		wave.texts.lead_span.push_back(leaf.texts.lead_span[rep_id]);
+		if (rep_id < leaf.texts.keys.size()) {
+			wave.texts.keys.push_back(leaf.texts.keys[rep_id]);
+		}
 		wave.texts.head = leaf.texts.head;
 	}
 	leaf.pending.erase(leaf.pending.begin(), leaf.pending.begin() + NumericCast<int64_t>(take));
@@ -695,7 +702,7 @@ void AILeafRegionState::RunInlineWave(idx_t l) {
 		rows_at_first_call = row_result.size();
 	}
 	dispatched += take;
-	AILeafEvaluate(context, call, l, wave.texts, query_text, wave.out_result, wave.out_valid);
+	AILeafEvaluate(context, call, l, wave.texts, query_text, wave.out_result, wave.out_valid, history);
 	vector<uint32_t> waiters;
 	for (idx_t i = 0; i < wave.reps.size(); i++) {
 		ApplyVerdict(l, wave.reps[i], wave.out_result[i] != 0, wave.out_valid[i] != 0);

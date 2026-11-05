@@ -83,6 +83,8 @@ struct AIRegionStreamState {
 	//! Scalar path: each distinct input is evaluated on its own, asynchronously (asynchronous iteration). Held
 	//! by pointer so moving the state into the global sink state never moves the pool its workers run in.
 	unique_ptr<AIAsyncDispatcher> dispatcher;
+	//! SET ai_history: the operator's scope (owned by the global sink state); nullptr = off.
+	const AIHistoryScope *history = nullptr;
 };
 
 //===--------------------------------------------------------------------===//
@@ -92,9 +94,17 @@ struct AIRegionStreamState {
 // child rows carry every type except the last.
 class AIRegionGlobalSinkState : public GlobalSinkState {
 public:
-	AIRegionGlobalSinkState(ClientContext &context, vector<LogicalType> child_types)
+	AIRegionGlobalSinkState(ClientContext &context, const PhysicalAIRegion &op, vector<LogicalType> child_types)
 	    : buffer(BufferAllocator::Get(context), std::move(child_types)) {
+		history_view.scope = context.GetCurrentQuery();
+		history_view.op_id = op.history_op_id;
+		history_view.upstream_ops = op.history_upstream;
+		history.view = &history_view;
 	}
+	//! SET ai_history: what this operator's calls may see and the id they record under. Declared before `segments`:
+	//! their dispatchers (joined on destruction) may still be recording.
+	AIHistoryView history_view;
+	AIHistoryScope history;
 	mutex lock;
 	std::atomic<bool> finalized {false};
 	//! No LIMIT: the source emits rows as they are decided (Finalize leaves the calls in flight); with a
@@ -131,7 +141,7 @@ public:
 
 unique_ptr<GlobalSinkState> PhysicalAIRegion::GetGlobalSinkState(ClientContext &context) const {
 	vector<LogicalType> child_types(types.begin(), types.end() - 1);
-	return make_uniq<AIRegionGlobalSinkState>(context, std::move(child_types));
+	return make_uniq<AIRegionGlobalSinkState>(context, *this, std::move(child_types));
 }
 
 unique_ptr<LocalSinkState> PhysicalAIRegion::GetLocalSinkState(ExecutionContext &context) const {
@@ -166,6 +176,7 @@ static void AIRegionEvaluateInline(const PhysicalAIRegion &op, ClientContext &co
 	AIRegionEmitUnfired(context, st, [&](DataChunk &factorized, idx_t base) {
 		vector<Value> values;
 		AIScalarPeerRowsScope peers(static_cast<double>(st.map->DistinctCount()) - 1.0);
+		AIHistoryScopeGuard history(st.history);
 		AIDedupFireWaveScalarFactorized(context, fn, factorized, values);
 		for (idx_t j = 0; j < values.size(); j++) {
 			st.rep_decided[base + j] = 1;
@@ -193,7 +204,8 @@ static void AIRegionDispatch(const PhysicalAIRegion &op, ClientContext &context,
 			}
 			// the distinct inputs known so far besides this one: the scalar call's head is shared by them
 			const double peers = static_cast<double>(st.map->DistinctCount()) - 1.0;
-			st.dispatcher->Submit(base + j, [&fn, &context, types, row, peers]() {
+			const AIHistoryScope *hist = st.history;
+			st.dispatcher->Submit(base + j, [&fn, &context, types, row, peers, hist]() {
 				DataChunk one;
 				one.Initialize(Allocator::DefaultAllocator(), types);
 				one.SetChildCardinality(1);
@@ -202,6 +214,7 @@ static void AIRegionDispatch(const PhysicalAIRegion &op, ClientContext &context,
 				}
 				vector<Value> values;
 				AIScalarPeerRowsScope scope(peers);
+				AIHistoryScopeGuard history(hist);
 				AIDedupFireWaveScalarFactorized(context, fn, one, values);
 				return values[0];
 			});
@@ -233,6 +246,14 @@ static void AIRegionDrainAll(AIRegionStreamState &st) {
 
 SinkResultType PhysicalAIRegion::Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const {
 	auto &lstate = input.local_state.Cast<AIRegionLocalSinkState>();
+	if (AIConfig::Get().history && !lstate.stream.history) {
+		// SET ai_history: every call of this segment records into the operator's buffer and gathers its view
+		auto &gstate_h = input.global_state.Cast<AIRegionGlobalSinkState>();
+		lstate.stream.history = &gstate_h.history;
+		if (lstate.stream.leaf) {
+			lstate.stream.leaf->history = &gstate_h.history;
+		}
+	}
 	auto &st = lstate.stream;
 	if (st.leaf) {
 		// Fold first, then buffer exactly the rows folded: a LIMIT met part-way through the chunk (rows landing

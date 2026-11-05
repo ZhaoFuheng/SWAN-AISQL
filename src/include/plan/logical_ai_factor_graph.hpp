@@ -33,6 +33,9 @@ public:
 	//! side): each member completes at its FIRST confirmed tuple, and downstream work flows only
 	//! for unsatisfied members. INVALID = none.
 	idx_t existential_side = DConstants::INVALID_INDEX;
+	//! SET ai_history: this AI operator's id and the ids of the AI operators strictly below it (AIAssignHistoryIds).
+	idx_t history_op_id = 0;
+	vector<idx_t> history_upstream;
 
 public:
 	static LogicalAIFactorGraph *TryCast(LogicalOperator &op);

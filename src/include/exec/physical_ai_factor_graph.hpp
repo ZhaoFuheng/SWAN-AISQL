@@ -66,6 +66,10 @@ public:
 	//! Pipeline-source operator -> side id, filled in BuildPipelines: each build pipeline's local
 	//! sink state resolves its side from its pipeline's source, independent of scheduling order.
 	std::unordered_map<const PhysicalOperator *, idx_t> source_to_side;
+	//! SET ai_history: this operator's id and the AI operators strictly below it in the plan (assigned by the
+	//! optimizer), the set whose published rounds its calls may carry.
+	idx_t history_op_id = 0;
+	vector<idx_t> history_upstream;
 
 public:
 	string GetName() const override {

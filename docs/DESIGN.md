@@ -449,6 +449,38 @@ environment variables, is [SETTINGS.md](SETTINGS.md).
 
 ---
 
+### 8.1 History mode (`SET ai_history`)
+
+An opt-in conversational mode: when an AI call is made on an input value and an AI operator **below it in
+the plan** already asked something about that value, the request carries that round (the earlier prompt and
+the raw answer) as prior chat turns before the current prompt. A pair prompt over two inputs carries both
+inputs' rounds. The design rules that keep it deterministic:
+
+- **Plan-based visibility.** The optimizer numbers the AI operators (regions, factor graphs) in post-order and
+  gives each the set of operators strictly below it (`AIAssignHistoryIds`). A call gathers only from that
+  set: ancestors always, siblings and its own operator never, whatever order they finish in.
+- **Best-effort, published as they land.** A round becomes visible the moment its call is answered; a call
+  simply goes without a round that has not landed yet. Operators keep streaming (a LIMIT above still stops
+  them early). Within one query a missing round is rare: an upstream operator's round on a row's own input
+  is complete when the row exists, join build sides, factor-graph sinks and aggregates finish before their
+  consumers read; only concurrently streaming branches (UNION ALL) can see a round in one run and not another.
+- **Subset of keys.** A round is keyed by the input values it was asked about (the referenced columns'
+  texts, NULL and empty skipped). It attaches to a call only when that key set is a subset of the call's,
+  so a pair call over (x, y) gets the unary rounds on x and on y, not another pair's round on x.
+- **Recency cap.** Turns are deduplicated and capped at `ai_history_turns` (default 3) most recently answered
+  rounds, presented oldest first: a join can hand one input dozens of rounds. The local cache key includes
+  the turns.
+- **Request shape** (`ai_history_style`, default `notes`). `notes` / `notes_reasoning`: the rounds are appended to
+  the user prompt as third-person notes ("Notes from earlier steps about this item, for reference only"), with the
+  verdict or only its reasoning; the prefix stays declared. `turns`: prior user/assistant messages (a request with
+  turns declares no prompt-cache prefix; measured on ECOMM it cost 18% more and the model anchored on its own
+  earlier verdicts). Image references in a round become
+  `[image]` (the current message carries the image). A round that asks the current call's own question (a
+  filter's claim scored a step later) is never attached: it carries no information, only a prior commitment, and
+  measured on ECOMM q14 it compressed every score to a tie.
+
+Measured first on ECOMM (q10, q11, q12, q14 are the within-query shapes); see ENGINEERING_NOTES.
+
 ## 9. Measured state
 
 All numbers are from the recorded runs in `aisql-bench/` (chat model `gpt-5.6-luna`; the Jev column routes

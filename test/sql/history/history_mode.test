@@ -1,0 +1,249 @@
+# name: test/sql/history/history_mode.test
+# description: SET ai_history: a call carries the rounds AI operators BELOW it already made on the same input as
+# group: [history]
+
+#              prior chat turns; never its own operator's rounds, never a sibling's, never another input's; and
+#              the turns are the same on every run (the mock counts the prior turns it receives).
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET threads=1;
+
+statement ok
+SET ai_factorize='all';
+
+query I
+SELECT current_setting('ai_history');
+----
+false
+
+query I
+SELECT current_setting('ai_history_style');
+----
+notes
+
+# the sections below count the prior MESSAGES the mock receives, so they pin the turns style; (g) covers notes
+statement ok
+SET ai_history_style = 'turns';
+
+statement ok
+CREATE TABLE t AS SELECT i AS k, 'document number ' || i::VARCHAR AS doc FROM range(8) r(i);
+
+# ---- (a) mode off: a filter region below a classify region, no prior turns anywhere
+statement ok
+CREATE TABLE h0 AS SELECT * FROM ai_mock_history();
+
+statement ok
+CREATE TABLE off_res AS
+WITH f AS (SELECT * FROM t WHERE ai_filter('[p=100] is the document fine? ' || doc))
+SELECT k, ai_classify('classify ' || doc, ['A', 'B']) AS c FROM f;
+
+query II
+SELECT h.history_requests - h0.history_requests, h.history_turns - h0.history_turns FROM ai_mock_history() h, h0;
+----
+0	0
+
+# ---- (b) mode on: every classify call carries exactly the filter's round on its document (8 calls, 8 turns)
+statement ok
+SET ai_history = true;
+
+statement ok
+SELECT ai_local_cache_clear(), ai_usage_reset();
+
+statement ok
+CREATE TABLE h1 AS SELECT * FROM ai_mock_history();
+
+statement ok
+CREATE TABLE on_res AS
+WITH f AS (SELECT * FROM t WHERE ai_filter('[p=100] is the document fine? ' || doc))
+SELECT k, ai_classify('classify ' || doc, ['A', 'B']) AS c FROM f;
+
+query II
+SELECT h.history_requests - h1.history_requests, h.history_turns - h1.history_turns FROM ai_mock_history() h, h1;
+----
+8	8
+
+# the same number of calls as without history: history adds turns, never calls
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+16
+
+# ---- (c) one operator: two leaves in one WHERE over the same column are folded into ONE node -> no turns
+statement ok
+CREATE TABLE h2 AS SELECT * FROM ai_mock_history();
+
+query I
+SELECT count(*) FROM t WHERE ai_filter('[p=100] first question about ' || doc) AND ai_filter('[p=100] second question about ' || doc);
+----
+8
+
+query II
+SELECT h.history_requests - h2.history_requests, h.history_turns - h2.history_turns FROM ai_mock_history() h, h2;
+----
+0	0
+
+# ---- (d) two sibling filters feeding a pair filter over their cross product: the planner folds all three into one
+#          factor graph (unary leaves per side + a pair edge). A pair is asked only once both members are confirmed,
+#          so each pair call carries its two members' own unary rounds (2 turns); the unary calls carry none
+#          (siblings never see each other), and no round on a third document is ever attached.
+statement ok
+CREATE TABLE h3 AS SELECT * FROM ai_mock_history();
+
+query I
+WITH a AS (SELECT * FROM t WHERE ai_filter('[p=100] is it an A document? ' || doc)),
+     b AS (SELECT * FROM t WHERE ai_filter('[p=100] is it a B document? ' || doc))
+SELECT count(*) FROM a, b WHERE ai_filter('[p=100] do these two match? ' || a.doc || ' and ' || b.doc);
+----
+64
+
+query II
+SELECT h.history_requests - h3.history_requests, h.history_turns - h3.history_turns FROM ai_mock_history() h, h3;
+----
+64	128
+
+# ---- (d1) a member round that also read a column the pair prompt does not mention (k) is not attached: the pair
+#          question must stay the same for every row that asks it (the subset rule), so only b's rounds ride along
+statement ok
+CREATE TABLE h3a AS SELECT * FROM ai_mock_history();
+
+query I
+WITH a AS (SELECT * FROM t WHERE ai_filter('[p=100] is document ' || k::VARCHAR || ' an A document? ' || doc)),
+     b AS (SELECT * FROM t WHERE ai_filter('[p=100] is it a B document? ' || doc))
+SELECT count(*) FROM a, b WHERE ai_filter('[p=100] do these two match? ' || a.doc || ' and ' || b.doc);
+----
+64
+
+query II
+SELECT h.history_requests - h3a.history_requests, h.history_turns - h3a.history_turns FROM ai_mock_history() h, h3a;
+----
+64	64
+
+# ---- (d2) a filter region below a projection with two scalar calls on the same document: the rewrite stacks the two
+#           calls as two regions, so the complete carries the filter's round (1 turn) and the classify above it the
+#           filter's and the complete's (2 turns): 8 + 16
+statement ok
+CREATE TABLE h3b AS SELECT * FROM ai_mock_history();
+
+statement ok
+CREATE TABLE proj_res AS
+WITH f AS (SELECT * FROM t WHERE ai_filter('[p=100] is the document fine? ' || doc))
+SELECT k, ai_complete('brand of ' || doc) AS brand, ai_classify('kind of ' || doc, ['A', 'B']) AS kind FROM f;
+
+query II
+SELECT h.history_requests - h3b.history_requests, h.history_turns - h3b.history_turns FROM ai_mock_history() h, h3b;
+----
+16	24
+
+# ---- (e) determinism and query scope: the same query again (caches cleared) gets the same turns, not more
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE h4 AS SELECT * FROM ai_mock_history();
+
+statement ok
+CREATE TABLE on_res2 AS
+WITH f AS (SELECT * FROM t WHERE ai_filter('[p=100] is the document fine? ' || doc))
+SELECT k, ai_classify('classify ' || doc, ['A', 'B']) AS c FROM f;
+
+query II
+SELECT h.history_requests - h4.history_requests, h.history_turns - h4.history_turns FROM ai_mock_history() h, h4;
+----
+8	8
+
+query I
+SELECT (SELECT count(*) FROM (SELECT * FROM on_res EXCEPT ALL SELECT * FROM on_res2))
+     + (SELECT count(*) FROM (SELECT * FROM on_res2 EXCEPT ALL SELECT * FROM on_res));
+----
+0
+
+# ---- the mock's answer with history differs from the bare answer for at least one document: the turns reached it
+query I
+SELECT count(*) > 0 FROM off_res o JOIN on_res n USING (k) WHERE o.c <> n.c;
+----
+true
+
+# ---- (f) the same question asked again is never attached: a filter's claim scored a step later (its prompt is the
+#          score's input) carries 0 turns, while a different question on the same document still does
+statement ok
+CREATE TABLE h5 AS SELECT * FROM ai_mock_history();
+
+statement ok
+CREATE TABLE skip_res AS
+WITH f AS (SELECT * FROM t WHERE ai_filter('[p=100] the document is fine: ' || doc))
+SELECT k, ai_score('[p=100] the document is fine: ' || doc, 'how fine it is') AS sc FROM f;
+
+query II
+SELECT h.history_requests - h5.history_requests, h.history_turns - h5.history_turns FROM ai_mock_history() h, h5;
+----
+0	0
+
+# ---- (g) notes styles: the rounds ride inside the user prompt (no prior messages for the mock to count), the calls
+#          are the same, and the answers still differ from the bare ones
+statement ok
+SET ai_history_style = 'notes';
+
+statement ok
+SELECT ai_local_cache_clear(), ai_usage_reset();
+
+statement ok
+CREATE TABLE h6 AS SELECT * FROM ai_mock_history();
+
+statement ok
+CREATE TABLE notes_res AS
+WITH f AS (SELECT * FROM t WHERE ai_filter('[p=100] is the document fine? ' || doc))
+SELECT k, ai_classify('classify ' || doc, ['A', 'B']) AS c FROM f;
+
+query II
+SELECT h.history_requests - h6.history_requests, h.history_turns - h6.history_turns FROM ai_mock_history() h, h6;
+----
+0	0
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT FROM ai_usage();
+----
+16
+
+query I
+SELECT count(*) > 0 FROM off_res o JOIN notes_res n USING (k) WHERE o.c <> n.c;
+----
+true
+
+statement ok
+SET ai_history_style = 'notes_reasoning';
+
+statement ok
+SELECT ai_local_cache_clear();
+
+statement ok
+CREATE TABLE notesr_res AS
+WITH f AS (SELECT * FROM t WHERE ai_filter('[p=100] is the document fine? ' || doc))
+SELECT k, ai_classify('classify ' || doc, ['A', 'B']) AS c FROM f;
+
+query I
+SELECT count(*) FROM notesr_res;
+----
+8
+
+statement error
+SET ai_history_style = 'essay';
+----
+
+statement ok
+RESET ai_history_style;
+
+query I
+SELECT current_setting('ai_history_style');
+----
+notes
+
+statement ok
+RESET ai_history;
+
+statement ok
+CALL ai_mock_stop();

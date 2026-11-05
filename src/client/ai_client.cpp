@@ -2513,68 +2513,238 @@ uint64_t AIResetTrainingData() {
 }
 
 //===--------------------------------------------------------------------===//
-// History mode: per-value conversation memory (session-lived; reset explicitly)
+// History mode (see ai_client.hpp): per-query scopes of published rounds, keyed by operator
 //===--------------------------------------------------------------------===//
-struct AIHistoryTurn {
-	string input;
-	string output;
-};
 static std::mutex &HistoryMutex() {
 	static std::mutex value;
 	return value;
 }
-static std::unordered_map<string, vector<AIHistoryTurn>> &History() {
-	static std::unordered_map<string, vector<AIHistoryTurn>> value;
+//! scope (query text) -> operator id -> its published rounds
+static std::unordered_map<string, std::unordered_map<idx_t, vector<AIHistoryRound>>> &History() {
+	static std::unordered_map<string, std::unordered_map<idx_t, vector<AIHistoryRound>>> value;
 	return value;
 }
-static std::atomic<bool> &HistoryEnabled() {
-	static std::atomic<bool> value {false};
+static uint64_t &HistorySeq() {
+	static uint64_t value = 0; // under HistoryMutex
 	return value;
 }
-
-void AIHistorySetEnabled(bool enabled) {
-	HistoryEnabled().store(enabled);
+static const AIHistoryScope *&HistoryScopeSlot() {
+	static thread_local const AIHistoryScope *slot = nullptr;
+	return slot;
 }
 
 bool AIHistoryEnabled() {
-	return HistoryEnabled().load();
+	return AIConfig::Get().history;
 }
 
-void AIHistoryRecord(const vector<string> &keys, const string &input, const string &output) {
-	if (keys.empty()) {
-		return;
-	}
-	std::lock_guard<std::mutex> lock(HistoryMutex());
-	for (const auto &key : keys) {
-		History()[key].push_back(AIHistoryTurn {input, output});
-	}
-}
-
-vector<std::pair<string, string>> AIHistoryGather(const vector<string> &keys) {
-	vector<std::pair<string, string>> turns;
-	if (keys.empty()) {
-		return turns;
-	}
-	std::lock_guard<std::mutex> lock(HistoryMutex());
-	std::set<std::pair<string, string>> seen;
-	for (const auto &key : keys) {
-		auto it = History().find(key);
-		if (it == History().end()) {
+string AIHistoryTurnText(const string &prompt) {
+	string out;
+	out.reserve(prompt.size());
+	for (size_t i = 0; i < prompt.size(); i++) {
+		const char c = prompt[i];
+		if (c == AI_IMAGE_OPEN) {
+			const size_t close = prompt.find(AI_IMAGE_CLOSE, i + 1);
+			out += "[image]";
+			if (close == string::npos) {
+				break;
+			}
+			i = close;
 			continue;
 		}
-		for (const auto &turn : it->second) {
-			auto pair = std::make_pair(turn.input, turn.output);
-			if (seen.insert(pair).second) {
-				turns.push_back(std::move(pair));
+		if (c == AI_IMAGE_TEXT_MARK) {
+			continue;
+		}
+		out += c;
+	}
+	return out;
+}
+
+void AIHistoryBeginQuery(const string &query_text) {
+	std::lock_guard<std::mutex> lock(HistoryMutex());
+	History().erase(query_text);
+}
+
+vector<std::pair<string, string>> AIHistoryGather(const AIHistoryView &view, const vector<string> &call_keys) {
+	vector<std::pair<string, string>> turns;
+	if (call_keys.empty() || (view.upstream_ops.empty() && !view.all_upstream)) {
+		return turns;
+	}
+	vector<string> sorted_keys(call_keys);
+	std::sort(sorted_keys.begin(), sorted_keys.end());
+	vector<const AIHistoryRound *> hits;
+	{
+		std::lock_guard<std::mutex> lock(HistoryMutex());
+		auto scope_it = History().find(view.scope);
+		if (scope_it == History().end()) {
+			return turns;
+		}
+		vector<idx_t> ops(view.upstream_ops);
+		if (view.all_upstream) {
+			ops.clear();
+			for (const auto &entry : scope_it->second) {
+				ops.push_back(entry.first);
+			}
+			std::sort(ops.begin(), ops.end());
+		}
+		for (const idx_t op : ops) {
+			auto op_it = scope_it->second.find(op);
+			if (op_it == scope_it->second.end()) {
+				continue;
+			}
+			for (const auto &round : op_it->second) {
+				if (std::includes(sorted_keys.begin(), sorted_keys.end(), round.keys.begin(), round.keys.end())) {
+					hits.push_back(&round); // asked only about inputs this call carries
+				}
 			}
 		}
+		// the most recently answered rounds first, so the cap keeps them; a join can hand one input many rounds
+		std::sort(hits.begin(), hits.end(),
+		          [](const AIHistoryRound *a, const AIHistoryRound *b) { return a->seq > b->seq; });
+		const idx_t cap = AIConfig::Get().history_turns;
+		for (const auto *hit : hits) {
+			bool seen = false;
+			for (const auto &have : turns) {
+				if (have.first == hit->prompt && have.second == hit->content) {
+					seen = true; // the same round recorded under two key sets or by two operators
+					break;
+				}
+			}
+			if (seen) {
+				continue;
+			}
+			if (turns.size() >= cap) {
+				break;
+			}
+			turns.emplace_back(hit->prompt, hit->content);
+		}
+		std::reverse(turns.begin(), turns.end()); // presented oldest first
 	}
 	return turns;
 }
 
+void AIHistoryAttach(AIRequest &request, const AIHistoryScope &scope, const vector<string> &call_keys) {
+	request.history.clear();
+	if (!scope.view) {
+		return;
+	}
+	request.history = AIHistoryGather(*scope.view, call_keys);
+}
+
+//! The answer a round contributes: its reasoning text when the style asks for reasoning only and the raw answer
+//! carries one, else the raw answer.
+static string AIHistoryAnswerText(const string &content, bool reasoning_only) {
+	if (reasoning_only) {
+		string reasoning;
+		if (AIParseStringField(content, "reasoning", reasoning) && !reasoning.empty()) {
+			return reasoning;
+		}
+	}
+	return content;
+}
+
+void AIHistoryFinalize(AIRequest &request) {
+	if (request.history.empty()) {
+		return;
+	}
+	const AIConfig &config = AIConfig::Get();
+	// the current question, as a round's text would show it (image references as "[image]")
+	const string current = AIHistoryTurnText(request.prompt_prefix + request.prompt);
+	vector<std::pair<string, string>> kept;
+	for (auto &turn : request.history) {
+		if (!turn.first.empty() && current.find(turn.first) != string::npos) {
+			continue; // the same question asked again (a filter's claim scored a step later): skip
+		}
+		kept.emplace_back(turn.first, AIHistoryAnswerText(turn.second, config.history_reasoning_only));
+	}
+	request.history.swap(kept);
+	if (request.history.empty()) {
+		return;
+	}
+	if (config.history_notes) {
+		string notes = "\n\nNotes from earlier steps about this item (for reference only; they may be imperfect):";
+		idx_t i = 1;
+		for (const auto &turn : request.history) {
+			notes += "\n" + std::to_string(i++) + ". Question: " + turn.first + "\n   Finding: " + turn.second;
+		}
+		request.prompt += notes;
+		request.history.clear();
+		return;
+	}
+	if (!request.prompt_prefix.empty()) {
+		// prior messages sit before the user message: no provider prefix could span them
+		request.prompt = request.prompt_prefix + request.prompt;
+		request.prompt_prefix.clear();
+		request.expected_reads = -1.0;
+	}
+}
+
+void AIHistoryAppendTurns(AIRequest &request, const vector<std::pair<string, string>> &turns) {
+	const idx_t cap = AIConfig::Get().history_turns;
+	for (const auto &turn : turns) {
+		if (request.history.size() >= cap) {
+			break;
+		}
+		bool seen = false;
+		for (const auto &have : request.history) {
+			if (have.first == turn.first && have.second == turn.second) {
+				seen = true;
+				break;
+			}
+		}
+		if (!seen) {
+			request.history.push_back(turn);
+		}
+	}
+}
+
+const AIHistoryScope *AIHistoryScalarScope(ClientContext &context, AIHistoryView &view_storage,
+                                           AIHistoryScope &scope_storage) {
+	if (!AIConfig::Get().history) {
+		return nullptr;
+	}
+	if (const AIHistoryScope *current = HistoryScopeSlot()) {
+		return current;
+	}
+	view_storage.scope = context.GetCurrentQuery();
+	view_storage.all_upstream = true;
+	scope_storage.view = &view_storage;
+	scope_storage.records = false;
+	return &scope_storage;
+}
+
+void AIHistoryRecordRound(const AIHistoryScope &scope, const vector<string> &call_keys, const string &full_prompt,
+                          const string &content) {
+	if (!scope.view || !scope.records || call_keys.empty()) {
+		return;
+	}
+	vector<string> keys(call_keys);
+	std::sort(keys.begin(), keys.end());
+	keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+	AIHistoryRound round {std::move(keys), AIHistoryTurnText(full_prompt), content, 0};
+	std::lock_guard<std::mutex> lock(HistoryMutex());
+	round.seq = ++HistorySeq();
+	History()[scope.view->scope][scope.view->op_id].push_back(std::move(round));
+}
+
+const AIHistoryScope *AIHistoryCurrentScope() {
+	return AIConfig::Get().history ? HistoryScopeSlot() : nullptr;
+}
+
+AIHistoryScopeGuard::AIHistoryScopeGuard(const AIHistoryScope *scope) : saved(HistoryScopeSlot()) {
+	HistoryScopeSlot() = scope;
+}
+AIHistoryScopeGuard::~AIHistoryScopeGuard() {
+	HistoryScopeSlot() = saved;
+}
+
 uint64_t AIHistoryReset() {
 	std::lock_guard<std::mutex> lock(HistoryMutex());
-	const uint64_t cleared = History().size();
+	uint64_t cleared = 0;
+	for (const auto &scope : History()) {
+		for (const auto &op : scope.second) {
+			cleared += op.second.size();
+		}
+	}
 	History().clear();
 	return cleared;
 }
@@ -2611,7 +2781,6 @@ void AIConfig::ResetToDefaults() {
 	{
 		std::lock_guard<std::mutex> lock(HistoryMutex());
 		History().clear();
-		HistoryEnabled().store(false);
 	}
 }
 

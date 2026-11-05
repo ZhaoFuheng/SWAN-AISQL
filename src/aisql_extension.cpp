@@ -213,6 +213,27 @@ static const vector<AIConfigSetting> &AIConfigSettings() {
 		             LogicalType::UBIGINT, Value::UBIGINT(1), [](AIConfig &c, const Value &v) {
 			             c.leaf_cold_slices = v.GetValue<uint64_t>();
 		             }});
+		t.push_back({"ai_history",
+		             "History mode: a call carries the rounds AI operators below it already made on the same input "
+		             "as prior chat turns (regions then decide every row before emitting)",
+		             LogicalType::BOOLEAN, Value::BOOLEAN(false), [](AIConfig &c, const Value &v) {
+			             c.history = v.GetValue<bool>();
+		             }});
+		t.push_back({"ai_history_turns", "History mode: at most this many prior rounds per request (the most recent)",
+		             LogicalType::UBIGINT, Value::UBIGINT(3), [](AIConfig &c, const Value &v) {
+			             c.history_turns = v.GetValue<uint64_t>();
+		             }});
+		t.push_back({"ai_history_style",
+		             "History mode shape: turns (prior messages) / notes (third-person notes appended to the prompt) / "
+		             "notes_reasoning (notes with the rounds' reasoning only)",
+		             LogicalType::VARCHAR, Value("notes"), [](AIConfig &c, const Value &v) {
+			             const string s = StringValue::Get(v);
+			             if (s != "turns" && s != "notes" && s != "notes_reasoning") {
+				             throw InvalidInputException("ai_history_style must be turns, notes or notes_reasoning");
+			             }
+			             c.history_notes = s != "turns";
+			             c.history_reasoning_only = s == "notes_reasoning";
+		             }});
 		t.push_back({"ai_debug_log", "Debug logging channels (csv: region,spec,yann)", LogicalType::VARCHAR, Value(""),
 		             str(&AIConfig::debug_log)});
 		t.push_back({"ai_debug_prompt_variant", "ai_filter prompt variant: strict/soft/plain", LogicalType::VARCHAR,
@@ -252,7 +273,7 @@ AIConfig AIConfigForContext(ClientContext &context) {
 
 // DuckDB takes a plain function pointer as the SET callback (no captures), so each table entry gets its own
 // instantiation that finds its row by index.
-constexpr size_t kAIConfigSettingCount = 34;
+constexpr size_t kAIConfigSettingCount = 37;
 
 template <size_t I>
 static void AIConfigSettingCallback(ClientContext &, SetScope scope, Value &v) {

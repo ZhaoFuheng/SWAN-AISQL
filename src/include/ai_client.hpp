@@ -11,6 +11,7 @@
 #pragma once
 
 #include <atomic>
+#include <mutex>
 #include "duckdb/common/common.hpp"
 #include "duckdb/common/string.hpp"
 #include "duckdb/common/vector.hpp"
@@ -123,6 +124,18 @@ struct AIConfig {
 	//! Leaf region: warm after this many ingested slices even if some leaf has few verdicts, so a rarely
 	//! asked leaf can't keep the region cold for the whole query (SET ai_leaf_cold_slices; default 1, 0 = unbounded).
 	idx_t leaf_cold_slices = 1;
+	//! History mode (SET ai_history): a call on an input value carries the rounds (prompt + answer) that AI
+	//! operators BELOW it in the plan already made on that value, as prior chat turns. Process-wide: the
+	//! operators and the functions must agree on it (a region in this mode decides every row before emitting).
+	bool history = false;
+	//! History mode: at most this many prior rounds per request, the most recently answered ones (SET
+	//! ai_history_turns): a join can hand one input dozens of rounds.
+	idx_t history_turns = 3;
+	//! History mode shape (SET ai_history_style): turns = the rounds are prior user/assistant messages; notes = the
+	//! rounds are third-person notes appended to the user prompt ("Notes from earlier steps about this item"),
+	//! the prompt-cache prefix stays declared; notes_reasoning = notes carrying only the round's reasoning text.
+	bool history_notes = true;
+	bool history_reasoning_only = false;
 	//! Local cache (layer 1): process-global response caches (chat + embed) serving repeats
 	//! within and across queries in this process. In-batch single-flight dedup is unaffected.
 	bool local_cache = true;
@@ -213,17 +226,83 @@ vector<AIQueryUsage> AIGetUsage();
 uint64_t AIResetUsage();
 
 //===----------------------------------------------------------------------===//
-// History mode: per-value conversation memory
+// History mode (SET ai_history): within one query, a call on an input value carries the rounds that AI
+// operators BELOW it in the plan already made on that value, as prior chat turns.
+//
+// A round is (the keys of the inputs it was asked about, its full prompt, the raw answer). Every answered call
+// publishes its round the moment it lands; a call gathers the rounds of the operators in its plan-time upstream set
+// only (never its own operator's, never a sibling's), and only rounds whose key set is a SUBSET of the call's keys
+// (a unary round on docA attaches to a pair call over docA and docB; another pair's round does not). History is
+// best-effort enrichment: a round that has not landed yet is simply not carried. Within one query that is rare, as
+// an upstream operator's round on a row's own input is complete when the row exists, join build sides, factor-graph
+// sinks and aggregates finish before their consumers read; only concurrently streaming branches (UNION ALL) can
+// see a round in one run and not another. The store is scoped by query text and cleared when the optimizer sees
+// the query.
 //===----------------------------------------------------------------------===//
-//! History mode toggle (default off). When on, functions record + replay history
-//! keyed implicitly by the column values referenced in their prompt.
-void AIHistorySetEnabled(bool enabled);
+struct AIRequest;
+struct AIHistoryRound {
+	vector<string> keys; //! sorted
+	string prompt;       //! the full user prompt (prefix + prompt), image references replaced by "[image]"
+	string content;      //! the raw answer
+	uint64_t seq = 0;    //! landing order within the process: the cap keeps the most recent rounds
+};
+//! What one operator's calls may see: the query scope and the operators strictly below it in the plan.
+struct AIHistoryView {
+	string scope;
+	idx_t op_id = 0;
+	vector<idx_t> upstream_ops;
+	//! A scalar AI call outside any region (not an operator the optimizer numbered): it may carry the rounds of
+	//! every operator published so far, and it records nothing.
+	bool all_upstream = false;
+};
+//! The handle a call needs: its operator's view (where to gather from, and the id it records under).
+struct AIHistoryScope {
+	const AIHistoryView *view = nullptr;
+	//! false for the query-level view of a scalar outside any region: it gathers but records nothing
+	bool records = true;
+};
+//! Whether the mode is on (AIConfig::history).
 bool AIHistoryEnabled();
-//! Append one (input, output) turn to the history of every key in `keys`.
-void AIHistoryRecord(const vector<string> &keys, const string &input, const string &output);
-//! Gather the prior turns across all `keys` (deduplicated, in order) for replay.
-vector<std::pair<string, string>> AIHistoryGather(const vector<string> &keys);
-//! Clear all recorded history. Returns the number of distinct keys cleared.
+//! Clear the query's scope (the optimizer calls this once per execution).
+void AIHistoryBeginQuery(const string &query_text);
+//! The prior turns for a call keyed by `call_keys`: published rounds of the view's upstream operators whose keys are
+//! a subset of the call's, deduplicated, the AIConfig::history_turns most recently answered ones, oldest first.
+vector<std::pair<string, string>> AIHistoryGather(const AIHistoryView &view, const vector<string> &call_keys);
+//! Attach the gathered turns to `request.history` (AIHistoryFinalize gives them their shape before the call).
+void AIHistoryAttach(AIRequest &request, const AIHistoryScope &scope, const vector<string> &call_keys);
+//! Append pre-gathered turns (a factor graph's member rounds) after the gathered ones: deduplicated, capped.
+void AIHistoryAppendTurns(AIRequest &request, const vector<std::pair<string, string>> &turns);
+//! Shape the attached turns for the call, once every turn is in: drop a round that asks the current call's own
+//! question (its prompt is contained in this prompt: the same question in another form carries no information,
+//! only a prior commitment), reduce answers to their reasoning when SET ai_history_style = notes_reasoning, then
+//! either keep them as prior messages (turns: a declared prompt_prefix is merged back into the prompt, since the
+//! messages sit before it) or append them to the prompt as third-person notes (notes / notes_reasoning).
+void AIHistoryFinalize(AIRequest &request);
+//! The scope a scalar AI function uses: the thread's region scope when a region drives it, else (mode on) a
+//! query-level view over every published operator that records nothing; nullptr when the mode is off.
+const AIHistoryScope *AIHistoryScalarScope(ClientContext &context, AIHistoryView &view_storage,
+                                           AIHistoryScope &scope_storage);
+//! Publish an answered call as a round of the scope's operator, visible at once: its full prompt as built (prefix +
+//! prompt, BEFORE AIHistoryFinalize appended any notes) and the raw answer.
+void AIHistoryRecordRound(const AIHistoryScope &scope, const vector<string> &call_keys, const string &full_prompt,
+                          const string &content);
+//! A round's prompt as a prior turn: image references `\x01ref\x02` become "[image]" (the current message
+//! carries the image), the embedder's text marks are removed.
+string AIHistoryTurnText(const string &prompt);
+//! The scope the thread's scalar AI functions record into and gather from (set by the region around the scalar
+//! function's evaluation); nullptr when the mode is off or no region is driving the thread.
+const AIHistoryScope *AIHistoryCurrentScope();
+//! RAII: make `scope` the thread's current history scope for the enclosed scalar evaluation.
+struct AIHistoryScopeGuard {
+	explicit AIHistoryScopeGuard(const AIHistoryScope *scope);
+	~AIHistoryScopeGuard();
+	AIHistoryScopeGuard(const AIHistoryScopeGuard &) = delete;
+	AIHistoryScopeGuard &operator=(const AIHistoryScopeGuard &) = delete;
+
+private:
+	const AIHistoryScope *saved;
+};
+//! Clear every scope. Returns the number of rounds cleared.
 uint64_t AIHistoryReset();
 
 //! A single chat-completion request.

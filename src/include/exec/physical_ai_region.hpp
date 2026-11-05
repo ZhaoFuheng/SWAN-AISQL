@@ -51,6 +51,10 @@ public:
 	vector<idx_t> limit_distinct_cols;
 	//! An un-pushed LIMIT above (see LogicalAIRegion::under_limit).
 	bool under_limit = false;
+	//! SET ai_history: this operator's id and the AI operators strictly below it in the plan (assigned by the
+	//! optimizer), the set whose published rounds its calls may carry.
+	idx_t history_op_id = 0;
+	vector<idx_t> history_upstream;
 
 public:
 	string GetName() const override {
