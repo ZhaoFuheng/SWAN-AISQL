@@ -1,0 +1,81 @@
+# name: test/sql/functions/score_nonvarchar_keys.test
+# description: ai_score over a non-VARCHAR column (id::VARCHAR) in a plan DuckDB copies. The key column was appended
+# group: [functions]
+
+#              as INTEGER, which the VARCHAR varargs of ai_score accept at the first bind but not when the copy
+#              re-resolves the function ("Failed to find function ai_score(VARCHAR, VARCHAR, BIGINT, BIGINT,
+#              BIGINT)"). Answers and calls equal the uncopied query's.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE t AS SELECT i AS id, i % 3 AS k FROM range(6) r(i);
+
+# the reference: the same predicate over a single scan, no copy
+query I
+SELECT list(id ORDER BY id) FROM t WHERE ai_score(id::VARCHAR, 'quality', 1, 5) >= 3;
+----
+[1, 3, 4, 5]
+
+# a CTE read twice is inlined once per reference: each copy re-binds ai_score
+query I
+WITH c AS (SELECT * FROM t WHERE ai_score(id::VARCHAR, 'quality', 1, 5) >= 3)
+SELECT list(a.id ORDER BY a.id, b.id) FROM c a JOIN c b ON a.k = b.k;
+----
+[1, 1, 3, 4, 4, 5]
+
+# the unbounded and DOUBLE-bounds forms take the same path: the inlined (copied) CTE answers as the MATERIALIZED one
+query I
+SELECT (WITH c AS (SELECT * FROM t WHERE ai_score(id::VARCHAR, 'quality') >= 0.5)
+        SELECT list(a.id ORDER BY a.id, b.id) FROM c a JOIN c b ON a.k = b.k)
+     = (WITH c AS MATERIALIZED (SELECT * FROM t WHERE ai_score(id::VARCHAR, 'quality') >= 0.5)
+        SELECT list(a.id ORDER BY a.id, b.id) FROM c a JOIN c b ON a.k = b.k);
+----
+true
+
+query I
+SELECT (WITH c AS (SELECT * FROM t WHERE ai_score(k::VARCHAR || ' ' || id::VARCHAR, 'quality', 1.0, 5.0) >= 3)
+        SELECT list(a.id ORDER BY a.id, b.id) FROM c a JOIN c b ON a.k = b.k)
+     = (WITH c AS MATERIALIZED (SELECT * FROM t WHERE ai_score(k::VARCHAR || ' ' || id::VARCHAR, 'quality', 1.0, 5.0) >= 3)
+        SELECT list(a.id ORDER BY a.id, b.id) FROM c a JOIN c b ON a.k = b.k);
+----
+true
+
+# any non-VARCHAR key type, NULLs included: DOUBLE (with a NULL), DATE, BOOLEAN next to a VARCHAR column
+statement ok
+CREATE TABLE ty AS SELECT i AS id, i % 3 AS k, CASE WHEN i = 2 THEN NULL ELSE i * 0.5 END AS d,
+    DATE '2026-01-01' + i::INTEGER AS dt, i % 2 = 0 AS b, 'x' || i AS s FROM range(6) r(i);
+
+query III
+SELECT (WITH c AS (SELECT * FROM ty WHERE ai_score(d::VARCHAR, 'q', 1, 5) >= 3)
+        SELECT list(a.id ORDER BY a.id, b.id) FROM c a JOIN c b ON a.k = b.k)
+     = (WITH c AS MATERIALIZED (SELECT * FROM ty WHERE ai_score(d::VARCHAR, 'q', 1, 5) >= 3)
+        SELECT list(a.id ORDER BY a.id, b.id) FROM c a JOIN c b ON a.k = b.k),
+       (WITH c AS (SELECT * FROM ty WHERE ai_score(dt::VARCHAR, 'q', 1, 5) >= 3)
+        SELECT list(a.id ORDER BY a.id, b.id) FROM c a JOIN c b ON a.k = b.k)
+     = (WITH c AS MATERIALIZED (SELECT * FROM ty WHERE ai_score(dt::VARCHAR, 'q', 1, 5) >= 3)
+        SELECT list(a.id ORDER BY a.id, b.id) FROM c a JOIN c b ON a.k = b.k),
+       (WITH c AS (SELECT * FROM ty WHERE ai_score(s || ' ' || b::VARCHAR, 'q', 1, 5) >= 3)
+        SELECT list(a.id ORDER BY a.id, b.id) FROM c a JOIN c b ON a.k = b.k)
+     = (WITH c AS MATERIALIZED (SELECT * FROM ty WHERE ai_score(s || ' ' || b::VARCHAR, 'q', 1, 5) >= 3)
+        SELECT list(a.id ORDER BY a.id, b.id) FROM c a JOIN c b ON a.k = b.k);
+----
+true	true	true
+
+# a re-bind keeps the keys it appended (no second copy of them): one call per distinct id, as the scan
+statement ok
+SELECT ai_usage_reset(), ai_local_cache_clear();
+
+query I
+WITH c AS (SELECT * FROM t WHERE ai_score(id::VARCHAR, 'quality', 1, 5) >= 3)
+SELECT count(*) FROM c a JOIN c b ON a.k = b.k;
+----
+6
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT <= 6 FROM ai_usage();
+----
+true
