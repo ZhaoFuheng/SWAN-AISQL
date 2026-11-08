@@ -282,5 +282,53 @@ SELECT (SELECT count(*) FROM ((SELECT * FROM g5 EXCEPT SELECT * FROM r5) UNION A
 ----
 0	0	0	true	0	0
 
+# --- inside a factor the leaf order learns: an OR side factor over 200 keyed members whose first leaf (the cheaper
+#     prompt, asked first cold) passes 5% and whose second passes 95%. Cold, every unit asks the 5% leaf and then
+#     the 95% one (~2 calls a member); once the first units' verdicts land the units ask the 95% leaf first and the
+#     second call all but disappears. The other side passes every member (200 calls, the keyed edge is exact).
+statement ok
+CREATE TABLE lo AS SELECT i AS k, 'lo ' || i::VARCHAR AS x FROM range(200) r(i);
+
+statement ok
+CREATE TABLE lp AS SELECT i AS k, 'lp ' || i::VARCHAR AS y FROM range(200) r(i);
+
+statement ok
+SELECT ai_local_cache_clear(); SELECT ai_usage_reset();
+
+query I
+SELECT count(*) > 150 FROM lo INNER JOIN lp ON lo.k = lp.k
+WHERE (ai_filter('[p=5] a ' || x) OR ai_filter('[p=95] b (the longer prompt) ' || x)) AND ai_filter('[p=100] c ' || y);
+----
+true
+
+# 200 (c) + 200 (first leaf) + the second leaf on the cold units' 5%-failures and on the 5% of the rest: well under
+# the flat order's ~590
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT BETWEEN 400 AND 520 FROM ai_usage();
+----
+true
+
+# the same under SET ai_leaf_prior = 'mlp' (no observed-rate shift; the graph has no model): the flat cold order
+# asks the 5% leaf first on every member, ~390 calls on that side
+statement ok
+SET ai_leaf_prior = 'mlp';
+
+statement ok
+SELECT ai_local_cache_clear(); SELECT ai_usage_reset();
+
+query I
+SELECT count(*) > 150 FROM lo INNER JOIN lp ON lo.k = lp.k
+WHERE (ai_filter('[p=5] a ' || x) OR ai_filter('[p=95] b (the longer prompt) ' || x)) AND ai_filter('[p=100] c ' || y);
+----
+true
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT BETWEEN 560 AND 600 FROM ai_usage();
+----
+true
+
+statement ok
+RESET ai_leaf_prior;
+
 statement ok
 CALL ai_mock_stop();

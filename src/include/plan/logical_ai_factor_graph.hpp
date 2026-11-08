@@ -16,6 +16,7 @@
 //===----------------------------------------------------------------------===//
 #pragma once
 
+#include "ai_dedup.hpp"
 #include "duckdb/planner/operator/logical_extension_operator.hpp"
 
 namespace duckdb {
@@ -33,6 +34,9 @@ public:
 	//! side): each member completes at its FIRST confirmed tuple, and downstream work flows only
 	//! for unsatisfied members. INVALID = none.
 	idx_t existential_side = DConstants::INVALID_INDEX;
+	//! The INNER equi-joins the graph absorbed between its sides (the rewrite accepts a chain of cross
+	//! products AND inner equi-joins): exact, call-free factors that confine pair domains to equal keys.
+	vector<AIExactEdge> exact_edges;
 
 public:
 	static LogicalAIFactorGraph *TryCast(LogicalOperator &op);

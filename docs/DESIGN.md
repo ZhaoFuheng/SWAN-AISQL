@@ -28,7 +28,8 @@ That yields one cost rule and one correctness rule, and every stage below is an 
 * **Region** — the operator that switches currency (§2): rows in, one dictionary of distinct
   inputs per leaf, verdicts out, fanned back to the rows.
 * **Factor graph** — the region's form for a semantic join: one dictionary per join side, and the
-  node's leaves split into per-side checks and per-pair checks.
+  node's leaves split into per-side checks and per-pair checks. An inner equi-join between two
+  sides is absorbed as an *exact* edge: its key confines the pair domain to equal-key buckets.
 
 ---
 
@@ -57,7 +58,10 @@ Three consequences follow.
   that is still live, not by `|A| × |B|`. The join predicate is a conjunction of *factors*, each a
   Boolean tree (AND, OR, NOT) over leaves that read one side or the same two sides; a factor is
   evaluated per member or per pair as one unit that folds its tree three-valued and stops as soon
-  as no open leaf could still make it true, so `a OR b` asks `b` only where `a` was false. Any
+  as no open leaf could still make it true, so `a OR b` asks `b` only where `a` was false; which
+  leaf a unit asks first is the minimum-expected-cost choice over the tree at the pass rates the
+  factor's earlier units observed (`ai_leaf_prior`), so the disjunct most likely to decide an OR is
+  asked first once the first units have answered. Any
   other shape, an OR or NOT that spans three sides, is taken as the *terms* of its disjunctive
   normal form: each term is a conjunctive graph over the same member dictionaries, run in turn,
   cheapest first, and a later term skips the members and pairs an earlier term already proved for
@@ -67,6 +71,24 @@ Three consequences follow.
   from a cursor, never stored, so a join of two 100k-row sides is scheduled from a few megabytes. Only a
   cyclic edge graph, which takes the staged schedule and lists each edge's live pairs, is capped
   (`ai_factor_pair_limit`) and left to the region over the cross product beyond it.
+* **A relational equi-join inside the semantic join never materialises its fan-out either.** When the
+  node above an inner equi-join reads both sides (a side predicate on each, with or without a pair
+  predicate), the graph takes the join's inputs as its sides and the join's equalities as an *exact*
+  edge next to the semantic ones: a pair is admissible only when the key columns are equal and
+  non-NULL, and no call decides it. A member's partner domain on that edge is its equal-key bucket
+  on the other side, so pair leaves are asked within buckets only, and an exact edge with no pair
+  leaf asks nothing at all: it exists to let unary deaths cross the join (a bucket whose members all
+  failed on one side kills the other side's members unasked, the semantic counterpart of the
+  relational semi-join reduction below it). Over keyed edges the order of the side predicates is the
+  order of the conjuncts of a per-row filter: each side predicate is its own unit with its own observed
+  pass rate, a member is asked one conjunct at a time, and the scheduler asks first the conjunct, of
+  whichever side, whose failures free the most calls; a conjunct nobody has sampled yet goes first,
+  so every conjunct is sampled before the conjuncts are compared, on an even share of one
+  slot-round of calls per conjunct (the cold slice a per-row filter pays too). The emitted rows are
+  the join of the survivors, nothing wider is ever built. The alternative placement, the two side predicates pushed below the join as separate regions,
+  spends the same unary calls but can never skip a member on account of the other side's verdicts;
+  the lifted node over the join's output spends the same calls but streams every joined pair through
+  the region (a 1,000 × 1,000 join on one key: 43 s against 0.2 s for the graph, same answers).
 
 ---
 
@@ -89,7 +111,8 @@ semantic decision**, and semantic placement happens before physical factorisatio
      cleanup           re-run column pruning / build-side choice after 1-2 reshaped the plan
   3  fold              group a filter's AI predicates into one node (tree + leaves)
   4  region            place the node, or a lone AI call, in a region: row -> distinct-value currency
-  5  join factorize    a node over a cross product becomes a factor graph (pair domain, never the product)
+  5  join factorize    a node over a chain of cross products and inner equi-joins becomes a factor graph
+                       (pair domains, never the product; a join's equality is an exact edge)
   6  limit / exists    push a LIMIT k or an EXISTS into the region or graph: stop once k survivors are known
                        (through a plain DISTINCT too: then k *distinct* survivors over the DISTINCT's columns)
 ```

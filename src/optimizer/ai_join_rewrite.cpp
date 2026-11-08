@@ -280,11 +280,18 @@ void AIJoinRewrite::TryPushBelowJoin(unique_ptr<LogicalOperator> &op, unique_ptr
 }
 
 void AIJoinRewrite::Rewrite(unique_ptr<LogicalOperator> &op, unique_ptr<LogicalOperator> &root) {
+	// The graph is tried at the filter BEFORE its subtree is rewritten: a region whose node reads two sides of a
+	// join chain would otherwise be pushed below the chain's top join first (its columns all come from that join's
+	// one side), landing above the fan-out of the inner join -- the shape the graph exists to avoid. A node reading
+	// one side is not the graph's case and falls through to the push-below as before.
+	if (factor_mode && TryFactorGraph(op, root)) {
+		for (auto &child : op->children) {
+			Rewrite(child, root); // the graph's sides may hold shapes of their own
+		}
+		return;
+	}
 	for (auto &child : op->children) {
 		Rewrite(child, root);
-	}
-	if (factor_mode && TryFactorGraph(op)) {
-		return;
 	}
 	TryMarkExistential(*op);
 	TryPushBelowJoin(op, root);
@@ -368,17 +375,58 @@ void AIJoinRewrite::TryMarkExistential(LogicalOperator &op) {
 	}
 }
 
-bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
+//! Is `op` an INNER join the factor graph can absorb as exact edges: every condition an equality between a column
+//! of one input and a column of the other (DuckDB's planner computes any key expression in a projection below
+//! the join, so after column pruning the conditions are column references)?
+static bool IsAbsorbableEquiJoin(const LogicalOperator &op) {
+	if (op.type != LogicalOperatorType::LOGICAL_COMPARISON_JOIN || op.children.size() != 2) {
+		return false;
+	}
+	auto &join = op.Cast<LogicalComparisonJoin>();
+	if (join.join_type != JoinType::INNER || join.conditions.empty()) {
+		return false;
+	}
+	for (auto &cond : join.conditions) {
+		// IS NOT DISTINCT FROM would match two NULL keys, which no bucket does: only plain equality
+		if (!cond.IsComparison() || cond.GetComparisonType() != ExpressionType::COMPARE_EQUAL ||
+		    cond.GetLHS().GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF ||
+		    cond.GetRHS().GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF ||
+		    cond.GetLHS().GetReturnType() != cond.GetRHS().GetReturnType()) {
+			return false; // the bucket equality compares values of one type (the binder casts in a projection below)
+		}
+	}
+	return true;
+}
+
+//! Does any operator of the subtree evaluate a non-AI expression that can throw (a CAST of text to a number)
+//! or draw (nextval, random)? The graph sinks every side in full, while a native inner join whose build side came
+//! up empty finishes its probe side after one chunk: absorbing such a join would let a throwing expression see
+//! rows it never saw, or a draw happen more often. The same barrier the pull-up keeps (Commutes).
+static bool SubtreeThrowsOrDraws(const LogicalOperator &op) {
+	if (AIOperatorCanThrowNonAI(op) || AIOperatorHasVolatileNonAI(op)) {
+		return true;
+	}
+	for (auto &child : op.children) {
+		if (SubtreeThrowsOrDraws(*child)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op, unique_ptr<LogicalOperator> &root) {
 	// Match: Filter(sole predicate == #region output) over AIRegion(folded conjunctive node) over a
-	// chain of cross products. The folded node's leaves must each read one side (unary) or two
-	// sides (edge), with at least one edge -- then the region collapses into an n-ary factor graph
-	// (member/pair domains with exact backward pruning; the cross product never materializes).
+	// chain of cross products and INNER equi-joins. The folded node's leaves must each read one side
+	// (unary) or two sides (edge), with at least one edge -- a semantic pair leaf or an absorbed join --
+	// then the region collapses into an n-ary factor graph (member/pair domains with exact backward
+	// pruning; neither the cross product nor the join's fan-out ever materializes).
 	if (op->type != LogicalOperatorType::LOGICAL_FILTER || op->expressions.size() != 1 || op->children.size() != 1) {
 		return false;
 	}
 	auto *region = LogicalAIRegion::TryCast(*op->children[0]);
 	if (!region || region->limit >= 0 || region->children.size() != 1 ||
-	    region->children[0]->type != LogicalOperatorType::LOGICAL_CROSS_PRODUCT) {
+	    (region->children[0]->type != LogicalOperatorType::LOGICAL_CROSS_PRODUCT &&
+	     !IsAbsorbableEquiJoin(*region->children[0]))) {
 		return false;
 	}
 	auto &pred_ref = *op->expressions[0];
@@ -456,10 +504,18 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 	if (fn.GetChildren().size() < 1 + 3 * n) {
 		return false;
 	}
-	// flatten the cross chain into its base sides
+	// flatten the chain into its base sides; the equi-joins' conditions become exact edges once the sides are known
 	vector<unique_ptr<LogicalOperator> *> sides;
+	vector<std::pair<ColumnBinding, ColumnBinding>> equalities; // (left column, right column) of each join condition
 	std::function<void(unique_ptr<LogicalOperator> &)> flatten = [&](unique_ptr<LogicalOperator> &child) {
 		if (child->type == LogicalOperatorType::LOGICAL_CROSS_PRODUCT) {
+			flatten(child->children[0]);
+			flatten(child->children[1]);
+		} else if (IsAbsorbableEquiJoin(*child)) {
+			for (auto &cond : child->Cast<LogicalComparisonJoin>().conditions) {
+				equalities.emplace_back(cond.GetLHS().Cast<BoundColumnRefExpression>().Binding(),
+				                        cond.GetRHS().Cast<BoundColumnRefExpression>().Binding());
+			}
 			flatten(child->children[0]);
 			flatten(child->children[1]);
 		} else {
@@ -483,6 +539,46 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 		}
 		return side_bindings.size();
 	};
+	// Exact edges: one per pair of sides an equality connects, its conditions' columns as key positions within
+	// each side's row (several conditions between the same two sides form one composite key).
+	vector<AIExactEdge> exact_edges;
+	for (auto &eq : equalities) {
+		idx_t a = side_of_binding(eq.first), b = side_of_binding(eq.second);
+		if (a >= sides.size() || b >= sides.size() || a == b) {
+			return false; // a key the chain does not own, or both keys on one side: not our shape
+		}
+		ColumnBinding ka = eq.first, kb = eq.second;
+		if (a > b) {
+			std::swap(a, b);
+			std::swap(ka, kb);
+		}
+		const idx_t pos_a = NumericCast<idx_t>(std::find(side_bindings[a].begin(), side_bindings[a].end(), ka) -
+		                                       side_bindings[a].begin());
+		const idx_t pos_b = NumericCast<idx_t>(std::find(side_bindings[b].begin(), side_bindings[b].end(), kb) -
+		                                       side_bindings[b].begin());
+		auto it = std::find_if(exact_edges.begin(), exact_edges.end(),
+		                       [&](const AIExactEdge &e) { return e.s == a && e.t == b; });
+		if (it == exact_edges.end()) {
+			exact_edges.push_back(AIExactEdge {a, b, {}, {}});
+			it = exact_edges.end() - 1;
+		}
+		it->s_cols.push_back(pos_a);
+		it->t_cols.push_back(pos_b);
+	}
+	// A keyed graph confines every pair domain to equal-key buckets, which only the sparse scheduler walks (the
+	// dense scheduler and the staged fallback enumerate whole pair domains).
+	if (!exact_edges.empty() && AIVarcharSetting(optimizer.context, "ai_factor_state", "sparse") != "sparse") {
+		return false;
+	}
+	// An absorbed join evaluates both inputs in full; a side that can throw or draw keeps the native join, whose
+	// empty build side would have cut the other side short.
+	if (!exact_edges.empty()) {
+		for (auto *side : sides) {
+			if (SubtreeThrowsOrDraws(**side)) {
+				return false;
+			}
+		}
+	}
 	bool ok = true;
 	bool any_edge = false;
 	std::function<void(const Expression &, vector<idx_t> &)> collect_sides = [&](const Expression &e,
@@ -523,11 +619,18 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 	// OR/NOT subtree whose leaves read one side or one pair of sides. A factor spanning three sides, or an
 	// OR/NOT at the top that spans three sides, is not a factor and the join stays a region.
 	vector<vector<idx_t>> all_leaf_sides(n);
+	std::set<idx_t> sides_read; // the sides any leaf reads
 	for (idx_t l = 0; l < n && ok; l++) {
 		for (idx_t part = 0; part < 3; part++) {
 			collect_sides(*fn.GetChildren()[1 + part * n + l], all_leaf_sides[l]);
 		}
 		std::sort(all_leaf_sides[l].begin(), all_leaf_sides[l].end());
+		sides_read.insert(all_leaf_sides[l].begin(), all_leaf_sides[l].end());
+	}
+	// Over an absorbed join, a node whose leaves all read ONE side is the push-below's case (a streaming region on
+	// the reduced side, no sink of both inputs); the graph takes the node only when its leaves span two sides.
+	if (!exact_edges.empty() && sides_read.size() < 2) {
+		return false;
 	}
 	// The node's terms: one when the tree is a conjunction of factors, else its disjunctive normal form
 	// (capped by ai_factor_max_terms), each term a conjunctive factor graph, results united.
@@ -536,12 +639,24 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 	if (!ok || !AIFactorTerms(*tree, all_leaf_sides, max_terms, terms)) {
 		return false;
 	}
-	any_edge = terms.size() > 1; // several terms are worth the graph even where each is one-sided
+	any_edge = terms.size() > 1 || !exact_edges.empty(); // several terms, or a join, are worth the graph even
+	                                                     // where every semantic factor is one-sided
 	for (auto &factors : terms) {
 		for (idx_t s = 0; s < sides.size(); s++) {
 			uf[s] = s; // the cycle check is per term
 		}
 		seen_edges.clear();
+		// the absorbed joins connect their sides in every term; a semantic edge between the same two sides merges
+		// into that edge (one edge, keyed and semantic) rather than closing a cycle
+		for (auto &exact : exact_edges) {
+			seen_edges.insert(std::make_pair(exact.s, exact.t));
+			const idx_t a = find(exact.s), b = find(exact.t);
+			if (a == b) {
+				cyclic = true;
+			} else {
+				uf[a] = b;
+			}
+		}
 		for (auto &factor : factors) {
 			if (factor.sides.size() != 2) {
 				continue;
@@ -564,17 +679,26 @@ bool AIJoinRewrite::TryFactorGraph(unique_ptr<LogicalOperator> &op) {
 	if ((!sparse_state || cyclic) && largest_domain > static_cast<double>(pair_limit)) {
 		ok = false; // too large a pair domain for per-pair state
 	}
+	if (cyclic && !exact_edges.empty()) {
+		ok = false; // the staged (cyclic) schedule walks whole pair domains: it has no keyed form
+	}
 	if (!ok || !any_edge) {
 		return false;
 	}
+	// The filter's output as its parents index it: an absorbed join may have projected side columns away, and
+	// the graph exposes every side column, so the positional maps above are remapped by binding identity (the
+	// consumers' column references re-resolve against the wider output on their own).
+	const auto filter_out = op->GetColumnBindings();
 	auto graph = make_uniq<LogicalAIFactorGraph>(
 	    region->region_index, folded_local ? std::move(folded_local) : std::move(region->expressions[0]));
+	graph->exact_edges = std::move(exact_edges);
 	for (auto *side : sides) {
 		StripSpeculativeBelow(*side);
 		graph->children.push_back(std::move(*side));
 	}
 	graph->ResolveOperatorTypes();
 	op = std::move(graph);
+	RemapParentPositionalMaps(*root, *op, filter_out);
 	return true;
 }
 

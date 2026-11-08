@@ -24,6 +24,10 @@ statement ok
 CREATE TABLE link AS SELECT range AS ka, (range % 50) AS kb FROM range(300);
 
 # --- folded-node region: a wrapper error inside a dispatched unit fails the query ----------------------
+# (under the default 'factor' mode this equi-join chain is a factor graph; 'pushdown' keeps the region)
+statement ok
+SET ai_join_factorize = 'pushdown';
+
 query II
 EXPLAIN SELECT count(*) FROM a JOIN link USING (ka) JOIN b USING (kb)
 WHERE (ai_complete('Return a single yes or no. n? '||ta))::INTEGER > 3 AND ai_filter('[p=50] fine? '||tb);
@@ -53,6 +57,9 @@ query I
 SELECT count(*) FROM a JOIN link USING (ka);
 ----
 300
+
+statement ok
+RESET ai_join_factorize;
 
 # --- factor graph: the same error on a pair predicate is raised, not turned into a dropped pair ---------
 query II

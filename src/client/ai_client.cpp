@@ -1393,16 +1393,18 @@ struct AIInFlightPublisher {
 		entries.push_back(std::move(e));
 		keys.push_back(std::move(key));
 	}
-	//! Hand each waiter the owner's result. Called before the registry entries are dropped.
-	void Publish(const vector<AIResult> &results) {
-		for (idx_t u = 0; u < entries.size() && u < results.size(); u++) {
-			{
-				std::lock_guard<std::mutex> lock(entries[u]->m);
-				entries[u]->result = results[u];
-				entries[u]->done = true;
-			}
-			entries[u]->cv.notify_all();
+	//! Hand ONE entry's waiters the owner's result the moment it lands, while the rest of the
+	//! owner's batch may still be in flight. Called before the registry entries are dropped.
+	void PublishOne(idx_t u, const AIResult &result) {
+		if (u >= entries.size()) {
+			return;
 		}
+		{
+			std::lock_guard<std::mutex> lock(entries[u]->m);
+			entries[u]->result = result;
+			entries[u]->done = true;
+		}
+		entries[u]->cv.notify_all();
 	}
 	~AIInFlightPublisher() {
 		for (auto &e : entries) {
@@ -2079,31 +2081,34 @@ vector<AIResult> AIBatchComplete(const vector<AIRequest> &requests, const string
 	// Execute the unique misses concurrently. Concurrency never exceeds the number of
 	// requests in this chunk, so it is bounded by the data chunk size either way. Both modes
 	// retry throttled requests; turbo additionally adapts the concurrency window (AIMD).
+	// Each answer is published the moment it lands -- cached (successes only, so transient
+	// failures can be retried later) and handed to the batches waiting on it -- rather than
+	// held until the slowest request of this chunk returns: a waiter that needs only a fast
+	// prompt of ours no longer waits for an unrelated straggler. The caller's result order is
+	// unchanged (miss_results[u]). Cached BEFORE the in-flight entry retires (the publisher's
+	// destructor), so a batch arriving in the gap finds the cached answer rather than
+	// re-sending: every instant is covered by one or the other.
 	vector<AIResult> miss_results(miss_rows.size());
+	auto land = [&](idx_t u) {
+		if (config.local_cache && miss_results[u].success) {
+			std::lock_guard<std::mutex> lock(CacheMutex());
+			Cache()[keys[miss_rows[u]]] = miss_results[u];
+		}
+		publisher.PublishOne(u, miss_results[u]);
+	};
 	if (AITurboEnabled() && !force_fixed) {
 		const idx_t turbo_max = std::min<idx_t>(config.turbo_max, miss_rows.size());
 		auto limiter = std::make_shared<AdaptiveLimiter>(config.turbo_start, config.turbo_min, turbo_max);
 		RunConcurrent(miss_rows.size(), turbo_max, [&](idx_t u) {
 			miss_results[u] = HedgedRequest(config, requests[miss_rows[u]], query_index, u, limiter);
+			land(u);
 		});
 	} else {
 		RunConcurrent(miss_rows.size(), config.max_concurrency, [&](idx_t u) {
 			miss_results[u] = HedgedRequest(config, requests[miss_rows[u]], query_index, u, nullptr);
+			land(u);
 		});
 	}
-
-	// Cache successes only (so transient failures can be retried later). Done BEFORE the
-	// in-flight entries retire, so a batch arriving in the gap finds the cached answer rather
-	// than re-sending: every instant is covered by one or the other.
-	{
-		std::lock_guard<std::mutex> lock(CacheMutex());
-		for (idx_t u = 0; u < miss_rows.size(); u++) {
-			if (config.local_cache && miss_results[u].success) {
-				Cache()[keys[miss_rows[u]]] = miss_results[u];
-			}
-		}
-	}
-	publisher.Publish(miss_results);
 
 	for (idx_t i = 0; i < n; i++) {
 		if (!served[i] && !waiting[i]) {

@@ -3875,8 +3875,12 @@ bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub
 	// soon as no assignment of the open leaves could make the tree TRUE (a false conjunct, every disjunct
 	// false, a leaf under a NOT that came back true, ...): a factor that is FALSE or NULL fails its tuples
 	// either way, and the graph never needs to tell the two apart beyond `valid`. The next leaf to ask is the exact
-	// minimum-expected-cost choice over the tree (every leaf at the cold rate, costed by its prompt's size), so a cheap
-	// leaf that could decide an OR goes first.
+	// minimum-expected-cost choice over the tree, each leaf costed by its prompt's size and at the P(true) the
+	// factor's units have observed for it so far in this query (SET ai_leaf_prior: the cold 0.5 shifted toward the
+	// leaf's pass rate as its verdicts land, shared by every unit of the sub-node), so the leaf most likely to
+	// decide an OR, or to fail an AND, goes first once the first units have answered.
+	const idx_t active_query = MetaTransaction::Get(context).GetActiveQuery();
+	auto &leaf_prior = *bind_data.leaf_prior_stats;
 	vector<AITriState> values(n, AITriState::TRI_UNKNOWN);
 	vector<double> p(n, 0.5), cost(n, 1.0);
 	for (idx_t l = 0; l < n; l++) {
@@ -3898,6 +3902,10 @@ bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub
 		if (!AIFilterTreeCanBeTrue(tree, values)) {
 			valid = AIFilterTreeCanBeFalse(tree, values);
 			return false;
+		}
+		p.assign(n, 0.5);
+		if (unit_config.leaf_prior_calibrated && leaf_prior.any.load()) {
+			leaf_prior.Adjust(active_query, p);
 		}
 		idx_t l = AIFilterTreeChooseNextLeaf(tree, values, p, cost);
 		if (l >= n || values[l] != AITriState::TRI_UNKNOWN) {
@@ -3925,6 +3933,10 @@ bool AIFactorEvalUnit(ClientContext &context, const BoundFunctionExpression &sub
 		const bool value =
 		    AIEvalLeaf(context, metas[l], leaf_prompts[l], query_text, ok, prefix, expected_reads, &pred, &unit_config);
 		values[l] = !ok ? AITriState::TRI_NULL : value ? AITriState::TRI_TRUE : AITriState::TRI_FALSE;
+		if (ok) {
+			// asked at the cold 0.5: the shift is the whole gap to the observed rate (no model to calibrate here)
+			leaf_prior.Add(active_query, n, l, 0.5, value);
+		}
 	}
 }
 

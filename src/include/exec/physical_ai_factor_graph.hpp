@@ -28,8 +28,8 @@ public:
 	static constexpr const PhysicalOperatorType TYPE = PhysicalOperatorType::EXTENSION;
 
 	PhysicalAIFactorGraph(PhysicalPlan &physical_plan, vector<LogicalType> types, unique_ptr<Expression> node,
-	                      vector<idx_t> side_widths, int64_t limit, idx_t existential_side,
-	                      idx_t estimated_cardinality);
+	                      vector<idx_t> side_widths, vector<AIExactEdge> exact_edges, int64_t limit,
+	                      idx_t existential_side, idx_t estimated_cardinality);
 
 	//! The folded AI node over the concatenated-sides layout: a conjunction of factors, each a one- or
 	//! two-side Boolean tree over its leaves.
@@ -38,12 +38,23 @@ public:
 	vector<idx_t> side_widths;
 	vector<idx_t> side_offsets;
 	//! Edges: (side s, side t, the leaf ids of the factors connecting them, their AND as a tree over
-	//! positions in `leaf_ids`), s < t.
+	//! positions in `leaf_ids`), s < t. An edge the graph absorbed from an inner equi-join also carries
+	//! the join's key columns (`key_s`/`key_t`, positions within each side's row): its pair domain is the
+	//! equal-key buckets only. An edge with keys and NO leaves is exact: every bucket pair is true without
+	//! a call, so unary deaths cascade across the join exactly as the join would have dropped the rows.
 	struct Edge {
 		idx_t s;
 		idx_t t;
 		vector<idx_t> leaf_ids;
 		string tree;
+		vector<idx_t> key_s;
+		vector<idx_t> key_t;
+		bool Keyed() const {
+			return !key_s.empty();
+		}
+		bool Semantic() const {
+			return !leaf_ids.empty();
+		}
 	};
 	//! One term of the node: a conjunctive factor graph. A node whose tree is a conjunction of factors has
 	//! one term; any other shape is its disjunctive normal form, one term per conjunction of literals, and
@@ -55,9 +66,15 @@ public:
 		//! serialized over positions in `unary_leaves[s]`).
 		vector<vector<idx_t>> unary_leaves;
 		vector<string> unary_trees;
+		//! Per side, the indices (into `factors`) of its unary factors: the side's conjuncts. The sparse scheduler
+		//! asks them as separate units, so a conjunct of one side can run before or after a conjunct of another,
+		//! as the conjuncts of a per-row filter are ordered, and each conjunct keeps its own pass-rate statistics.
+		vector<vector<idx_t>> unary_factors;
 		vector<Edge> edges;
 	};
 	vector<TermPlan> terms;
+	//! The absorbed inner equi-joins (see LogicalAIFactorGraph::exact_edges); merged into every term's edges.
+	vector<AIExactEdge> exact_edges;
 	//! LIMIT k pushed into the evaluation (-1 = none): the lazy/adaptive scheduler stops
 	//! dispatching once k output rows are confirmed.
 	int64_t limit;

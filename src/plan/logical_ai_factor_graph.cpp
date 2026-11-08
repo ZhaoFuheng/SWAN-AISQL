@@ -106,8 +106,9 @@ PhysicalOperator &LogicalAIFactorGraph::CreatePlan(ClientContext &context, Physi
 		side_widths.push_back(plan.GetTypes().size());
 		plans.push_back(plan);
 	}
-	auto &graph = planner.Make<PhysicalAIFactorGraph>(std::move(types), std::move(expressions[0]),
-	                                                  std::move(side_widths), limit, existential_side, card);
+	auto &graph =
+	    planner.Make<PhysicalAIFactorGraph>(std::move(types), std::move(expressions[0]), std::move(side_widths),
+	                                        exact_edges, limit, existential_side, card);
 	for (auto &plan : plans) {
 		graph.children.push_back(plan);
 	}

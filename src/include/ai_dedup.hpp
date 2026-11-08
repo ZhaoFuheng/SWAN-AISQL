@@ -98,6 +98,16 @@ struct AIFactor {
 	string tree;            //!< the factor's Boolean tree over 0..leaf_ids.size()-1, serialized
 };
 
+//! An EXACT factor between two sides: the equality conditions of an INNER join the graph absorbed. A pair of
+//! members is admissible only when the key columns (positions within each side's row) are equal and non-NULL;
+//! no call decides it. Alongside the semantic factors it confines every pair domain to equal-key buckets.
+struct AIExactEdge {
+	idx_t s;              //!< side owning `s_cols`
+	idx_t t;              //!< side owning `t_cols`
+	vector<idx_t> s_cols; //!< key column positions within side s's row, condition by condition
+	vector<idx_t> t_cols; //!< the matching positions within side t's row
+};
+
 //! Partition a folded node's tree into factors: flatten the ANDs at any nesting, and take each remaining
 //! child (a leaf, or an OR/NOT subtree) as one factor whose sides are the union of its leaves' sides
 //! (`leaf_sides[l]`, ascending). Returns false when a factor reads zero or more than two sides, i.e. an

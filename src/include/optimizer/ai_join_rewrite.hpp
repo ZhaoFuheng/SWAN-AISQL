@@ -40,7 +40,10 @@ private:
 	//! whose AI call reads columns from exactly one side, push the region onto that side (the projection's
 	//! expressions are inlined into the call; consumers are rebound through the projection). No-op otherwise.
 	void TryPushBelowJoin(unique_ptr<LogicalOperator> &op, unique_ptr<LogicalOperator> &root);
-	bool TryFactorGraph(unique_ptr<LogicalOperator> &op);
+	//! Filter(#region) over a folded region over a chain of cross products and INNER equi-joins -> one factor
+	//! graph over the chain's base sides; the joins' equalities become exact (call-free) edges. `root` is the
+	//! plan root, for the positional maps of operators above the replaced filter. False leaves `op` untouched.
+	bool TryFactorGraph(unique_ptr<LogicalOperator> &op, unique_ptr<LogicalOperator> &root);
 	void TryMarkExistential(LogicalOperator &op);
 	//! Depth-first sweep for duplicate-insensitive consumers (DISTINCT / min/max/DISTINCT-agg GROUP BY) whose
 	//! whole input derives from ONE side of an INNER join below: converts the join to (RIGHT_)SEMI so the

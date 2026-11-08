@@ -1,0 +1,359 @@
+# name: test/sql/factor_join/equijoin_factor_graph.test
+# description: the factor graph absorbs INNER equi-joins as exact edges: side predicates of both sides stay in one
+# group: [factor_join]
+
+#              node above the join and run over the sides' distinct members, pair domains are confined to equal-key
+#              buckets, and the join's fan-out never materializes. Results equal the unoptimized evaluation.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+SET threads=2;
+
+# 60 rows a side, keys in buckets of 2 (k = i % 30); a NULL key on each side joins nothing; S carries 5 duplicate
+# rows (multiplicities); a second key g for the composite-key case
+statement ok
+CREATE TABLE R AS SELECT i AS id, CASE WHEN i = 59 THEN NULL ELSE i % 30 END AS k, i % 3 AS g, 'r item ' || i AS d FROM range(60) t(i);
+
+statement ok
+CREATE TABLE S AS SELECT i AS id, CASE WHEN i = 58 THEN NULL ELSE i % 30 END AS k, i % 3 AS g, 's item ' || i AS d FROM range(60) t(i)
+UNION ALL SELECT i, i % 30, i % 3, 's item ' || i FROM range(5) t(i);
+
+statement ok
+CREATE TABLE T AS SELECT i AS id, 't item ' || i AS d FROM range(6) t(i);
+
+# ---- references: the whole stack off (the mock answers a prompt the same way every time)
+statement ok
+SET ai_pullup=false; SET ai_factorize='off'; SET ai_semi_reduce=false; SET ai_reorder=false; SET ai_join_factorize='off';
+
+statement ok
+CREATE TABLE ref_a AS SELECT r.id AS rid, s.id AS sid FROM R r JOIN S s ON r.k = s.k
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d);
+
+statement ok
+CREATE TABLE ref_b AS SELECT r.id AS rid, s.id AS sid FROM R r JOIN S s ON r.k = s.k
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d)
+  AND ai_filter('[p=50] do they match? ' || r.d || ' / ' || s.d);
+
+statement ok
+CREATE TABLE ref_c AS SELECT r.id AS rid, s.id AS sid FROM R r JOIN S s ON r.k = s.k AND r.g = s.g
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d);
+
+statement ok
+CREATE TABLE ref_d AS SELECT r.id AS rid, s.id AS sid, t.id AS tid FROM R r JOIN S s ON r.k = s.k, T t
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d)
+  AND ai_filter('[p=50] do s and t match? ' || s.d || ' / ' || t.d);
+
+statement ok
+RESET ai_pullup; RESET ai_factorize; RESET ai_semi_reduce; RESET ai_reorder; RESET ai_join_factorize;
+
+query I
+SELECT count(*) > 0 FROM ref_a;
+----
+true
+
+# ---- (a) side predicates on both sides over an equi-join: one factor graph, the join an exact edge (Join Keys)
+query II
+EXPLAIN SELECT r.id, s.id FROM R r JOIN S s ON r.k = s.k
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*Join Keys.*
+
+statement ok
+SELECT ai_local_cache_clear(); SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE out_a AS SELECT r.id AS rid, s.id AS sid FROM R r JOIN S s ON r.k = s.k
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM out_a EXCEPT ALL SELECT * FROM ref_a) UNION ALL (SELECT * FROM ref_a EXCEPT ALL SELECT * FROM out_a));
+----
+0
+
+# never more calls than one unary call per distinct member (60 + 60); a bucket whose members all failed on one
+# side spares the other side's members their call, so usually fewer
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT BETWEEN 60 AND 120 FROM ai_usage();
+----
+true
+
+# ---- (b) with a pair predicate too: the edge is keyed AND semantic; pairs are asked within buckets only
+query II
+EXPLAIN SELECT r.id, s.id FROM R r JOIN S s ON r.k = s.k
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d)
+  AND ai_filter('[p=50] do they match? ' || r.d || ' / ' || s.d);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*Join Keys.*
+
+statement ok
+SELECT ai_local_cache_clear(); SELECT ai_usage_reset();
+
+statement ok
+CREATE TABLE out_b AS SELECT r.id AS rid, s.id AS sid FROM R r JOIN S s ON r.k = s.k
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d)
+  AND ai_filter('[p=50] do they match? ' || r.d || ' / ' || s.d);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM out_b EXCEPT ALL SELECT * FROM ref_b) UNION ALL (SELECT * FROM ref_b EXCEPT ALL SELECT * FROM out_b));
+----
+0
+
+# at most 120 unary calls + the 120 equal-key pairs (30 buckets x 2 x 2); the 3,600 cross pairs are never asked
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT <= 240 FROM ai_usage();
+----
+true
+
+# ---- (c) a composite key (two equality conditions) is one exact edge with two key columns
+query II
+EXPLAIN SELECT r.id, s.id FROM R r JOIN S s ON r.k = s.k AND r.g = s.g
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*Join Keys: S0#[0-9]+ = S1#[0-9]+, S0#[0-9]+ = S1#[0-9]+.*
+
+statement ok
+CREATE TABLE out_c AS SELECT r.id AS rid, s.id AS sid FROM R r JOIN S s ON r.k = s.k AND r.g = s.g
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM out_c EXCEPT ALL SELECT * FROM ref_c) UNION ALL (SELECT * FROM ref_c EXCEPT ALL SELECT * FROM out_c));
+----
+0
+
+# ---- (d) a chain: an equi-join and a cross product, with a semantic edge on the cross pair -> three sides
+query II
+EXPLAIN SELECT r.id, s.id, t.id FROM R r JOIN S s ON r.k = s.k, T t
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d)
+  AND ai_filter('[p=50] do s and t match? ' || s.d || ' / ' || t.d);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*Sides: 3.*Join Keys.*
+
+statement ok
+CREATE TABLE out_d AS SELECT r.id AS rid, s.id AS sid, t.id AS tid FROM R r JOIN S s ON r.k = s.k, T t
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d)
+  AND ai_filter('[p=50] do s and t match? ' || s.d || ' / ' || t.d);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM out_d EXCEPT ALL SELECT * FROM ref_d) UNION ALL (SELECT * FROM ref_d EXCEPT ALL SELECT * FROM out_d));
+----
+0
+
+# ---- (e) a LIMIT above the graph returns exactly k rows
+query I
+SELECT count(*) FROM (SELECT r.id, s.id FROM R r JOIN S s ON r.k = s.k
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d) LIMIT 3);
+----
+3
+
+# ---- (f) a predicate on ONE side over an equi-join is not the graph's case: the region is pushed below the join
+query II
+EXPLAIN SELECT r.id, s.id FROM R r JOIN S s ON r.k = s.k WHERE ai_filter('[p=40] is r fine? ' || r.d);
+----
+physical_plan	<REGEX>:(?s).*Join Type: INNER.*Ai Region.*
+
+# ---- (g) the dense scheduler has no keyed form: the join keeps its region above it (an inner join remains in
+#          the plan, which no graph plan has), same result
+statement ok
+SET ai_factor_state = 'dense';
+
+query II
+EXPLAIN SELECT r.id, s.id FROM R r JOIN S s ON r.k = s.k
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d);
+----
+physical_plan	<REGEX>:(?s).*Ai Region.*Join Type: INNER.*
+
+statement ok
+CREATE TABLE out_g AS SELECT r.id AS rid, s.id AS sid FROM R r JOIN S s ON r.k = s.k
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM out_g EXCEPT ALL SELECT * FROM ref_a) UNION ALL (SELECT * FROM ref_a EXCEPT ALL SELECT * FROM out_g));
+----
+0
+
+statement ok
+RESET ai_factor_state;
+
+# ---- (h) bucket identity is SQL equality, not the values' text: -0.0 and +0.0 DOUBLE keys join, and so do
+#          INTERVAL '1 month' and INTERVAL '30 days'
+statement ok
+CREATE TABLE KR AS SELECT * FROM (VALUES (1, -0.0::DOUBLE, INTERVAL '1 month', 'kr one'), (2, 0.0::DOUBLE, INTERVAL '30 days', 'kr two'), (3, 1.5::DOUBLE, INTERVAL '2 days', 'kr three')) t(id, d, iv, txt);
+
+statement ok
+CREATE TABLE KS AS SELECT * FROM (VALUES (1, 0.0::DOUBLE, INTERVAL '30 days', 'ks one'), (2, -0.0::DOUBLE, INTERVAL '1 month', 'ks two'), (3, 1.5::DOUBLE, INTERVAL '48 hours', 'ks three')) t(id, d, iv, txt);
+
+query II
+EXPLAIN SELECT r.id, s.id FROM KR r JOIN KS s ON r.d = s.d WHERE ai_filter('[p=100] r? ' || r.txt) AND ai_filter('[p=100] s? ' || s.txt);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*Join Keys.*
+
+query I
+SELECT count(*) FROM KR r JOIN KS s ON r.d = s.d WHERE ai_filter('[p=100] r? ' || r.txt) AND ai_filter('[p=100] s? ' || s.txt);
+----
+5
+
+query I
+SELECT count(*) FROM KR r JOIN KS s ON r.iv = s.iv WHERE ai_filter('[p=100] r? ' || r.txt) AND ai_filter('[p=100] s? ' || s.txt);
+----
+5
+
+# ---- (i) a LIMIT over a wide join: k rows come back, and the survivors' pairs are never listed beyond them
+statement ok
+CREATE TABLE WR AS SELECT i AS id, 7 AS k, 'wr ' || i AS d FROM range(300) t(i);
+
+statement ok
+CREATE TABLE WS AS SELECT i AS id, 7 AS k, 'ws ' || i AS d FROM range(300) t(i);
+
+query I
+SELECT count(*) FROM (SELECT r.id, s.id FROM WR r JOIN WS s ON r.k = s.k
+WHERE ai_filter('[p=100] r? ' || r.d) AND ai_filter('[p=100] s? ' || s.d) LIMIT 1);
+----
+1
+
+# ---- (j) a side whose expressions can throw (a text-to-number CAST) keeps the native join: an empty build side
+#          would have cut that side short, which the graph, sinking both inputs in full, could not reproduce
+statement ok
+CREATE TABLE TR AS SELECT i AS id, i % 5 AS k, i::VARCHAR AS num, 'tr ' || i AS d FROM range(20) t(i);
+
+query II
+EXPLAIN SELECT r.id, s.id FROM TR r JOIN S s ON r.k = s.k
+WHERE CAST(r.num AS INTEGER) >= 0 AND ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d);
+----
+physical_plan	<REGEX>:(?s).*Ai Region.*Join Type: INNER.*
+
+query I
+SELECT count(*) >= 0 FROM TR r JOIN S s ON r.k = s.k
+WHERE CAST(r.num AS INTEGER) >= 0 AND ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d);
+----
+true
+
+# ---- (k) a bushy forest: two equi-joins sharing T, side predicates on the two outer sides, parity with the stack off
+statement ok
+CREATE TABLE BT AS SELECT i AS id, i % 30 AS k, 'bt ' || i AS d FROM range(40) t(i);
+
+statement ok
+SET ai_pullup=false; SET ai_factorize='off'; SET ai_semi_reduce=false; SET ai_reorder=false; SET ai_join_factorize='off';
+
+statement ok
+CREATE TABLE ref_k AS SELECT r.id AS rid, s.id AS sid, t.id AS tid FROM R r JOIN BT t ON r.k = t.k JOIN S s ON s.k = t.k
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d);
+
+statement ok
+RESET ai_pullup; RESET ai_factorize; RESET ai_semi_reduce; RESET ai_reorder; RESET ai_join_factorize;
+
+query II
+EXPLAIN SELECT r.id, s.id, t.id FROM R r JOIN BT t ON r.k = t.k JOIN S s ON s.k = t.k
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d);
+----
+physical_plan	<REGEX>:(?s).*Ai Factor Graph.*Sides: 3.*Join Keys.*
+
+statement ok
+CREATE TABLE out_k AS SELECT r.id AS rid, s.id AS sid, t.id AS tid FROM R r JOIN BT t ON r.k = t.k JOIN S s ON s.k = t.k
+WHERE ai_filter('[p=40] is r fine? ' || r.d) AND ai_filter('[p=40] is s fine? ' || s.d);
+
+query I
+SELECT count(*) FROM ((SELECT * FROM out_k EXCEPT ALL SELECT * FROM ref_k) UNION ALL (SELECT * FROM ref_k EXCEPT ALL SELECT * FROM out_k));
+----
+0
+
+query I
+SELECT count(*) > 0 FROM out_k;
+----
+true
+
+# ---- (l) side order over a one-to-one join is the conjunct order of a per-row filter: the scheduler samples every side
+#          before comparing them, so the selective side is asked first whichever side the table order puts first.
+#          100 keys a side; one side passes ~50%, the other ~5%: the selective side costs 100 calls, the other only its
+#          ~5 survivors plus one cold round (<= ai_concurrency = 20) when the tie picks it; asking the 50% side to
+#          exhaustion first would cost ~100 + ~50
+statement ok
+CREATE TABLE LR AS SELECT i AS id, i AS k, 'lr ' || i AS d FROM range(100) t(i);
+
+statement ok
+CREATE TABLE LS AS SELECT i AS id, i AS k, 'ls ' || i AS d FROM range(100) t(i);
+
+statement ok
+SELECT ai_local_cache_clear(); SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM LR r JOIN LS s ON r.k = s.k
+WHERE ai_filter('[p=50] is r fine? ' || r.d) AND ai_filter('[p=5] is s fine? ' || s.d);
+----
+true
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT BETWEEN 100 AND 135 FROM ai_usage();
+----
+true
+
+statement ok
+SELECT ai_local_cache_clear(); SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM LR r JOIN LS s ON r.k = s.k
+WHERE ai_filter('[p=5] is r fine? ' || r.d) AND ai_filter('[p=50] is s fine? ' || s.d);
+----
+true
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT BETWEEN 100 AND 135 FROM ai_usage();
+----
+true
+
+# ---- (m) a side's conjuncts are separate units: the selective conjunct of one side runs before the cheap-to-pass
+#          conjunct of the SAME side and before the other side's, as a per-row filter orders its conjuncts. R carries a
+#          ~90%-pass leaf (shorter prompt, so the cold within-side order would ask it first) and a ~10%-pass leaf, S a
+#          ~50%-pass leaf: asking R's 10% leaf first costs 100 calls + ~10 for S + ~5 for R's other leaf (+ cold
+#          rounds); asking R's whole conjunction per member first would cost ~190 before S is touched
+statement ok
+SELECT ai_local_cache_clear(); SELECT ai_usage_reset();
+
+query I
+SELECT count(*) >= 0 FROM LR r JOIN LS s ON r.k = s.k
+WHERE ai_filter('[p=90] r ok? ' || r.d) AND ai_filter('[p=10] is this r item really fine? ' || r.d)
+  AND ai_filter('[p=50] is s fine? ' || s.d);
+----
+true
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT BETWEEN 100 AND 160 FROM ai_usage();
+----
+true
+
+# ---- (o) exploration is an even share of one slot-round per unary conjunct: side PA has 2 members that always fail,
+#          PB 200 (a cross product with a pair predicate). The first round draws PA's 2 and PB's share of 10
+#          (ceil(20 / 2 conjuncts)) before a verdict lands, then PB waits for its samples; PA's deaths end the graph,
+#          bar the PB members asked while PA's verdicts were still in flight. A pool would have drawn 18 of PB.
+statement ok
+CREATE TABLE PA AS SELECT i AS id, 'pa ' || i AS d FROM range(2) t(i);
+
+statement ok
+CREATE TABLE PB AS SELECT i AS id, 'pb ' || i AS d FROM range(200) t(i);
+
+statement ok
+SET ai_concurrency=20;
+
+statement ok
+SELECT ai_local_cache_clear(); SELECT ai_usage_reset();
+
+query I
+SELECT count(*) FROM PA a, PB b
+WHERE ai_filter('[p=0] is a fine? ' || a.d) AND ai_filter('[p=50] is b fine? ' || b.d)
+  AND ai_filter('[p=50] do a and b match? ' || a.d || ' / ' || b.d);
+----
+0
+
+query I
+SELECT (sum(llm_calls) - sum(embed_calls))::BIGINT BETWEEN 12 AND 60 FROM ai_usage();
+----
+true
+
+statement ok
+RESET ai_concurrency;
+
+statement ok
+CALL ai_mock_stop();
