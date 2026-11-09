@@ -791,6 +791,15 @@ static unique_ptr<FunctionData> AIScoreBind(BindScalarFunctionInput &input) {
 	if (!arguments.empty() && arguments[0]) {
 		CollectColumnRefs(*arguments[0], key_exprs);
 	}
+	// The overloads take VARCHAR varargs, so a key is appended as VARCHAR: an INTEGER column under a cast
+	// (ai_score(id::VARCHAR, ..)) appended as INTEGER binds once, but a plan copy (a CTE read twice)
+	// re-resolves the function by its argument types and finds no ai_score(..., INTEGER).
+	for (auto &key_expr : key_exprs) {
+		if (key_expr->GetReturnType() != LogicalType::VARCHAR) {
+			key_expr =
+			    BoundCastExpression::AddCastToType(input.GetClientContext(), std::move(key_expr), LogicalType::VARCHAR);
+		}
+	}
 	const bool rebind = AIKeysAlreadyAppended(arguments, key_exprs, 1);
 	// ai_score(input, criteria, lo, hi): read the constant bounds; int-ness comes from the overload (the
 	// BIGINT-bounds overload -> integer output, rounded; the DOUBLE-bounds overload -> double output).
