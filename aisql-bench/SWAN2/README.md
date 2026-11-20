@@ -8,7 +8,7 @@ one its harness runs; edit there, then sync.
 
 | directory | what |
 |---|---|
-| `aisql/<qid>.sql` | the question's query in DuckDB SQL with AI functions (`ai_filter`, `ai_classify`, `ai_complete`, `ai_agg`); every system runs this one query, SWAN-AISQL as written and BlendSQL, LOTUS, PLOP, ThalamusDB and Palimpzest through the benchmark's mechanical translations or its written-order executor |
+| `aisql/<qid>.sql` | the question's query in DuckDB SQL with AI functions (`ai_filter`, `ai_classify`, `ai_complete`, `ai_agg`); every system runs this one query, SWAN-AISQL as written and BlendSQL, LOTUS, PLOP and Palimpzest through the benchmark's mechanical translations or its written-order executor |
 | `oracle/<qid>.sql` | the same query with each AI call replaced by the true hidden value; it returns the gold answer on the original database |
 | `questions/<db>.csv` | the 120 questions: id, database, question text, evidence, difficulty, query shape and BIRD's gold SQL |
 

@@ -8,6 +8,7 @@ CALL dbgen(sf=0.005);
 CREATE TEMP TABLE nation_sample AS
 SELECT *
 FROM nation
+ORDER BY n_nationkey
 LIMIT 25;
 
 WITH

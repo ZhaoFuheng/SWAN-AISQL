@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-query table of every recorded system (SWAN, PLOP, BlendSQL, ThalamusDB, Palimpzest, LOTUS) for one SemBench suite.
+"""Per-query table of every recorded system (SWAN, PLOP, BlendSQL, Palimpzest, LOTUS) for one SemBench suite.
 
   python3 compare.py MOVIE            (from aisql-bench/; also ECOMM, MMQA)
   SWAN_TAG=_x python3 compare.py MOVIE   compare a tagged SWAN run (swan_movie_results_x.json)
@@ -27,7 +27,7 @@ def fmt(v, digits):
     return ("%.*f" % (digits, v)) if isinstance(v, (int, float)) else "-"
 
 
-SYSTEMS = (("LOTUS", "lotus"), ("BlendSQL", "blendsql"), ("Palimpzest", "palimpzest"), ("ThalamusDB", "thalamusdb"), ("PLOP", "plop"), ("SWAN", "swan"))
+SYSTEMS = (("LOTUS", "lotus"), ("BlendSQL", "blendsql"), ("Palimpzest", "palimpzest"), ("PLOP", "plop"), ("SWAN", "swan"))
 
 
 def main():
@@ -74,8 +74,8 @@ def main():
     if any(counted[x] != len(queries) for x in names):
         print("\nA macro over fewer queries than the suite (marked with its query count) is not comparable with the "
               "full-suite macros.")
-    if any(n in ("PLOP", "BlendSQL", "ThalamusDB", "Palimpzest") for n in names):
-        print("\nPLOP, BlendSQL, ThalamusDB and Palimpzest costs are estimates from their token counts (their requests carry no provider cost header).")
+    if any(n in ("PLOP", "BlendSQL", "Palimpzest") for n in names):
+        print("\nPLOP, BlendSQL and Palimpzest costs are estimates from their token counts (their requests carry no provider cost header).")
 
 
 if __name__ == "__main__":

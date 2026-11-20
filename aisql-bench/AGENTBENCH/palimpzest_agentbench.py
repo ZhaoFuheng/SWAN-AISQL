@@ -11,7 +11,8 @@ else using the proxy; cost is ESTIMATED from those tokens at the luna list price
 
   run:  python3 palimpzest_agentbench.py [Q1 Q2 ...]
   env:  PALIMPZEST_PYTHON, AI_PROXY_URL (:4001), AI_MODEL (gpt-5.6-luna), AI_MAX_CONCURRENCY (20),
-        PALIMPZEST_OPTIMIZER (pareto | none), PALIMPZEST_POLICY (MaxQuality | MinCost)
+        PALIMPZEST_OPTIMIZER (pareto | none), PALIMPZEST_POLICY (MaxQuality | MinCost),
+        PALIMPZEST_TAG (results/<tag>/ and results/<tag>_agentbench_results.json; default palimpzest)
 """
 import json
 import os
@@ -24,7 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
 import palimpzest_common as P  # noqa: E402
 
-TAG = "palimpzest"
+TAG = os.environ.get("PALIMPZEST_TAG", "palimpzest")      # results/<tag>/ and results/<tag>_agentbench_results.json
 EXEC = os.path.join(HERE, "..", "palimpzest_hybrid_exec.py")
 
 
@@ -44,7 +45,7 @@ def main():
         cmd = [P.python(), EXEC, os.path.join(HERE, "lotus_queries", name + ".py"), os.path.join(HERE, "dataset"), csv_path,
                P.MODEL, P.PROXY, str(P.DOP), "--optimizer", P.OPTIMIZER, "--policy", P.POLICY]
         try:
-            p = subprocess.run(cmd, text=True, capture_output=True, timeout=7200, cwd=HERE)
+            p = subprocess.run(cmd, text=True, capture_output=True, timeout=7200, cwd=HERE, env=P.child_env())
         except subprocess.TimeoutExpired:  # Palimpzest has no cap of its own; record the overrun, keep going
             p = None
         dt = time.time() - t0  # wall time, interpreter start-up included; latency_s is the program's own time

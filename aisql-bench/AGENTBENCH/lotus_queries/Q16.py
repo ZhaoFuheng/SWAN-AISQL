@@ -9,7 +9,7 @@ def run(load, lm):
     orders = load("orders")
     customer = load("customer")
 
-    customer_sample = customer.head(100)
+    customer_sample = customer.sort_values("c_custkey", kind="stable").head(100)  # ORDER BY c_custkey LIMIT 100
 
     a = part
     if len(a) > 0:

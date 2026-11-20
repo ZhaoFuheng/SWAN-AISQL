@@ -8,6 +8,7 @@ CALL dbgen(sf=0.005);
 CREATE TEMP TABLE customer_sample AS
 SELECT *
 FROM customer
+ORDER BY c_custkey
 LIMIT 180;
 
 WITH

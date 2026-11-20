@@ -1,2 +1,8 @@
-# LOTUS baselines (aisql-bench/MOVIE/lotus_movie.py etc.); pins the version the recorded runs used.
-lotus-ai>=1.1
+# LOTUS baselines (aisql-bench/*/lotus_*.py, aisql-bench/AGENTBENCH/lotus_agentbench.py). The recorded LOTUS runs
+# replay only under these versions: a newer litellm renders the request body differently, so the same prompts
+# miss the cache and run fresh. litellm 1.92.0 is older than the serving stack needs to be, so LOTUS gets its own
+# environment, aisql-bench/.venv-lotus; aisql-bench/setup_lotus.sh builds it from this file.
+lotus-ai==1.2.4
+litellm==1.92.0
+openai==2.45.0     # the SDK litellm sent the recorded requests with
+pyarrow            # ECOMM's tables are parquet

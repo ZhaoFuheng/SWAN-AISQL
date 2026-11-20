@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """LOTUS baseline on the PLOP agent_bench 30 queries (translations in lotus_queries/QN.py).
 
-Protocol matches the other suites: unmodified pip lotus-ai, in-process cache OFF (query-level
-caching is the server cache's job), routed via the :4001 recording proxy, true request counting
-= proxy hits+misses delta per query. No ground truth exists for this benchmark; result frames
-are saved to results/lotus/QN.csv for cross-system agreement checks.
+Protocol matches the other suites: unmodified pip lotus-ai, its in-process cache on and emptied
+before each query (query-scoped; cross-run reuse is the server cache's job), routed via the :4001
+recording proxy, true request counting = proxy hits+misses delta per query. No ground truth exists
+for this benchmark; result frames are saved to results/lotus/QN.csv for cross-system agreement checks.
 
   run:  python3 lotus_agentbench.py [Q1 Q2 ...]
   env:  AI_PROXY_URL (:4001), AI_MODEL (gpt-5.6-luna), AI_MAX_CONCURRENCY (20)
+        LOTUS_CACHE=0 (LOTUS's cache off, as in every run before 2026-11-19), LOTUS_CACHE_SIZE (entries,
+        default 1,000,000 to hold a whole query; LOTUS's own default keeps 1,024), LOTUS_TAG (results/<tag>/ and results/<tag>_agentbench_results.json)
 """
 import os, sys
 # Pin the hash seed BEFORE importing lotus: prompts render in set order -> unstable cache keys.
@@ -23,7 +25,11 @@ from datetime import datetime, timezone
 import pandas as pd
 import lotus
 
-lotus.settings.configure(enable_cache=False)
+# BENCHMARK RULE: local caches must be query-scoped (Q1's cache must not serve Q2). LOTUS's
+# in-process cache has no query boundary, so the runner gives it one: on, and emptied before each query.
+LOTUS_CACHE = os.environ.get("LOTUS_CACHE", "1") != "0"
+LOTUS_CACHE_SIZE = int(os.environ.get("LOTUS_CACHE_SIZE", "1000000"))
+lotus.settings.configure(enable_cache=LOTUS_CACHE)
 from lotus.models import LM
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -31,6 +37,7 @@ DATA = os.path.join(HERE, "dataset")
 PROXY = os.environ.get("AI_PROXY_URL", "http://localhost:4001")
 MODEL = os.environ.get("AI_MODEL", "gpt-5.6-luna")
 CONC = int(os.environ.get("AI_MAX_CONCURRENCY", "20"))
+TAG = os.environ.get("LOTUS_TAG", "lotus")
 
 CSV = {
     "books_info": "book_review/books_info.csv", "reviews": "book_review/reviews.csv",
@@ -71,8 +78,8 @@ def cache_misses():
 def main():
     which = sys.argv[1:] or [f"Q{i}" for i in range(1, 31)]
     lm = LM(model=MODEL, api_base=PROXY + "/v1", api_key="sk-test", max_batch_size=CONC)
-    lotus.settings.configure(lm=lm, enable_cache=False)
-    os.makedirs(os.path.join(HERE, "results", "lotus"), exist_ok=True)
+    lotus.settings.configure(lm=lm, enable_cache=LOTUS_CACHE)
+    os.makedirs(os.path.join(HERE, "results", TAG), exist_ok=True)
     stamp = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     per_query = {}
     for name in which:
@@ -81,6 +88,7 @@ def main():
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         lm.reset_stats()
+        lm.reset_cache(LOTUS_CACHE_SIZE)   # query-scoped: an earlier query's answers never serve this one
         r0, m0 = cache_requests(), cache_misses()
         t0 = time.time()
         err = None
@@ -91,15 +99,17 @@ def main():
         dt = time.time() - t0
         u = lm.stats.physical_usage
         rec = {"latency_s": round(dt, 1), "llm_calls": cache_requests() - r0,
-               "llm_calls_fresh": cache_misses() - m0, "tokens": u.total_tokens,
+               "llm_calls_fresh": cache_misses() - m0,
+               "lotus_cache_hits": lm.stats.cache_hits, "lotus_operator_cache_hits": lm.stats.operator_cache_hits,
+               "tokens": u.total_tokens,
                "cost_usd": round(u.total_cost, 5), "rows": len(out), "error": err, "ran_at": stamp}
         per_query[name] = rec
-        out.to_csv(os.path.join(HERE, "results", "lotus", name + ".csv"), index=False)
+        out.to_csv(os.path.join(HERE, "results", TAG, name + ".csv"), index=False)
         print(f"{name:>4} lat={dt:7.1f}s calls={rec['llm_calls']:>6} fresh={rec['llm_calls_fresh']:>6} "
               f"tok={u.total_tokens:>8} ${u.total_cost:.4f} rows={len(out)}"
               + (f"  ERR {err}" if err else ""), flush=True)
         # accumulate after each query so an interrupted run keeps partials
-        path = os.path.join(HERE, "results", "lotus_agentbench_results.json")
+        path = os.path.join(HERE, "results", TAG + "_agentbench_results.json")
         old = json.load(open(path)) if os.path.exists(path) else {"per_query": {}}
         old["model"], old["concurrency"], old["updated"] = MODEL, CONC, stamp
         old["per_query"].update(per_query)
@@ -111,7 +121,7 @@ def main():
                         "tokens": sum(q["tokens"] for q in tot.values()),
                         "errors": sum(1 for q in tot.values() if q["error"])}
         json.dump(old, open(path, "w"), indent=1)
-    print("\nTOTAL", json.load(open(os.path.join(HERE, "results", "lotus_agentbench_results.json")))["total"])
+    print("\nTOTAL", json.load(open(os.path.join(HERE, "results", TAG + "_agentbench_results.json")))["total"])
 
 
 main()

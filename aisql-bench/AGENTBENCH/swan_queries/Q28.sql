@@ -92,6 +92,7 @@ customer_context AS (
 	JOIN (
 		SELECT DISTINCT o_custkey
 		FROM joined
+		ORDER BY o_custkey
 		LIMIT 60
 	) k ON k.o_custkey = c.c_custkey
 	WHERE ai_filter('Does this customer look operationally strategic based on name style, market segment, and account balance?

@@ -1,315 +1,375 @@
 {
  "per_query": {
   "Q1": {
-   "latency_s": 14.8,
+   "latency_s": 13.5,
    "llm_calls": 200,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 56637,
    "cost_usd": 0.01802,
    "rows": 5,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q2": {
-   "latency_s": 7.1,
+   "latency_s": 6.8,
    "llm_calls": 100,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 15581,
    "cost_usd": 0.00638,
    "rows": 3,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q3": {
-   "latency_s": 7.5,
+   "latency_s": 7.4,
    "llm_calls": 79,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 18241,
    "cost_usd": 0.01218,
    "rows": 4,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q4": {
-   "latency_s": 10.1,
+   "latency_s": 9.9,
    "llm_calls": 141,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 87209,
    "cost_usd": 0.02483,
    "rows": 0,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q5": {
-   "latency_s": 1.8,
+   "latency_s": 1.7,
    "llm_calls": 1,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 363,
    "cost_usd": 0.00015,
    "rows": 4,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q6": {
-   "latency_s": 10.2,
+   "latency_s": 10.1,
    "llm_calls": 200,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 181599,
    "cost_usd": 0.04401,
    "rows": 1,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q7": {
-   "latency_s": 12.4,
+   "latency_s": 12.0,
    "llm_calls": 210,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 184545,
    "cost_usd": 0.04556,
    "rows": 0,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q8": {
-   "latency_s": 10.2,
+   "latency_s": 10.1,
    "llm_calls": 200,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 181596,
    "cost_usd": 0.04489,
    "rows": 1,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q9": {
    "latency_s": 10.8,
    "llm_calls": 200,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 182620,
    "cost_usd": 0.04597,
    "rows": 0,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q10": {
-   "latency_s": 1.9,
+   "latency_s": 1.8,
    "llm_calls": 26,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 5414,
    "cost_usd": 0.00119,
    "rows": 5,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q11": {
-   "latency_s": 3.6,
+   "latency_s": 3.5,
    "llm_calls": 79,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 14821,
    "cost_usd": 0.00328,
    "rows": 5,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q12": {
-   "latency_s": 1.8,
+   "latency_s": 1.7,
    "llm_calls": 26,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 5258,
    "cost_usd": 0.00116,
    "rows": 2,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q13": {
-   "latency_s": 3.9,
+   "latency_s": 3.8,
    "llm_calls": 73,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 13960,
    "cost_usd": 0.00318,
    "rows": 5,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q14": {
-   "latency_s": 3.1,
+   "latency_s": 3.0,
    "llm_calls": 61,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 11736,
    "cost_usd": 0.00259,
    "rows": 1,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q15": {
-   "latency_s": 81.0,
+   "latency_s": 80.0,
    "llm_calls": 1100,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 270286,
    "cost_usd": 0.12915,
    "rows": 183,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q16": {
-   "latency_s": 62.0,
+   "latency_s": 61.2,
    "llm_calls": 1199,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 233598,
    "cost_usd": 0.07338,
    "rows": 237,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q17": {
-   "latency_s": 291.8,
+   "latency_s": 290.1,
    "llm_calls": 3931,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 1008098,
    "cost_usd": 0.4869,
    "rows": 6004,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q18": {
-   "latency_s": 7.0,
+   "latency_s": 6.8,
    "llm_calls": 78,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 17832,
    "cost_usd": 0.0082,
    "rows": 2625,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q19": {
-   "latency_s": 926.5,
+   "latency_s": 922.3,
    "llm_calls": 13340,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 2816274,
    "cost_usd": 1.43023,
    "rows": 98410,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q20": {
-   "latency_s": 5.0,
+   "latency_s": 4.9,
    "llm_calls": 100,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 29535,
    "cost_usd": 0.0065,
    "rows": 55,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q21": {
-   "latency_s": 4.6,
+   "latency_s": 4.3,
    "llm_calls": 100,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 27861,
    "cost_usd": 0.00599,
    "rows": 2712,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q22": {
-   "latency_s": 5.7,
+   "latency_s": 5.6,
    "llm_calls": 100,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 28209,
    "cost_usd": 0.00611,
    "rows": 270,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q23": {
-   "latency_s": 4.9,
+   "latency_s": 4.8,
    "llm_calls": 100,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 31928,
    "cost_usd": 0.00777,
    "rows": 551,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q24": {
-   "latency_s": 4.1,
+   "latency_s": 4.0,
    "llm_calls": 62,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 18897,
    "cost_usd": 0.00429,
    "rows": 870,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q25": {
-   "latency_s": 85.5,
+   "latency_s": 85.1,
    "llm_calls": 1161,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 284452,
    "cost_usd": 0.13651,
    "rows": 177,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q26": {
-   "latency_s": 108.1,
+   "latency_s": 107.6,
    "llm_calls": 1429,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 361835,
    "cost_usd": 0.17051,
    "rows": 2499,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q27": {
-   "latency_s": 87.8,
+   "latency_s": 87.3,
    "llm_calls": 1136,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 297368,
    "cost_usd": 0.14588,
    "rows": 104,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q28": {
-   "latency_s": 20.8,
+   "latency_s": 20.5,
    "llm_calls": 270,
    "llm_calls_fresh": 0,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
    "tokens": 60635,
    "cost_usd": 0.02807,
    "rows": 11,
    "error": null,
-   "ran_at": "2026-10-02 18:27:35 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q29": {
-   "latency_s": 6.4,
+   "latency_s": 3.3,
    "llm_calls": 28,
    "llm_calls_fresh": 0,
-   "tokens": 5793,
-   "cost_usd": 0.002,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
+   "tokens": 5828,
+   "cost_usd": 0.00205,
    "rows": 28,
    "error": null,
-   "ran_at": "2026-10-15 22:18:26 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   },
   "Q30": {
-   "latency_s": 7.0,
+   "latency_s": 5.2,
    "llm_calls": 11,
    "llm_calls_fresh": 0,
-   "tokens": 2554,
-   "cost_usd": 0.0012,
+   "lotus_cache_hits": 0,
+   "lotus_operator_cache_hits": 0,
+   "tokens": 2666,
+   "cost_usd": 0.00133,
    "rows": 3,
    "error": null,
-   "ran_at": "2026-10-15 22:18:26 MDT"
+   "ran_at": "2026-11-19 20:59:28 MST"
   }
  },
  "model": "gpt-5.6-luna",
  "concurrency": 20,
- "updated": "2026-10-15 22:18:26 MDT",
+ "updated": "2026-11-19 20:59:28 MST",
  "total": {
   "n_queries": 30,
-  "latency_s": 1807.4,
+  "latency_s": 1789.1,
   "llm_calls": 25741,
-  "cost_usd": 2.8961,
-  "tokens": 6454735,
+  "cost_usd": 2.8963,
+  "tokens": 6454882,
   "errors": 0
  }
 }

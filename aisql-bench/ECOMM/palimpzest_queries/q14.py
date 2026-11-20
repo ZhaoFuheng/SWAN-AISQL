@@ -49,7 +49,8 @@ def run(pz_config, data_dir: str):
     df = output.to_df()
     if len(df):
         df["fit_score"] = pd.to_numeric(df["fit_score"], errors="coerce").fillna(0)
-        df = df.sort_values(["prod_id", "fit_score"], ascending=[True, False]).drop_duplicates("prod_id")
+        # equally scored images of a product: the lowest image id, not whichever pair arrived first
+        df = df.sort_values(["prod_id", "fit_score", "image_id"], ascending=[True, False, True]).drop_duplicates("prod_id")
         df = pd.DataFrame({"product_id": df["image_id"].astype(str)})
     else:
         df = pd.DataFrame({"product_id": []})

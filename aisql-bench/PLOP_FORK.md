@@ -67,8 +67,26 @@ None of the edits touches the optimizer (`src/optimizer/semantic.cpp`) or the SQ
 - PLOP does not support images, so SemBench ECOMM and MMQA are not run for it; on the hybrid bench its
   prompts are the originals, so SWAN replays its verdicts through the proxy's shared-verdict alias.
 - The hybrid bench's 30 queries and data ship in the fork under `test/semantic/agent_bench/`.
-- Q29 and Q30 have LIMITs inside CTEs with no ORDER BY, so the rows they ask about depended on the engine (the
-  public build draws different nations on Q29 than the pre-release tree did). Every system's copy orders those
-  LIMITs by key (`plop_queries/`, `plop_gt_queries/`, `swan_queries/`, `blendsql_queries/`, `thalamusdb_queries/`,
-  `lotus_queries/`); PLOP runs from `plop_queries/` (`PLOP_QUERY_DIR`) for those two, and the ground truth
-  (`results/plop_gt` = public build, `DUCKDB_SEMANTIC_MODE=none`, `plop_gt_queries/`) is generated the same way.
+- **Input-selecting LIMITs are ordered by key.** A LIMIT with no ORDER BY that sits *below* a semantic function
+  decides which rows the function is asked about, so the input depended on the engine and the machine (the
+  public build draws different nations on Q29 than the pre-release tree did; the arm64 rebuild of 2026-11-09
+  drew different customers for BlendSQL on Q15 and Q19). Every such LIMIT is ordered by its key in every
+  system's copy (`plop_queries/`, `plop_gt_queries/`, `swan_queries/`, `blendsql_queries/`,
+  `lotus_queries/`), so all systems are evaluated on the same input:
+
+  | queries | LIMIT | ordered by | since |
+  |---|---|---|---|
+  | Q29, Q30 | the CTE key LIMITs | the key (`ps_suppkey`, `s_suppkey, s_nationkey`, `s_nationkey`, `l_partkey`, `l_suppkey`) | 2026-10-15 |
+  | Q15, Q16, Q17, Q19, Q25 | `customer_sample`: `SELECT * FROM customer LIMIT k` | `c_custkey` | 2026-11-10 |
+  | Q18 | `nation_sample`: `SELECT * FROM nation LIMIT 25` | `n_nationkey` | 2026-11-10 |
+  | Q27 | `SELECT DISTINCT ps_suppkey FROM joined LIMIT 80` | `ps_suppkey` | 2026-11-10 |
+  | Q28 | `SELECT DISTINCT o_custkey FROM joined LIMIT 60` | `o_custkey` | 2026-11-10 |
+
+  A LIMIT *above* a semantic function (the trailing `LIMIT k` of Q1-Q3) is left unordered: it is what lets a
+  system stop early, and those queries are scored on soundness and completeness, not row identity.
+  PLOP must run these ten queries from `plop_queries/` (`PLOP_QUERY_DIR=<abs path>/AGENTBENCH/plop_queries`):
+  the fork's own `test/semantic/agent_bench/` copies are unordered. The ground truth (`results/plop_gt` =
+  public build, `DUCKDB_SEMANTIC_MODE=none`, `plop_gt_queries/`) is generated the same way.
+  The 2026-11-10 ordering changes the input of Q15-Q19, Q25, Q27 and Q28, so their ground truth and every
+  system's rows for those eight queries were re-recorded on 2026-11-11; the published hybrid-bench table
+  is measured on the ordered queries.

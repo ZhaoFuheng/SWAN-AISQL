@@ -510,7 +510,6 @@
       "Virgin Atlantic",
       "Aerom\u00e9xico",
       "Qatar Airways",
-      "Malaysia Airlines",
       "WestJet",
       "Qatar Airways",
       "Cathay Pacific",
@@ -553,7 +552,6 @@
       "China Southern Airlines",
       "Aerom\u00e9xico",
       "Hainan Airlines",
-      "SalamAir",
       "Middle East Airlines",
       "Garuda Indonesia",
       "Delta Air Lines",
@@ -1423,7 +1421,7 @@
       [
         3,
         "0c1cec5ca5a6fb780a9cfa24d99132b1.jpg",
-        "gold"
+        "white"
       ],
       [
         3,
@@ -1583,7 +1581,7 @@
       [
         6,
         "0d03699bfc51444df6ca45c9f7566a55.jpg",
-        "blue"
+        "red"
       ],
       [
         6,

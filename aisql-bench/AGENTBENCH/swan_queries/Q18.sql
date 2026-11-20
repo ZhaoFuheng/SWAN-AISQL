@@ -15,6 +15,7 @@ CREATE VIEW IF NOT EXISTS region   AS SELECT * FROM './dataset/tpch/region.parqu
 CREATE TEMP TABLE nation_sample AS
 SELECT *
 FROM nation
+ORDER BY n_nationkey
 LIMIT 25;
 
 WITH

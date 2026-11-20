@@ -11,7 +11,7 @@ def run(load, lm):
     nation = load("nation")
     region = load("region")
 
-    nation_sample = nation.head(25)
+    nation_sample = nation.sort_values("n_nationkey", kind="stable").head(25)  # ORDER BY n_nationkey LIMIT 25
 
     p = part[
         part["p_size"].astype(int).between(3, 30)

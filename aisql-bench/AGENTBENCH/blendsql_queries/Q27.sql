@@ -136,6 +136,7 @@ Return a single YES or NO, with no other words. If uncertain, return YES.'
     SELECT DISTINCT
       ps_suppkey
     FROM joined
+    ORDER BY ps_suppkey
     LIMIT 80
   ) AS k
     ON k.ps_suppkey = s.s_suppkey

@@ -20,9 +20,15 @@ import urllib.request
 import lotus
 
 # BENCHMARK RULE: local caches must be query-scoped (Q1's cache must not serve Q2). LOTUS's
-# in-process cache is process-lifetime with no query boundary, so it must stay OFF; cross-run
-# reuse is the server cache's job, which replays recorded latency AND cost on every hit.
-lotus.settings.configure(enable_cache=False)
+# in-process cache has no query boundary, so the runner gives it one: the cache is on (LOTUS's own
+# `enable_cache` setting) and is emptied before each query. Cross-run reuse is the server cache's job,
+# which replays recorded latency AND cost on every hit.
+#   LOTUS_CACHE=0        LOTUS's cache off, as in every run before 2026-11-19
+#   LOTUS_CACHE_SIZE=n   entries the cache holds (default 1,000,000, so that it holds a whole query; LOTUS's
+#                        own default keeps the last 1,024 answers, fewer than one query here sends)
+LOTUS_CACHE = os.environ.get("LOTUS_CACHE", "1") != "0"
+LOTUS_CACHE_SIZE = int(os.environ.get("LOTUS_CACHE_SIZE", "1000000"))
+lotus.settings.configure(enable_cache=LOTUS_CACHE)
 from lotus.models import LM
 
 from ecomm_common import ARI_QUERIES, gt, score
@@ -32,6 +38,8 @@ DATA = os.path.join(HERE, "data", "sf_500")
 PROXY = os.environ.get("AI_PROXY_URL", "http://localhost:4001")
 MODEL = os.environ.get("AI_MODEL", "gpt-5.6-luna")
 CONC = int(os.environ.get("AI_MAX_CONCURRENCY", "20"))
+# SWAN_TAG suffixes the result files (e.g. "_nocache") so a variant run never clobbers the default run.
+TAG = os.environ.get("SWAN_TAG", "")
 
 
 def cache_requests():
@@ -70,7 +78,7 @@ def main():
     from datetime import datetime, timezone
     which = sys.argv[1:] or [f"q{i}" for i in range(1, 15)]
     RES, RAW, LOG = (os.path.join(HERE, f) for f in
-                     ("lotus_ecomm_results.json", "lotus_ecomm_raw.json", "lotus_ecomm_log.txt"))
+                     (f"lotus_ecomm_results{TAG}.json", f"lotus_ecomm_raw{TAG}.json", f"lotus_ecomm_log{TAG}.txt"))
     def _load(p):
         try:
             return json.load(open(p))
@@ -82,11 +90,13 @@ def main():
     lm = LM(model=MODEL, api_base=PROXY, api_key="dummy", max_batch_size=CONC)
     lotus.settings.configure(lm=lm)
     stamp = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-    header = f"LOTUS ECOMM {MODEL} via {PROXY}  concurrency={CONC}  sf500  queries={which}"
+    header = (f"LOTUS ECOMM {MODEL} via {PROXY}  concurrency={CONC}  sf500  "
+              f"cache={'on' if LOTUS_CACHE else 'off'}  queries={which}")
     print(header + "\n")
     lines = []
     for name in which:
         lm.reset_stats()
+        lm.reset_cache(LOTUS_CACHE_SIZE)   # query-scoped: an earlier query's answers never serve this one
         m0 = cache_misses()
         r0 = cache_requests()
         t0 = time.time()
@@ -101,6 +111,7 @@ def main():
         metric = "ari" if name in ARI_QUERIES else "f1"
         rec = {"latency_s": round(dt, 1), "llm_calls_fresh": cache_misses() - m0,
                "llm_calls": cache_requests() - r0,
+               "lotus_cache_hits": lm.stats.cache_hits, "lotus_operator_cache_hits": lm.stats.operator_cache_hits,
                "tokens": u.total_tokens, "cost_usd": round(u.total_cost, 5),
                "n_out": len(out), "n_gold": len(gold), "precision": P, "recall": R,
                "metric": metric, "quality": M, "error": err, "ran_at": stamp}

@@ -9,7 +9,8 @@ Calls and tokens are BlendSQL's own accounting of the query (true requests, stre
 from those tokens at the SWAN 2.0 meter's gpt-5.6-luna prices (an estimate, like PLOP's).
 
   run:  <python with blendsql> blendsql_agentbench.py [Q1 Q2 ...]      (SWAN_bench/.venv has it)
-  env:  AI_PROXY_URL (:4001), AI_MODEL (gpt-5.6-luna), AI_MAX_CONCURRENCY (20)
+  env:  AI_PROXY_URL (:4001), AI_MODEL (gpt-5.6-luna), AI_MAX_CONCURRENCY (20),
+        BLENDSQL_TAG (results/<tag>/ and results/<tag>_agentbench_results.json; default blendsql)
 """
 import json
 import os
@@ -22,6 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PROXY = os.environ.get("AI_PROXY_URL", "http://localhost:4001")
 MODEL = os.environ.get("AI_MODEL", "gpt-5.6-luna")
 CONC = os.environ.get("AI_MAX_CONCURRENCY", "20")
+TAG = os.environ.get("BLENDSQL_TAG", "blendsql")      # results/<tag>/ and results/<tag>_agentbench_results.json
 P_IN, P_OUT = 0.20, 1.20  # $ per 1M tokens, gpt-5.6-luna (SWAN_bench/src/swan_bench/meter.py)
 os.environ["BLENDSQL_ASYNC_LIMIT"] = CONC
 
@@ -61,7 +63,7 @@ def split_file(text):
 def main():
     import pandas as pd
     which = sys.argv[1:] or [f"Q{i}" for i in range(1, 31)]
-    os.makedirs(os.path.join(HERE, "results", "blendsql"), exist_ok=True)
+    os.makedirs(os.path.join(HERE, "results", TAG), exist_ok=True)
     stamp = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     os.chdir(HERE)  # the setup statements read ./dataset/...
     per_query = {}
@@ -83,11 +85,11 @@ def main():
         rec = {"latency_s": round(dt, 1), "llm_calls": calls, "llm_calls_fresh": None, "tokens": p_tok + c_tok,
                "cost_usd": cost, "cost_is_estimate": True, "rows": len(out), "error": err, "ran_at": stamp}
         per_query[name] = rec
-        out.to_csv(os.path.join(HERE, "results", "blendsql", name + ".csv"), index=False)
+        out.to_csv(os.path.join(HERE, "results", TAG, name + ".csv"), index=False)
         print(f"{name:>4} lat={dt:7.1f}s calls={calls:>6} tok={p_tok + c_tok:>8} ~${cost:.4f} rows={len(out)}"
               + (f"  ERR {err}" if err else ""), flush=True)
         # accumulate after each query so an interrupted run keeps partials
-        path = os.path.join(HERE, "results", "blendsql_agentbench_results.json")
+        path = os.path.join(HERE, "results", TAG + "_agentbench_results.json")
         old = json.load(open(path)) if os.path.exists(path) else {"per_query": {}}
         old["model"], old["concurrency"], old["updated"] = MODEL, CONC, stamp
         old["per_query"].update(per_query)
@@ -99,7 +101,7 @@ def main():
                         "tokens": sum(q["tokens"] for q in tot.values()),
                         "errors": sum(1 for q in tot.values() if q["error"])}
         json.dump(old, open(path, "w"), indent=1)
-    print("\nTOTAL", json.load(open(os.path.join(HERE, "results", "blendsql_agentbench_results.json")))["total"])
+    print("\nTOTAL", json.load(open(os.path.join(HERE, "results", TAG + "_agentbench_results.json")))["total"])
 
 
 main()

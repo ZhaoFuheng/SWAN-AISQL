@@ -118,6 +118,7 @@ Return a single YES or NO, with no other words. If uncertain, return YES.'
     SELECT DISTINCT
       o_custkey
     FROM joined
+    ORDER BY o_custkey
     LIMIT 60
   ) AS k
     ON k.o_custkey = c.c_custkey

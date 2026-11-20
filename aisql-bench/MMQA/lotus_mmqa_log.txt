@@ -131,3 +131,45 @@ TOTAL(11q)  latency=1682.9s  cost=$2.4338  tokens=8524003  fresh_calls=10405  ma
 === 2026-09-23 22:25:58 MDT  LOTUS gpt-5.6-luna via http://127.0.0.1:4011  concurrency=20  queries=['q7'] ===
 q7    lat=1139.6s calls=   1 tok=5756921 $1.6107  n=171/5  P=0.039 R=1.0 F1=0.075
 TOTAL(11q)  latency=1719.7s  cost=$2.4339  tokens=8524536  fresh_calls=2407  macro-F1=0.449
+
+=== 2026-11-10 18:47:16 MST  LOTUS gpt-5.6-luna via http://localhost:4001  concurrency=20  queries=['q1', 'q2a', 'q2b', 'q3a', 'q3f', 'q4', 'q5', 'q6a', 'q6b', 'q6c', 'q7'] ===
+q1    lat=  17.2s calls=   0 tok=  34267 $0.0120  n=1/1  P=1.0 R=1.0 F1=1.0
+q2a   lat= 195.4s calls=   0 tok=1238063 $0.3580  n=149/5  P=0.034 R=1.0 F1=0.065
+q2b   lat= 204.6s calls=   0 tok=1296781 $0.3706  n=149/5  P=0.034 R=1.0 F1=0.065
+q3a   lat=  11.7s calls=   0 tok=  45226 $0.0145  n=23/13  P=0.565 R=1.0 F1=0.722
+q3f   lat=  10.2s calls=   0 tok=  44067 $0.0131  n=3/3  P=1.0 R=1.0 F1=1.0
+q4    lat=   3.5s calls=   0 tok=   7533 $0.0032  n=56/39  P=0.518 R=0.744 F1=0.611
+q5    lat=   1.2s calls=   0 tok=   3110 $0.0007  n=1/1  P=1.0 R=1.0 F1=1.0
+q6a   lat=  12.0s calls=   0 tok=  31335 $0.0153  n=27/1  P=0.056 R=1.0 F1=0.105
+q6b   lat=  13.7s calls=   0 tok=  33433 $0.0178  n=36/1  P=0.043 R=1.0 F1=0.083
+q6c   lat=  13.2s calls=   0 tok=  33476 $0.0179  n=61/5  P=0.125 R=1.0 F1=0.222
+q7    lat= 900.1s calls=   0 tok=5756921 $1.6107  n=171/5  P=0.039 R=1.0 F1=0.075
+TOTAL(11q)  latency=1382.8s  cost=$2.4338  tokens=8524212  fresh_calls=0  macro-F1=0.45
+
+=== 2026-11-11 23:16:32 MST  LOTUS gpt-5.6-luna via http://localhost:4001  concurrency=20  queries=['q1', 'q2a', 'q2b', 'q3a', 'q3f', 'q4', 'q5', 'q6a', 'q6b', 'q6c', 'q7'] ===
+q1    lat=  17.2s calls=   0 tok=  34267 $0.0120  n=1/1  P=1.0 R=1.0 F1=1.0
+q2a   lat= 194.4s calls=   0 tok=1238063 $0.3580  n=149/5  P=0.034 R=1.0 F1=0.065
+q2b   lat= 204.7s calls=   0 tok=1296781 $0.3706  n=149/5  P=0.034 R=1.0 F1=0.065
+q3a   lat=  11.7s calls=   0 tok=  45226 $0.0145  n=23/13  P=0.565 R=1.0 F1=0.722
+q3f   lat=  10.2s calls=   0 tok=  44067 $0.0131  n=3/3  P=1.0 R=1.0 F1=1.0
+q4    lat=   3.5s calls=   0 tok=   7533 $0.0032  n=56/39  P=0.518 R=0.744 F1=0.611
+q5    lat=   1.2s calls=   0 tok=   3110 $0.0007  n=1/1  P=1.0 R=1.0 F1=1.0
+q6a   lat=  11.9s calls=   0 tok=  31335 $0.0153  n=27/1  P=0.056 R=1.0 F1=0.105
+q6b   lat=  13.7s calls=   0 tok=  33433 $0.0178  n=36/1  P=0.043 R=1.0 F1=0.083
+q6c   lat=  13.2s calls=   0 tok=  33476 $0.0179  n=61/5  P=0.125 R=1.0 F1=0.222
+q7    lat= 901.7s calls=   0 tok=5756921 $1.6107  n=171/5  P=0.039 R=1.0 F1=0.075
+TOTAL(11q)  latency=1383.4s  cost=$2.4338  tokens=8524212  fresh_calls=0  macro-F1=0.45
+
+=== 2026-11-19 19:02:00 MST  LOTUS gpt-5.6-luna via http://localhost:4001  concurrency=20  cache=on  queries=['q1', 'q2a', 'q2b', 'q3a', 'q3f', 'q4', 'q5', 'q6a', 'q6b', 'q6c', 'q7'] ===
+q1    lat=  17.2s calls=   0 tok=  34267 $0.0120  n=1/1  P=1.0 R=1.0 F1=1.0
+q2a   lat= 196.2s calls=   0 tok=1238063 $0.3580  n=149/5  P=0.034 R=1.0 F1=0.065
+q2b   lat= 205.6s calls=   0 tok=1296781 $0.3706  n=149/5  P=0.034 R=1.0 F1=0.065
+q3a   lat=  11.7s calls=   0 tok=  45226 $0.0145  n=23/13  P=0.565 R=1.0 F1=0.722
+q3f   lat=  10.2s calls=   0 tok=  44067 $0.0131  n=3/3  P=1.0 R=1.0 F1=1.0
+q4    lat=   3.5s calls=   0 tok=   7533 $0.0032  n=56/39  P=0.518 R=0.744 F1=0.611
+q5    lat=   1.2s calls=   0 tok=   3110 $0.0007  n=1/1  P=1.0 R=1.0 F1=1.0
+q6a   lat=  12.0s calls=   0 tok=  31335 $0.0153  n=27/1  P=0.056 R=1.0 F1=0.105
+q6b   lat=  13.7s calls=   0 tok=  33433 $0.0178  n=36/1  P=0.043 R=1.0 F1=0.083
+q6c   lat=  13.2s calls=   0 tok=  33476 $0.0179  n=61/5  P=0.125 R=1.0 F1=0.222
+q7    lat= 906.4s calls=   0 tok=5756921 $1.6107  n=171/5  P=0.039 R=1.0 F1=0.075
+TOTAL(11q)  latency=1390.9s  cost=$2.4338  tokens=8524212  fresh_calls=0  macro-F1=0.45

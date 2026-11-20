@@ -41,12 +41,10 @@ docker_env.txt
 .ccache/
 aisql-bench/*/llm_calls_*.log
 sembench_ecomm/
-.venv-thalamusdb/
-aisql-bench/*/thalamusdb.duckdb
-aisql-bench/*/thalamusdb_export/
 .venv-palimpzest/
+.venv-lotus/
 
-# agent_bench run scratch: DuckDB temp storage of the ThalamusDB runner, Palimpzest's parse-error dumps, and the
+# agent_bench run scratch: DuckDB temp storage, Palimpzest's parse-error dumps, and the
 # raw Q19 outputs (committed gzipped; score_agentbench.py reads .csv.gz)
 aisql-bench/AGENTBENCH/.tmp/
 aisql-bench/AGENTBENCH/parse-answer-errors/
