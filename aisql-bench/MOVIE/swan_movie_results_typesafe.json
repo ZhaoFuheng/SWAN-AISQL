@@ -1,30 +1,30 @@
 {
  "model": "gpt-5.6-luna",
  "concurrency": "20",
- "updated": "2026-09-26 20:28:43 CDT",
+ "updated": "2026-11-20 10:05:04 MST",
  "per_query": {
   "q1": {
-   "latency_s": 1.4,
-   "llm_calls_fresh": 27,
-   "llm_calls": 30,
-   "cache_hits": 75,
-   "tokens": 13885,
+   "latency_s": 1.1,
+   "llm_calls_fresh": 0,
+   "llm_calls": 28,
+   "cache_hits": 0,
+   "tokens": 11878,
    "reasoning_tokens": 0,
-   "cost_usd": 0.00051,
+   "cost_usd": 0.00048,
    "n_out": 5,
    "n_gold": 1487,
    "precision": 1.0,
    "recall": 1.0,
    "quality": 1.0,
    "error": null,
-   "ran_at": "2026-09-25 12:28:15 CDT"
+   "ran_at": "2026-11-20 10:05:04 MST"
   },
   "q2": {
-   "latency_s": 3.6,
+   "latency_s": 3.3,
    "llm_calls_fresh": 0,
    "llm_calls": 119,
-   "cache_hits": 178,
-   "tokens": 53015,
+   "cache_hits": 0,
+   "tokens": 50138,
    "reasoning_tokens": 0,
    "cost_usd": 0.00201,
    "n_out": 5,
@@ -33,10 +33,10 @@
    "recall": 1.0,
    "quality": 1.0,
    "error": null,
-   "ran_at": "2026-09-25 12:28:15 CDT"
+   "ran_at": "2026-11-20 10:05:04 MST"
   },
   "q3": {
-   "latency_s": 4.0,
+   "latency_s": 3.9,
    "llm_calls_fresh": 0,
    "llm_calls": 119,
    "cache_hits": 0,
@@ -45,15 +45,15 @@
    "cost_usd": 0.00199,
    "n_out": 1,
    "n_gold": 1,
+   "value": 9.0,
+   "rel_err": 0.3571,
    "quality": 0.643,
    "error": null,
-   "ran_at": "2026-09-25 12:28:15 CDT",
-   "value": 9.0,
-   "rel_err": 0.3571
+   "ran_at": "2026-11-20 10:05:04 MST"
   },
   "q4": {
-   "latency_s": 3.3,
-   "llm_calls_fresh": 119,
+   "latency_s": 3.1,
+   "llm_calls_fresh": 0,
    "llm_calls": 119,
    "cache_hits": 1,
    "tokens": 49651,
@@ -61,47 +61,47 @@
    "cost_usd": 0.00199,
    "n_out": 1,
    "n_gold": 1,
+   "value": 0.0667,
+   "rel_err": 0.4286,
    "quality": 0.571,
    "error": null,
-   "ran_at": "2026-09-25 12:28:15 CDT",
-   "value": 0.0667,
-   "rel_err": 0.4286
+   "ran_at": "2026-11-20 10:05:04 MST"
   },
   "q5": {
-   "latency_s": 1.9,
-   "llm_calls_fresh": 36,
-   "llm_calls": 36,
-   "cache_hits": 77,
-   "tokens": 20705,
+   "latency_s": 1.3,
+   "llm_calls_fresh": 0,
+   "llm_calls": 35,
+   "cache_hits": 0,
+   "tokens": 17455,
    "reasoning_tokens": 0,
-   "cost_usd": 0.00072,
+   "cost_usd": 0.0007,
    "n_out": 10,
    "n_gold": 32288,
    "precision": 1.0,
    "recall": 1.0,
    "quality": 1.0,
    "error": null,
-   "ran_at": "2026-09-25 12:28:15 CDT"
+   "ran_at": "2026-11-20 10:05:04 MST"
   },
   "q6": {
-   "latency_s": 2.0,
-   "llm_calls_fresh": 42,
-   "llm_calls": 42,
-   "cache_hits": 87,
-   "tokens": 23906,
+   "latency_s": 1.4,
+   "llm_calls_fresh": 0,
+   "llm_calls": 41,
+   "cache_hits": 0,
+   "tokens": 20366,
    "reasoning_tokens": 0,
-   "cost_usd": 0.00084,
+   "cost_usd": 0.00082,
    "n_out": 10,
    "n_gold": 32736,
    "precision": 0.889,
    "recall": 0.8,
    "quality": 0.842,
    "error": null,
-   "ran_at": "2026-09-25 12:28:15 CDT"
+   "ran_at": "2026-11-20 10:05:04 MST"
   },
   "q7": {
-   "latency_s": 446.5,
-   "llm_calls_fresh": 16214,
+   "latency_s": 428.1,
+   "llm_calls_fresh": 0,
    "llm_calls": 16256,
    "cache_hits": 0,
    "tokens": 8296910,
@@ -113,7 +113,7 @@
    "recall": 0.854,
    "quality": 0.777,
    "error": null,
-   "ran_at": "2026-09-25 12:28:15 CDT"
+   "ran_at": "2026-11-20 10:05:04 MST"
   },
   "q8": {
    "latency_s": 4.1,
@@ -125,14 +125,14 @@
    "cost_usd": 0.00175,
    "n_out": 2,
    "n_gold": 2,
+   "value": 0.0,
+   "rel_err": 0.0404,
    "quality": 0.96,
    "error": null,
-   "ran_at": "2026-09-25 12:28:15 CDT",
-   "value": 0.0,
-   "rel_err": 0.0404
+   "ran_at": "2026-11-20 10:05:04 MST"
   },
   "q9": {
-   "latency_s": 5.0,
+   "latency_s": 0.9,
    "llm_calls_fresh": 0,
    "llm_calls": 128,
    "cache_hits": 0,
@@ -141,14 +141,14 @@
    "cost_usd": 0.00303,
    "n_out": 256,
    "n_gold": 256,
-   "precision": 0.759,
-   "recall": 0.581,
-   "quality": 0.759,
+   "precision": 0.752,
+   "recall": 0.569,
+   "quality": 0.752,
    "error": null,
-   "ran_at": "2026-09-26 20:28:43 CDT"
+   "ran_at": "2026-11-20 10:05:04 MST"
   },
   "q10": {
-   "latency_s": 39.1,
+   "latency_s": 10.6,
    "llm_calls_fresh": 0,
    "llm_calls": 1864,
    "cache_hits": 0,
@@ -157,19 +157,19 @@
    "cost_usd": 0.04295,
    "n_out": 105,
    "n_gold": 116,
-   "precision": 0.397,
-   "recall": 0.277,
-   "quality": 0.397,
+   "precision": 0.405,
+   "recall": 0.281,
+   "quality": 0.405,
    "error": null,
-   "ran_at": "2026-09-26 20:28:43 CDT"
+   "ran_at": "2026-11-20 10:05:04 MST"
   }
  },
  "total": {
   "n_queries": 10,
-  "latency_s": 510.9,
-  "sweep_wall_s": 44.1,
-  "cost_usd": 0.3906,
-  "tokens": 9682325,
+  "latency_s": 457.8,
+  "sweep_wall_s": 458.0,
+  "cost_usd": 0.3905,
+  "tokens": 9670651,
   "llm_calls_fresh": 0,
   "macro_quality": 0.795
  }

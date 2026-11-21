@@ -7,7 +7,7 @@ CREATE VIEW IF NOT EXISTS orders AS SELECT * FROM "./dataset/tpch/orders.parquet
 CREATE VIEW IF NOT EXISTS partsupp AS SELECT * FROM "./dataset/tpch/partsupp.parquet";
 CREATE VIEW IF NOT EXISTS nation AS SELECT * FROM "./dataset/tpch/nation.parquet";
 CREATE VIEW IF NOT EXISTS region AS SELECT * FROM "./dataset/tpch/region.parquet";
-CREATE TEMPORARY TABLE customer_sample AS SELECT * FROM customer LIMIT 100;
+CREATE TEMPORARY TABLE customer_sample AS SELECT * FROM customer ORDER BY c_custkey LIMIT 100;
 -- query (BlendSQL)
 WITH __b1 AS (
   SELECT

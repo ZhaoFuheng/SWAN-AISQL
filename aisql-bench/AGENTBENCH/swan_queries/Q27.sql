@@ -106,6 +106,7 @@ supplier_context AS (
 	JOIN (
 		SELECT DISTINCT ps_suppkey
 		FROM joined
+		ORDER BY ps_suppkey
 		LIMIT 80
 	) k ON k.ps_suppkey = s.s_suppkey
 	WHERE ai_filter('You are shortlisting suppliers for long-term procurement partnerships. Based on supplier identity style, account balance, and profile comment tone, does this supplier appear commercially dependable enough for preferred-vendor consideration?

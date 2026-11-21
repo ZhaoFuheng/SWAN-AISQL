@@ -2,7 +2,7 @@
 (setup_palimpzest.sh), so it imports nothing from this repository.
 
     python palimpzest_exec.py MODULE_PATH FUNCTION DATA_DIR MODEL PROXY_URL DOP [--policy MaxQuality|MinCost]
-                              [--optimizer pareto|none]
+                              [--optimizer pareto|none] [--execution parallel|sequential]
 
 MODULE_PATH is a Python file holding the query program: either SemBench's style, a `run(pz_config, data_dir)`
 function (FUNCTION = "run"), or a module of functions `q1(pz_config, data_dir)`, ... (FUNCTION = the name).
@@ -39,6 +39,7 @@ def main() -> None:
     flags = sys.argv[7:]
     policy_name = flags[flags.index("--policy") + 1] if "--policy" in flags else "MaxQuality"
     optimizer = flags[flags.index("--optimizer") + 1] if "--optimizer" in flags else "pareto"
+    execution = flags[flags.index("--execution") + 1] if "--execution" in flags else "parallel"
     real_stdout = sys.stdout
     sys.stdout = sys.stderr
 
@@ -48,7 +49,7 @@ def main() -> None:
     lm_model = model if "/" in model else f"openai/{model}"
     m = Model(lm_model, api_base=proxy.rstrip("/") + "/v1")
     policy = pz.MaxQuality() if policy_name == "MaxQuality" else pz.MinCost()
-    config = pz.QueryProcessorConfig(policy=policy, optimizer_strategy=optimizer, execution_strategy="parallel",
+    config = pz.QueryProcessorConfig(policy=policy, optimizer_strategy=optimizer, execution_strategy=execution,
                                      max_workers=int(dop), join_parallelism=int(dop), available_models=[m],
                                      progress=False, verbose=False)
 

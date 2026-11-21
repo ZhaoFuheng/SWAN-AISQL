@@ -1,7 +1,7 @@
 {
  "per_query": {
   "Q1": {
-   "latency_s": 24.0,
+   "latency_s": 16.9,
    "llm_calls": 200,
    "llm_calls_fresh": null,
    "tokens": 56995,
@@ -9,10 +9,10 @@
    "cost_is_estimate": true,
    "rows": 5,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q2": {
-   "latency_s": 7.8,
+   "latency_s": 7.5,
    "llm_calls": 100,
    "llm_calls_fresh": null,
    "tokens": 16903,
@@ -20,10 +20,10 @@
    "cost_is_estimate": true,
    "rows": 3,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q3": {
-   "latency_s": 6.1,
+   "latency_s": 5.6,
    "llm_calls": 79,
    "llm_calls_fresh": null,
    "tokens": 11941,
@@ -31,10 +31,10 @@
    "cost_is_estimate": true,
    "rows": 4,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q4": {
-   "latency_s": 10.2,
+   "latency_s": 9.5,
    "llm_calls": 141,
    "llm_calls_fresh": null,
    "tokens": 84286,
@@ -42,10 +42,10 @@
    "cost_is_estimate": true,
    "rows": 269,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q5": {
-   "latency_s": 1.1,
+   "latency_s": 0.8,
    "llm_calls": 1,
    "llm_calls_fresh": null,
    "tokens": 259,
@@ -53,54 +53,54 @@
    "cost_is_estimate": true,
    "rows": 4,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q6": {
-   "latency_s": 0.2,
-   "llm_calls": 0,
+   "latency_s": 8.7,
+   "llm_calls": 200,
    "llm_calls_fresh": null,
-   "tokens": 0,
-   "cost_usd": 0.0,
+   "tokens": 173629,
+   "cost_usd": 0.03696,
    "cost_is_estimate": true,
-   "rows": 0,
-   "error": "ParseError(\"Expecting ). Line 37, Col: 74.\\n   title\\n  FROM __b1\\n  WHERE\\n    __BSQL__LLMMap('Confirm this is the Buddy the Soldier Bear children\\\\'\\x1b[4ms\\x1b[0m picture book that follows a stuffed bear from a toy store to a battlefield, emphasizes supporting s\")",
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "rows": 1,
+   "error": null,
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q7": {
-   "latency_s": 0.2,
-   "llm_calls": 0,
+   "latency_s": 10.8,
+   "llm_calls": 210,
    "llm_calls_fresh": null,
-   "tokens": 0,
-   "cost_usd": 0.0,
+   "tokens": 175815,
+   "cost_usd": 0.03811,
    "cost_is_estimate": true,
    "rows": 0,
-   "error": "ParseError(\"Expecting ). Line 37, Col: 74.\\n   title\\n  FROM __b1\\n  WHERE\\n    __BSQL__LLMMap('Confirm this is the Buddy the Soldier Bear children\\\\'\\x1b[4ms\\x1b[0m picture book that follows a stuffed bear from a toy store to a battlefield, emphasizes supporting s\")",
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "error": null,
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q8": {
-   "latency_s": 0.2,
-   "llm_calls": 0,
+   "latency_s": 7.9,
+   "llm_calls": 200,
    "llm_calls_fresh": null,
-   "tokens": 0,
-   "cost_usd": 0.0,
+   "tokens": 172970,
+   "cost_usd": 0.03717,
    "cost_is_estimate": true,
-   "rows": 0,
-   "error": "TokenError(\"Error tokenizing 'e_idx = c.book_idx\\nORDER BY\\n  rf.review_time DESC'\")",
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "rows": 1,
+   "error": null,
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q9": {
-   "latency_s": 0.2,
-   "llm_calls": 0,
+   "latency_s": 8.6,
+   "llm_calls": 200,
    "llm_calls_fresh": null,
-   "tokens": 0,
-   "cost_usd": 0.0,
+   "tokens": 173074,
+   "cost_usd": 0.03709,
    "cost_is_estimate": true,
-   "rows": 0,
-   "error": "TokenError(\"Error tokenizing 'e_idx = c.book_idx\\nORDER BY\\n  rf.review_time DESC'\")",
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "rows": 1,
+   "error": null,
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q10": {
-   "latency_s": 2.4,
+   "latency_s": 2.1,
    "llm_calls": 26,
    "llm_calls_fresh": null,
    "tokens": 4587,
@@ -108,10 +108,10 @@
    "cost_is_estimate": true,
    "rows": 5,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q11": {
-   "latency_s": 4.6,
+   "latency_s": 4.2,
    "llm_calls": 79,
    "llm_calls_fresh": null,
    "tokens": 12947,
@@ -119,10 +119,10 @@
    "cost_is_estimate": true,
    "rows": 5,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q12": {
-   "latency_s": 2.2,
+   "latency_s": 1.7,
    "llm_calls": 26,
    "llm_calls_fresh": null,
    "tokens": 4665,
@@ -130,10 +130,10 @@
    "cost_is_estimate": true,
    "rows": 2,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q13": {
-   "latency_s": 5.1,
+   "latency_s": 4.5,
    "llm_calls": 73,
    "llm_calls_fresh": null,
    "tokens": 12156,
@@ -141,10 +141,10 @@
    "cost_is_estimate": true,
    "rows": 5,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q14": {
-   "latency_s": 3.7,
+   "latency_s": 3.5,
    "llm_calls": 61,
    "llm_calls_fresh": null,
    "tokens": 10272,
@@ -152,10 +152,10 @@
    "cost_is_estimate": true,
    "rows": 1,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q15": {
-   "latency_s": 90.7,
+   "latency_s": 90.2,
    "llm_calls": 1100,
    "llm_calls_fresh": null,
    "tokens": 242306,
@@ -163,10 +163,10 @@
    "cost_is_estimate": true,
    "rows": 122,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q16": {
-   "latency_s": 63.4,
+   "latency_s": 56.9,
    "llm_calls": 1100,
    "llm_calls_fresh": null,
    "tokens": 162750,
@@ -174,10 +174,10 @@
    "cost_is_estimate": true,
    "rows": 0,
    "error": null,
-   "ran_at": "2026-10-02 20:21:05 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q17": {
-   "latency_s": 278.6,
+   "latency_s": 276.8,
    "llm_calls": 3862,
    "llm_calls_fresh": null,
    "tokens": 776583,
@@ -185,10 +185,10 @@
    "cost_is_estimate": true,
    "rows": 9093,
    "error": null,
-   "ran_at": "2026-10-02 20:21:05 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q18": {
-   "latency_s": 9.7,
+   "latency_s": 9.8,
    "llm_calls": 78,
    "llm_calls_fresh": null,
    "tokens": 16165,
@@ -196,10 +196,10 @@
    "cost_is_estimate": true,
    "rows": 2200,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q19": {
-   "latency_s": 1111.4,
+   "latency_s": 1100.1,
    "llm_calls": 13338,
    "llm_calls_fresh": null,
    "tokens": 2630765,
@@ -207,10 +207,10 @@
    "cost_is_estimate": true,
    "rows": 383487,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q20": {
-   "latency_s": 5.3,
+   "latency_s": 5.0,
    "llm_calls": 100,
    "llm_calls_fresh": null,
    "tokens": 26743,
@@ -218,10 +218,10 @@
    "cost_is_estimate": true,
    "rows": 55,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q21": {
-   "latency_s": 5.2,
+   "latency_s": 4.9,
    "llm_calls": 100,
    "llm_calls_fresh": null,
    "tokens": 25279,
@@ -229,10 +229,10 @@
    "cost_is_estimate": true,
    "rows": 2712,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q22": {
-   "latency_s": 5.7,
+   "latency_s": 4.9,
    "llm_calls": 100,
    "llm_calls_fresh": null,
    "tokens": 25706,
@@ -240,10 +240,10 @@
    "cost_is_estimate": true,
    "rows": 270,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q23": {
-   "latency_s": 6.1,
+   "latency_s": 4.9,
    "llm_calls": 100,
    "llm_calls_fresh": null,
    "tokens": 27830,
@@ -251,10 +251,10 @@
    "cost_is_estimate": true,
    "rows": 649,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q24": {
-   "latency_s": 4.6,
+   "latency_s": 3.3,
    "llm_calls": 62,
    "llm_calls_fresh": null,
    "tokens": 17269,
@@ -262,10 +262,10 @@
    "cost_is_estimate": true,
    "rows": 868,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q25": {
-   "latency_s": 94.6,
+   "latency_s": 93.8,
    "llm_calls": 1161,
    "llm_calls_fresh": null,
    "tokens": 253813,
@@ -273,10 +273,10 @@
    "cost_is_estimate": true,
    "rows": 120,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q26": {
-   "latency_s": 115.0,
+   "latency_s": 113.4,
    "llm_calls": 1429,
    "llm_calls_fresh": null,
    "tokens": 321820,
@@ -284,10 +284,10 @@
    "cost_is_estimate": true,
    "rows": 169,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q27": {
-   "latency_s": 72.7,
+   "latency_s": 71.5,
    "llm_calls": 1037,
    "llm_calls_fresh": null,
    "tokens": 214906,
@@ -295,10 +295,10 @@
    "cost_is_estimate": true,
    "rows": 8,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q28": {
-   "latency_s": 21.0,
+   "latency_s": 19.8,
    "llm_calls": 264,
    "llm_calls_fresh": null,
    "tokens": 46728,
@@ -306,10 +306,10 @@
    "cost_is_estimate": true,
    "rows": 5,
    "error": null,
-   "ran_at": "2026-10-02 19:46:20 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q29": {
-   "latency_s": 7.0,
+   "latency_s": 1.4,
    "llm_calls": 7,
    "llm_calls_fresh": null,
    "tokens": 1168,
@@ -317,10 +317,10 @@
    "cost_is_estimate": true,
    "rows": 28,
    "error": null,
-   "ran_at": "2026-10-15 22:18:42 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   },
   "Q30": {
-   "latency_s": 6.0,
+   "latency_s": 5.2,
    "llm_calls": 7,
    "llm_calls_fresh": null,
    "tokens": 1560,
@@ -328,19 +328,19 @@
    "cost_is_estimate": true,
    "rows": 0,
    "error": null,
-   "ran_at": "2026-10-15 22:18:42 MDT"
+   "ran_at": "2026-11-20 17:17:39 MST"
   }
  },
  "model": "gpt-5.6-luna",
  "concurrency": "20",
- "updated": "2026-10-15 22:18:42 MDT",
+ "updated": "2026-11-20 17:17:39 MST",
  "total": {
   "n_queries": 30,
-  "latency_s": 1965.0,
-  "llm_calls": 24631,
-  "cost_usd": 2.7604,
+  "latency_s": 1954.2,
+  "llm_calls": 25441,
+  "cost_usd": 2.9097,
   "cost_is_estimate": true,
-  "tokens": 5006402,
-  "errors": 4
+  "tokens": 5701890,
+  "errors": 0
  }
 }

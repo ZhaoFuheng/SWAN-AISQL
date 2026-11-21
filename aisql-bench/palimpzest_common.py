@@ -9,7 +9,7 @@ cost estimation needs a validator or training set, which the suites do not suppl
 other settings (MaxQuality, parallel execution, 20 workers). The benchmark model goes in as a self-hosted
 model through the cache proxy, which Palimpzest prices at zero, so calls and tokens are the proxy's counter
 deltas during the query (run the suites one at a time through a proxy nothing else is using) and cost is
-estimated from those tokens at the gpt-5.6 list price, as for PLOP, BlendSQL and ThalamusDB.
+estimated from those tokens at the gpt-5.6 list price, as for PLOP and BlendSQL.
 """
 import json
 import os
@@ -33,6 +33,14 @@ def python() -> str:
     raise SystemExit("Palimpzest's interpreter is missing: run aisql-bench/setup_palimpzest.sh or set PALIMPZEST_PYTHON")
 
 
+def child_env() -> dict:
+    """The environment of Palimpzest's interpreter, with the hash seed pinned (PALIMPZEST_HASHSEED, default 0).
+    Palimpzest names an operator's input types (text, image) in set order when it writes its system prompt, so
+    without a pin a query over text and images sends one of two prompt wordings, chosen per process, and each
+    wording has its own recorded answers."""
+    return dict(os.environ, PYTHONHASHSEED=os.environ.get("PALIMPZEST_HASHSEED", "0"))
+
+
 def proxy_counters():
     """(requests, misses, prompt tokens, completion tokens) from the proxy's running counters."""
     try:
@@ -42,14 +50,17 @@ def proxy_counters():
         return 0, -1, 0, 0
 
 
-def run_query(module_path: str, function: str, data_dir: str, timeout: int = 7200) -> dict:
+def run_query(module_path: str, function: str, data_dir: str, timeout: int = 7200, execution: str | None = None) -> dict:
     """One Palimpzest execution; returns the exec script's JSON (its `seconds` is the query's own time inside
     the interpreter, after the ~10 s import of palimpzest/torch) plus `error`, `llm_calls`, `llm_calls_fresh`,
-    `tokens` and `cost_usd` (proxy deltas; estimate)."""
+    `tokens` and `cost_usd` (proxy deltas; estimate). `execution` names a Palimpzest execution strategy other than
+    the parallel one every query runs under by default."""
     r0, m0, p0, c0 = proxy_counters()
     cmd = [python(), EXEC, module_path, function, data_dir, MODEL, PROXY, str(DOP), "--policy", POLICY, "--optimizer", OPTIMIZER]
+    if execution:
+        cmd += ["--execution", execution]
     try:
-        p = subprocess.run(cmd, input="", text=True, capture_output=True, timeout=timeout, cwd=HERE)
+        p = subprocess.run(cmd, input="", text=True, capture_output=True, timeout=timeout, cwd=HERE, env=child_env())
     except subprocess.TimeoutExpired:  # Palimpzest has no cap of its own; record the overrun, keep the suite going
         p = None
     r1, m1, p1, c1 = proxy_counters()

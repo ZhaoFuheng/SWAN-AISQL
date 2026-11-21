@@ -47,8 +47,8 @@ Return a single YES or NO, with no other words. If uncertain, return YES."""
         "l_partkey", "l_suppkey", "l_quantity", "l_extendedprice", "l_discount", "l_shipmode",
     ]]
 
-    # customer_context: DISTINCT o_custkey LIMIT 60 (no ORDER BY -> first 60 in current order)
-    keys = joined[["o_custkey"]].drop_duplicates().head(60)
+    # customer_context: DISTINCT o_custkey ORDER BY o_custkey LIMIT 60
+    keys = joined[["o_custkey"]].drop_duplicates().sort_values("o_custkey", kind="stable").head(60)
     cc = customer.merge(keys, left_on="c_custkey", right_on="o_custkey").drop(columns=["o_custkey"])
     if len(cc) > 0:
         cc = cc.sem_filter(

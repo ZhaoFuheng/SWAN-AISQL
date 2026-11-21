@@ -47,10 +47,8 @@ def main():
         open(os.path.join(DST, q + ".sql"), "w").write(body + "\n")
     json.dump(limits, open(os.path.join(DST, "output_limits.json"), "w"), indent=1)
     print("limit removed:", ", ".join(sorted(limits, key=lambda s: int(s[1:]))) or "(none)")
-    print("stage into the PLOP tree and run the ground truth with:")
-    print("  cp plop_gt_queries/Q*.sql $PLOP_ROOT/test/semantic/agent_bench_gt/")
-    print("  PLOP_MODE=none PLOP_QUERY_DIR=test/semantic/agent_bench_gt PLOP_TAG=plop_gt \\")
-    print("    python3 plop_agentbench.py")
+    print("run the ground truth with:")
+    print(f"  PLOP_MODE=none PLOP_QUERY_DIR={DST} PLOP_TAG=plop_gt python3 plop_agentbench.py")
 
 
 main()

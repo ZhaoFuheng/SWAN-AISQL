@@ -13,7 +13,7 @@ def run(load, lm):
     partsupp = load("partsupp")
     supplier = load("supplier")
 
-    customer_sample = customer.head(180)
+    customer_sample = customer.sort_values("c_custkey", kind="stable").head(180)  # ORDER BY c_custkey LIMIT 180
 
     ship = pd.to_datetime(lineitem["l_shipdate"])
     lr = lineitem[

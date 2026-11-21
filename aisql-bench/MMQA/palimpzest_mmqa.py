@@ -24,6 +24,10 @@ import palimpzest_common as P  # noqa: E402
 TAG = os.environ.get("SWAN_TAG", "")
 GT = os.path.join(HERE, "ground_truth")
 QUERIES = ["q1", "q2a", "q2b", "q3a", "q3f", "q4", "q5", "q6a", "q6b", "q6c", "q7"]
+# q5 is ONE model call over 16 rows. Palimpzest's parallel executor hands finished rows on in set order (object
+# addresses), so that call's prompt lists the rows in a different order in every run and no recording can
+# replay it. Its sequential executor keeps the table's order; with a single call nothing else changes.
+EXECUTION = {"q5": "sequential"}
 MODULE = os.path.join(HERE, "palimpzest_queries.py")
 DATA = os.path.join(HERE, "files", "mmqa", "data", "sf_200")
 
@@ -63,7 +67,7 @@ def extract(name, res):
 
 def run_one(name, stamp):
     t0 = time.time()  # wall time of the whole subprocess, interpreter start-up included; latency_s is the query's own time
-    res = P.run_query(MODULE, name, DATA)
+    res = P.run_query(MODULE, name, DATA, execution=EXECUTION.get(name))
     dt = time.time() - t0
     err = res["error"]
     try:

@@ -16,6 +16,11 @@ CALL ai_mock_start();
 statement ok
 SET ai_hedge = false;
 
+# usage records are process-wide and outlive ai_mock_start(): start from none, so that what an earlier test file
+# booked in the same process (CI runs about ten files per process, in directory order) is not summed below
+statement ok
+SELECT ai_usage_reset();
+
 statement ok
 SET ai_concurrency = 20;
 

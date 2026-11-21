@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """PLOP (Morrila) on its own agent_bench 30 queries, DP cost-model mode (the paper's setting).
 
-Runs the authors' DuckDB fork on their unmodified QN.sql files with
+Runs the authors' DuckDB fork on this repository's copies of their QN.sql files (plop_queries/: the LIMITs
+that select a semantic function's input are ordered by key, see ../PLOP_FORK.md) with
 SEMANTIC_OPTIMIZER=true, DUCKDB_SEMANTIC_MODE=costmodel, workers pinned to our concurrency,
 model gpt-5.6-luna, routed via the :4001 recording proxy (LLM_API_URL patch). True call
 counting = proxy hits+misses delta; tokens from the proxy's prompt/completion counters; cost
@@ -10,7 +11,8 @@ header on replay). Result rows go to results/plop/QN.csv for cross-system agreem
 
   run:  python3 plop_agentbench.py [Q1 Q2 ...]
   env:  PLOP_ROOT (the public Morrila clone, default ../../../Morrila), PLOP_BIN (its shell, default
-        $PLOP_ROOT/build/release/duckdb), AI_PROXY_URL, AI_MODEL, AI_MAX_CONCURRENCY
+        $PLOP_ROOT/build/release/duckdb), AI_PROXY_URL, AI_MODEL, AI_MAX_CONCURRENCY,
+        PLOP_QUERY_DIR (another query folder: absolute, or relative to the PLOP tree), PLOP_MODE, PLOP_TAG
 """
 import json
 import os
@@ -29,8 +31,10 @@ CONC = os.environ.get("AI_MAX_CONCURRENCY", "20")
 # gpt-5.6 list price per 1M tokens (input / output); estimate only
 P_IN, P_OUT = 0.25, 2.00
 
-# which query folder inside the PLOP tree to read (agent_bench_gt = output LIMITs removed)
-QUERY_DIR = os.environ.get("PLOP_QUERY_DIR", "test/semantic/agent_bench")
+# which query folder to read. Default: this repository's copies, the ones behind the published row and the
+# ground truth. The fork's own files (PLOP_QUERY_DIR=test/semantic/agent_bench, relative to the PLOP tree) leave
+# those LIMITs unordered, so which rows they select depends on the engine and the machine.
+QUERY_DIR = os.environ.get("PLOP_QUERY_DIR", os.path.join(HERE, "plop_queries"))
 TAG_OVERRIDE = os.environ.get("PLOP_TAG", "")
 MODE = os.environ.get("PLOP_MODE", "costmodel")  # costmodel = the paper's DP; none = the paper's QUALITY GROUND TRUTH (un-rewritten UDF execution)
 ENV = {**os.environ, "SEMANTIC_OPTIMIZER": "true", "DUCKDB_SEMANTIC_MODE": MODE,

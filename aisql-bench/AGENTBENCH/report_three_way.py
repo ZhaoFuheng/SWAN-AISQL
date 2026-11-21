@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Q1-Q30 three-way table: SWAN vs PLOP-DP vs LOTUS, scored by the deterministic scorer
-(eval_agentbench.py: LIMIT-free PLOP ground truth, LIMIT queries sound+complete).
+"""Q1-Q30 table of every system: LOTUS, BlendSQL, Palimpzest, PLOP-DP and SWAN, scored by the deterministic
+scorer (eval_agentbench.py: LIMIT-free PLOP ground truth, LIMIT queries sound+complete).
 
-Reads results/{<SWAN_TAG>,plop,lotus}_agentbench_results.json for calls / latency / cost and writes
-results/agentbench_comparison_three_way.md.
+Reads results/{<SWAN_TAG>,plop,lotus,blendsql,palimpzest}_agentbench_results.json for calls / latency / cost
+and writes results/agentbench_comparison_three_way.md.
 
-  SWAN_TAG=swan_fix3 python3 report_three_way.py
+  SWAN_TAG=swan_20261111 python3 report_three_way.py     (the committed table; SWAN_TAG=swan for your own run)
 """
 import importlib.util
 import json
@@ -15,7 +15,7 @@ from datetime import date
 HERE = os.path.dirname(os.path.abspath(__file__))
 SWAN_TAG = os.environ.get("SWAN_TAG", "swan")
 SYSTEMS = [("LOTUS", "lotus")]
-for name, tag in (("BlendSQL", "blendsql"), ("Palimpzest", "palimpzest"), ("ThalamusDB", "thalamusdb")):
+for name, tag in (("BlendSQL", "blendsql"), ("Palimpzest", "palimpzest")):
     if os.path.exists(os.path.join(HERE, "results", tag + "_agentbench_results.json")):
         SYSTEMS.append((name, tag))
 SYSTEMS += [("PLOP", "plop"), ("SWAN", SWAN_TAG)]
@@ -25,21 +25,19 @@ ev = importlib.util.module_from_spec(importlib.util.spec_from_loader("ev", loade
 ev.__dict__["__file__"] = os.path.join(HERE, "eval_agentbench.py")
 exec(compile(ev_src, "eval_agentbench.py", "exec"), ev.__dict__)
 
-HEADER = """# agent_bench Q1-Q30: LOTUS vs BlendSQL vs Palimpzest vs ThalamusDB vs PLOP-DP vs SWAN (gpt-5.6-luna) -- {today}
+HEADER = """# agent_bench Q1-Q30: LOTUS vs BlendSQL vs Palimpzest vs PLOP-DP vs SWAN (gpt-5.6-luna) -- {today}
 
-Quality = deterministic scorer (eval_agentbench.py): LIMIT-free PLOP execution as ground truth; LIMIT queries scored sound+complete. Calls = true request counts through the recording proxy (SWAN replays PLOP's samples via the shared-verdict alias; LOTUS Q1-Q18 replayed from 2026-09-21, Q19-Q30 recorded fresh 2026-09-26). LOTUS translations are ours (aisql-bench/README.md, provenance table). SWAN run: results/{swan_tag}.
+Quality = deterministic scorer (eval_agentbench.py): LIMIT-free PLOP execution as ground truth; LIMIT queries scored sound+complete. Calls = true request counts through the cache proxy. Each system's columns are one full run of the 30 queries ({runs}), a replay of its recorded calls with their recorded response times, one system at a time; SWAN replays PLOP's samples via the shared-verdict alias. LOTUS translations are ours (aisql-bench/README.md, provenance table). SWAN run: results/{swan_tag}.
 
 **Read the LOTUS quality column with care.** SWAN and PLOP consume the *same* recorded verdict for every
 shared prompt (the proxy's shared-verdict alias), so they agree with the ground truth by construction
 wherever their plans agree. LOTUS uses its own prompt templates, so its verdicts are independent samples of
-the same model: on queries whose answer hinges on a handful of judgments (Q13/Q16/Q17/Q30 have an EMPTY
-ground truth; LOTUS admitted 3 / 261 / 3,026 / 4 rows) any disagreement scores 0 even when LOTUS's answer
+the same model: on queries whose answer hinges on a handful of judgments ({empty} have an EMPTY
+ground truth; LOTUS admitted {lotus_rows} rows) any disagreement scores 0 even when LOTUS's answer
 is a perfectly reasonable reading. Its macro therefore measures verdict agreement with PLOP's samples as
 much as correctness; the calls / latency / cost columns are the like-for-like comparison. BlendSQL (our
 mechanical translation, translate_to_blendsql.py; zero-shot; cost estimated from its token counts) is in
-the same position as LOTUS: independent samples. ThalamusDB (our formulation, thalamusdb_queries/; exact
-mode under SemBench's runner settings; cost estimated from its token counts) likewise; Q1-Q3's
-classification runs as a CASE cascade of its boolean filters. Palimpzest (Abacus optimizer; the LOTUS
+the same position as LOTUS: independent samples. Palimpzest (Abacus optimizer; the LOTUS
 programs with their semantic operators served by Palimpzest; cost estimated from its token counts) likewise.
 
 """
@@ -51,10 +49,20 @@ def table_header():
     return "| q | " + " | ".join(cols) + " |\n|---|" + "---|" * len(cols)
 
 
+def run_days(per_query):
+    days = sorted({(r.get("ran_at") or "")[:10] for r in per_query.values()} - {""})
+    return "undated" if not days else days[0] if len(days) == 1 else f"{days[0]} to {days[-1]}"
+
+
 def main():
     runs = {name: json.load(open(os.path.join(HERE, "results", tag + "_agentbench_results.json")))["per_query"]
             for name, tag in SYSTEMS}
-    lines = [HEADER.format(today=date.today().isoformat(), swan_tag=SWAN_TAG).rstrip("\n"), table_header()]
+    # the header's facts are read from the result files, so a regenerated table never cites an older run
+    empty = [f"Q{i}" for i in range(1, 31) if not sum(ev.scorer.load_rows(ev.GT_TAG, f"Q{i}")[1].values())]
+    lotus_rows = " / ".join(f"{sum(ev.scorer.load_rows('lotus', q)[1].values()):,}" for q in empty)
+    lines = [HEADER.format(today=date.today().isoformat(), swan_tag=SWAN_TAG, runs=", ".join(
+        f"{name} {run_days(runs[name])}" for name, _ in SYSTEMS), empty="/".join(empty),
+        lotus_rows=lotus_rows).rstrip("\n"), "", table_header()]
     q_sum = {n: [] for n, _ in SYSTEMS}
     tot = {n: {"calls": 0, "lat": 0.0, "cost": 0.0} for n, _ in SYSTEMS}
     for i in range(1, 31):

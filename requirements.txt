@@ -6,4 +6,4 @@ pandas>=2.0            # aisql-bench scorers / result tables
 # Embedding server (serve/ai_embed_server.py) -- pick ONE:
 #   requirements-embed-st.txt   any host: CLIP clip-ViT-B-32 via sentence-transformers (text + image)  [default]
 #   requirements-embed-mlx.txt  Apple Silicon only: the same CLIP model via mlx-embeddings (AI_EMBED_BACKEND=mlx) [optional]
-# LOTUS baselines (aisql-bench/*/lotus_*.py): requirements-lotus.txt
+# LOTUS baselines (aisql-bench/*/lotus_*.py): their own environment, aisql-bench/setup_lotus.sh (requirements-lotus.txt)

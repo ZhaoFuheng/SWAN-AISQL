@@ -34,11 +34,26 @@ exec(compile(scorer_src, "score_agentbench.py", "exec"), scorer.__dict__)
 LIMITS = json.load(open(os.path.join(HERE, "plop_gt_queries", "output_limits.json")))
 
 
+_RECORDS = {}
+
+
+def record(system, q):
+    """The runner's own record of this query (results/<system>_agentbench_results.json); {} if there is none."""
+    if system not in _RECORDS:
+        path = os.path.join(HERE, "results", system + "_agentbench_results.json")
+        _RECORDS[system] = json.load(open(path)).get("per_query", {}) if os.path.exists(path) else {}
+    return _RECORDS[system].get(q) or {}
+
+
 def score(system, q):
     """(score, note) for one query."""
     gt_cols, _ = scorer.load_rows(GT_TAG, q)
     if gt_cols is None:
         return None, "no ground truth"
+    # A query the system could not run scores 0, whatever file its runner left: a failed query writes an empty
+    # result, which read as "ran and returned no rows" and scored 1.000 (BlendSQL Q6-Q9 until 2026-11-20).
+    if record(system, q).get("error"):
+        return 0.0, "the query failed in this system"
     cols, rows = scorer.load_rows(system, q, cols=gt_cols)
     # A system whose output cannot be PARSED must not score: with cols=None the shared column list
     # is empty, the ground truth projects to an empty multiset, and empty-vs-empty scored 1.000 --
@@ -48,6 +63,12 @@ def score(system, q):
     if not gt_cols:
         _, actual = scorer.load_rows(system, q)
         return (1.0, "both empty") if not actual else (0.0, "gt empty, system returned rows")
+    if not cols:
+        # an EMPTY system result (no header): no shared column, so both sides would project to empty multisets
+        # and score 1.000; judge it against the unprojected ground truth instead
+        _, gt_all = scorer.load_rows(GT_TAG, q)
+        if gt_all:
+            return 0.0, "system returned no rows, the ground truth has rows"
 
     shared = [c for c in gt_cols if cols and c in cols]
     _, gt_rows = scorer.load_rows(GT_TAG, q, cols=shared) if shared else (None, Counter())

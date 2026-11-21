@@ -12,7 +12,7 @@ def run(load, lm):
     nation = load("nation")
     customer = load("customer")
 
-    customer_sample = customer.head(120)
+    customer_sample = customer.sort_values("c_custkey", kind="stable").head(120)  # ORDER BY c_custkey LIMIT 120
 
     od = pd.to_datetime(orders["o_orderdate"])
     o = orders[

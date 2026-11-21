@@ -15,6 +15,7 @@ CREATE VIEW IF NOT EXISTS region   AS SELECT * FROM './dataset/tpch/region.parqu
 CREATE TEMP TABLE customer_sample AS
 SELECT *
 FROM customer
+ORDER BY c_custkey
 LIMIT 180;
 
 WITH

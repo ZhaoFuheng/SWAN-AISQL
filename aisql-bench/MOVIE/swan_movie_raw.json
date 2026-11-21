@@ -26206,20 +26206,8 @@
  "q10": {
   "predicted": [
    [
-    "ant_man_and_the_wasp_quantumania",
-    "2.7578125"
-   ],
-   [
-    "la_la_land",
-    "4.333333333333333"
-   ],
-   [
     "thor_love_and_thunder",
     "2.6153846153846154"
-   ],
-   [
-    "elvis",
-    "3.0"
    ],
    [
     "roma_2018",
@@ -26230,60 +26218,16 @@
     "5.0"
    ],
    [
-    "the_invisible_man_2020",
-    "4.285714285714286"
-   ],
-   [
     "moonlight_2016",
     "4.4"
-   ],
-   [
-    "mad_max_fury_road",
-    "3.7857142857142856"
-   ],
-   [
-    "blue_is_the_warmest_color",
-    "4.166666666666667"
    ],
    [
     "rocketman_2019",
     "4.0"
    ],
    [
-    "marriage_story_2019",
-    "3.2"
-   ],
-   [
-    "i_tonya",
-    "4.2"
-   ],
-   [
-    "black_panther_2018",
-    "4.5227272727272725"
-   ],
-   [
-    "nomadland",
-    "4.090909090909091"
-   ],
-   [
     "mission_impossible_fallout",
     "4.466666666666667"
-   ],
-   [
-    "captain_america_civil_war",
-    "4.3"
-   ],
-   [
-    "avengers_infinity_war",
-    "3.8947368421052633"
-   ],
-   [
-    "suicide_squad_2016",
-    "1.0"
-   ],
-   [
-    "shazam",
-    "4.142857142857143"
    ],
    [
     "incredibles_2",
@@ -26298,20 +26242,8 @@
     "4.222222222222222"
    ],
    [
-    "deadpool_2",
-    "4.125"
-   ],
-   [
     "jurassic_world_dominion",
     "2.8"
-   ],
-   [
-    "no_time_to_die_2021",
-    "3.4"
-   ],
-   [
-    "first_man",
-    "3.875"
    ],
    [
     "top_gun_maverick",
@@ -26320,6 +26252,34 @@
    [
     "star_wars_the_rise_of_skywalker",
     "3.0476190476190474"
+   ],
+   [
+    "arrival_2016",
+    "3.933333333333333"
+   ],
+   [
+    "jojo_rabbit",
+    "3.6363636363636362"
+   ],
+   [
+    "toy_story_4",
+    "4.260869565217392"
+   ],
+   [
+    "black_panther_wakanda_forever",
+    "3.5454545454545454"
+   ],
+   [
+    "prairie_home_companion",
+    "3.4"
+   ],
+   [
+    "west_side_story_2021",
+    "4.75"
+   ],
+   [
+    "first_man",
+    "3.875"
    ],
    [
     "2012",
@@ -26342,14 +26302,6 @@
     "3.8823529411764706"
    ],
    [
-    "arrival_2016",
-    "3.933333333333333"
-   ],
-   [
-    "jojo_rabbit",
-    "3.6363636363636362"
-   ],
-   [
     "blackkklansman",
     "4.157894736842105"
    ],
@@ -26358,32 +26310,96 @@
     "4.166666666666667"
    ],
    [
-    "toy_story_4",
-    "4.260869565217392"
-   ],
-   [
-    "black_panther_wakanda_forever",
-    "3.5454545454545454"
-   ],
-   [
     "the_irishman",
     "4.428571428571429"
    ],
    [
-    "prairie_home_companion",
+    "ant_man_and_the_wasp_quantumania",
+    "2.7578125"
+   ],
+   [
+    "la_la_land",
+    "4.333333333333333"
+   ],
+   [
+    "elvis",
+    "3.0"
+   ],
+   [
+    "the_invisible_man_2020",
+    "4.285714285714286"
+   ],
+   [
+    "mad_max_fury_road",
+    "3.7857142857142856"
+   ],
+   [
+    "blue_is_the_warmest_color",
+    "4.166666666666667"
+   ],
+   [
+    "marriage_story_2019",
+    "3.2"
+   ],
+   [
+    "i_tonya",
+    "4.2"
+   ],
+   [
+    "black_panther_2018",
+    "4.5227272727272725"
+   ],
+   [
+    "nomadland",
+    "4.090909090909091"
+   ],
+   [
+    "captain_america_civil_war",
+    "4.3"
+   ],
+   [
+    "avengers_infinity_war",
+    "3.8947368421052633"
+   ],
+   [
+    "suicide_squad_2016",
+    "1.0"
+   ],
+   [
+    "shazam",
+    "4.142857142857143"
+   ],
+   [
+    "deadpool_2",
+    "4.125"
+   ],
+   [
+    "no_time_to_die_2021",
     "3.4"
-   ],
-   [
-    "west_side_story_2021",
-    "4.75"
-   ],
-   [
-    "captain_marvel",
-    "3.723404255319149"
    ],
    [
     "jurassic_world_fallen_kingdom",
     "3.0833333333333335"
+   ],
+   [
+    "cruella",
+    "3.5"
+   ],
+   [
+    "snow_white_and_the_huntsman",
+    "2.84375"
+   ],
+   [
+    "halloween_2018",
+    "3.6"
+   ],
+   [
+    "glass_onion_a_knives_out_mystery",
+    "4.2"
+   ],
+   [
+    "captain_marvel",
+    "3.723404255319149"
    ],
    [
     "the_revenant_2015",
@@ -26406,32 +26422,12 @@
     "4.076923076923077"
    ],
    [
-    "cruella",
-    "3.5"
-   ],
-   [
-    "snow_white_and_the_huntsman",
-    "2.84375"
-   ],
-   [
     "doctor_strange_2016",
     "3.4"
    ],
    [
-    "halloween_2018",
-    "3.6"
-   ],
-   [
     "stillwater_2020",
     "4.0"
-   ],
-   [
-    "glass_onion_a_knives_out_mystery",
-    "4.2"
-   ],
-   [
-    "star_wars_the_last_jedi",
-    "4.378378378378378"
    ],
    [
     "everything_everywhere_all_at_once",
@@ -26454,12 +26450,16 @@
     "1.6666666666666667"
    ],
    [
-    "the_favourite_2018",
-    "3.888888888888889"
-   ],
-   [
     "bohemian_rhapsody",
     "2.857142857142857"
+   ],
+   [
+    "star_wars_the_last_jedi",
+    "4.378378378378378"
+   ],
+   [
+    "the_favourite_2018",
+    "3.888888888888889"
    ],
    [
     "catch_me_if_you_can",
@@ -26470,8 +26470,64 @@
     "4.8"
    ],
    [
-    "solo_a_star_wars_story",
-    "3.611111111111111"
+    "get_out",
+    "4.4"
+   ],
+   [
+    "booksmart",
+    "3.8"
+   ],
+   [
+    "ready_player_one",
+    "3.3333333333333335"
+   ],
+   [
+    "parasite_2019",
+    "4.555555555555555"
+   ],
+   [
+    "spider_man_homecoming",
+    "4.6"
+   ],
+   [
+    "doctor_strange_in_the_multiverse_of_madness",
+    "2.789473684210526"
+   ],
+   [
+    "1193230-state_of_play",
+    "3.875"
+   ],
+   [
+    "a_quiet_place_2018",
+    "3.8"
+   ],
+   [
+    "it_2017",
+    "4.0"
+   ],
+   [
+    "joker_2019",
+    "3.1153846153846154"
+   ],
+   [
+    "dune_2021",
+    "3.875"
+   ],
+   [
+    "eternals",
+    "1.8"
+   ],
+   [
+    "wonder_woman_2017",
+    "4.575757575757576"
+   ],
+   [
+    "birds_of_prey_2020",
+    "3.6875"
+   ],
+   [
+    "alien_covenant",
+    "3.0"
    ],
    [
     "dunkirk_2017",
@@ -26494,10 +26550,6 @@
     "4.4375"
    ],
    [
-    "aquaman_2018",
-    "2.857142857142857"
-   ],
-   [
     "ad_astra",
     "3.8"
    ],
@@ -26514,6 +26566,14 @@
     "3.6"
    ],
    [
+    "solo_a_star_wars_story",
+    "3.611111111111111"
+   ],
+   [
+    "aquaman_2018",
+    "2.857142857142857"
+   ],
+   [
     "black_widow_2021",
     "3.590909090909091"
    ],
@@ -26522,76 +26582,12 @@
     "4.1"
    ],
    [
-    "get_out",
-    "4.4"
-   ],
-   [
-    "booksmart",
-    "3.8"
-   ],
-   [
-    "joker_2019",
-    "3.1153846153846154"
-   ],
-   [
-    "dune_2021",
-    "3.875"
-   ],
-   [
-    "ready_player_one",
-    "3.3333333333333335"
-   ],
-   [
-    "eternals",
-    "1.8"
-   ],
-   [
-    "wonder_woman_2017",
-    "4.575757575757576"
-   ],
-   [
-    "birds_of_prey_2020",
-    "3.6875"
-   ],
-   [
-    "parasite_2019",
-    "4.555555555555555"
-   ],
-   [
-    "spider_man_homecoming",
-    "4.6"
-   ],
-   [
-    "doctor_strange_in_the_multiverse_of_madness",
-    "2.789473684210526"
-   ],
-   [
-    "1193230-state_of_play",
-    "3.875"
-   ],
-   [
-    "alien_covenant",
-    "3.0"
-   ],
-   [
-    "a_quiet_place_2018",
-    "3.8"
-   ],
-   [
-    "it_2017",
-    "4.0"
-   ],
-   [
     "taken_3",
     "1.775"
    ],
    [
     "spider_man_far_from_home",
     "4.136363636363637"
-   ],
-   [
-    "widows_2018",
-    "4.444444444444445"
    ],
    [
     "aladdin",
@@ -26606,10 +26602,6 @@
     "3.6666666666666665"
    ],
    [
-    "midsommar",
-    "3.4"
-   ],
-   [
     "glass_2019",
     "3.0"
    ],
@@ -26618,12 +26610,20 @@
     "3.4"
    ],
    [
-    "kong_skull_island",
-    "3.0"
-   ],
-   [
     "promising_young_woman",
     "4.0"
+   ],
+   [
+    "widows_2018",
+    "4.444444444444445"
+   ],
+   [
+    "midsommar",
+    "3.4"
+   ],
+   [
+    "kong_skull_island",
+    "3.0"
    ]
   ]
  }

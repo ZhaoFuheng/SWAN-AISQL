@@ -62,8 +62,8 @@ Return a single YES or NO, with no other words. If uncertain, return YES."""
         "o_orderdate", "o_orderpriority", "o_totalprice",
     ]]
 
-    # supplier_context: DISTINCT ps_suppkey LIMIT 80 (no ORDER BY -> first 80 in current order)
-    keys = joined[["ps_suppkey"]].drop_duplicates().head(80)
+    # supplier_context: DISTINCT ps_suppkey ORDER BY ps_suppkey LIMIT 80
+    keys = joined[["ps_suppkey"]].drop_duplicates().sort_values("ps_suppkey", kind="stable").head(80)
     sc = supplier.merge(keys, left_on="s_suppkey", right_on="ps_suppkey").drop(columns=["ps_suppkey"])
     if len(sc) > 0:
         sc = sc.sem_filter(
