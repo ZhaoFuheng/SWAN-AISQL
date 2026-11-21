@@ -8,7 +8,11 @@ normalized (strings stripped/lowercased, numbers rounded to 4 significant places
 to seconds) so dialect formatting differences don't count as errors. Duplicate rows count with
 multiplicity. Empty-vs-empty scores 1.0; empty-vs-nonempty scores 0.0.
 
-  python3 score_agentbench.py [systems...]   (default: swan plop lotus, vs plop_none)
+eval_agentbench.py is the scorer behind the published table: it reuses the row loading and F1 below and
+scores the three LIMIT queries on soundness and completeness. Run directly, this file compares every query
+by exact rows against GT_SYSTEM (default plop_gt, the LIMIT-free ground truth).
+
+  python3 score_agentbench.py [systems...]   (default: swan plop lotus)
 """
 import json
 import math
@@ -19,7 +23,7 @@ from collections import Counter
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-GT = os.environ.get("GT_SYSTEM", "plop_none")
+GT = os.environ.get("GT_SYSTEM", "plop_gt")
 
 
 def norm_val(v):
@@ -107,7 +111,9 @@ def main():
             else:
                 # re-project ground truth onto the shared columns for a fair multiset match
                 shared = [c for c in gt_cols if cols and c in cols]
-                _, gt_shared = load_rows(GT, q, cols=shared) if shared else (None, Counter())
+                # no shared column (an empty or failed result): compare with the unprojected ground truth, or
+                # empty-vs-empty would score a missing answer 1.0
+                _, gt_shared = load_rows(GT, q, cols=shared) if shared else (None, gt_rows)
                 score = f1(gt_shared, rows)
             macro[s].append(score)
             line += f"{score:>10.3f}"

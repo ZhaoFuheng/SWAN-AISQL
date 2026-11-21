@@ -84,8 +84,8 @@ None of the edits touches the optimizer (`src/optimizer/semantic.cpp`) or the SQ
 
   A LIMIT *above* a semantic function (the trailing `LIMIT k` of Q1-Q3) is left unordered: it is what lets a
   system stop early, and those queries are scored on soundness and completeness, not row identity.
-  PLOP must run these ten queries from `plop_queries/` (`PLOP_QUERY_DIR=<abs path>/AGENTBENCH/plop_queries`):
-  the fork's own `test/semantic/agent_bench/` copies are unordered. The ground truth (`results/plop_gt` =
+  `plop_agentbench.py` runs PLOP from `plop_queries/` by default; the fork's own `test/semantic/agent_bench/`
+  copies are unordered (`PLOP_QUERY_DIR` selects another folder). The ground truth (`results/plop_gt` =
   public build, `DUCKDB_SEMANTIC_MODE=none`, `plop_gt_queries/`) is generated the same way.
   The 2026-11-10 ordering changes the input of Q15-Q19, Q25, Q27 and Q28, so their ground truth and every
   system's rows for those eight queries were re-recorded on 2026-11-11; the published hybrid-bench table

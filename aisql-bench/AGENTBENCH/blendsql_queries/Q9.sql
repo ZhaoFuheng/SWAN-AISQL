@@ -40,7 +40,7 @@ Details: ',
     __b1.b__title AS title
   FROM __b1
   WHERE
-    {{LLMMap('Confirm this is French Illusions, the travel memoir where Linda Kovic-Skow recounts her au pair year with the demanding Dubois family in France\'s Loire Valley.', __b1.__p0)}} = TRUE
+    {{LLMMap('Confirm this is French Illusions, the travel memoir where Linda Kovic-Skow recounts her au pair year with the demanding Dubois family in France''s Loire Valley.', __b1.__p0)}} = TRUE
 ), reviews_filtered AS (
   SELECT
     CAST(SPLIT_PART(r.purchase_id, '_', 2) AS INT) AS purchase_idx,

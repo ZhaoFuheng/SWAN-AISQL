@@ -40,7 +40,7 @@ Details: ',
     __b1.b__title AS title
   FROM __b1
   WHERE
-    {{LLMMap('Confirm this is the second edition of Make: Electronics, the hands-on beginner\'s electronics guide from the Make magazine team that highlights colorful diagrams and step-by-step experiments.', __b1.__p0)}} = TRUE
+    {{LLMMap('Confirm this is the second edition of Make: Electronics, the hands-on beginner''s electronics guide from the Make magazine team that highlights colorful diagrams and step-by-step experiments.', __b1.__p0)}} = TRUE
 ), reviews_filtered AS (
   SELECT
     CAST(SPLIT_PART(r.purchase_id, '_', 2) AS INT) AS purchase_idx,

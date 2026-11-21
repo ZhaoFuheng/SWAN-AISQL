@@ -87,7 +87,7 @@ def _colname(tbl, name):
 
 
 def _q(s):
-    return s.replace("'", "\\'")
+    return s.replace("'", "''")
 
 
 def _rewrite_select(select, k, counter):

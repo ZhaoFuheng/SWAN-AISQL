@@ -71,7 +71,7 @@ Committed: every query (SWAN, PLOP, PLOP ground-truth, LOTUS), the harnesses, go
 suite databases (`ECOMM/ecomm.db`, `MOVIE/movie.db`, `MMQA/mmqa.db`), the agent_bench datasets
 (`AGENTBENCH/dataset/`, TPC-H sf0.005 parquet + book_review/yelp/googlelocal/stockindex), the per-run
 summaries (`*_results.json`, comparison `.md`) and the result rows of the cited runs
-(`AGENTBENCH/results/{plop,plop_gt,plop_none,lotus,blendsql,palimpzest,swan_20261111}`; the 52MB Q19 outputs are gzipped and
+(`AGENTBENCH/results/{plop,plop_gt,lotus,blendsql,palimpzest,swan_20261111}`; the 52MB Q19 outputs are gzipped and
 the scorer reads `.csv.gz`).
 
 Not committed (images, raw sources, caches):

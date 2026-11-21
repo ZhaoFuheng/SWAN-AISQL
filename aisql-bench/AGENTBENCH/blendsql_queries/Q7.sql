@@ -41,7 +41,7 @@ Details: ',
     __b1.b__title AS title
   FROM __b1
   WHERE
-    {{LLMMap('Confirm this is the Buddy the Soldier Bear children\'s picture book that follows a stuffed bear from a toy store to a battlefield, emphasizes supporting soldiers and veteran families, and is categorized under children\'s literature.', __b1.__p0)}} = TRUE
+    {{LLMMap('Confirm this is the Buddy the Soldier Bear children''s picture book that follows a stuffed bear from a toy store to a battlefield, emphasizes supporting soldiers and veteran families, and is categorized under children''s literature.', __b1.__p0)}} = TRUE
 ), reviews_filtered AS (
   SELECT
     CAST(SPLIT_PART(r.purchase_id, '_', 2) AS INT) AS purchase_idx,

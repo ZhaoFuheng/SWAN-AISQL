@@ -84,7 +84,7 @@ tables that mix text and images). BlendSQL and PLOP take no images.
 | | macro-F1 | calls | cost | latency |
 |---|---|---|---|---|
 | LOTUS 1.2.4 | 0.632* | 25,741 | $2.90 | 1,789 s |
-| BlendSQL 0.1.27 | 0.747* | 24,631 | $2.76 | 1,922 s |
+| BlendSQL 0.1.27 | 0.714* | 25,441 | $2.91 | 1,954 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.735* | 25,777 | $6.82 | 2,040 s |
 | PLOP-DP | 1.000 | 13,328 | $0.50 | 905 s |
 | **SWAN-AISQL** | **1.000** | **10,997** | **$0.28** | **731 s** |
