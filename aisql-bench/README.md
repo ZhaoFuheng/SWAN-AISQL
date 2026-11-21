@@ -231,6 +231,10 @@ repository. The 120 queries are also kept here under `SWAN2/`.
   recordings: `PYTHONHASHSEED=0` (its system prompt lists an operator's input types in set order), its
   sequential executor for MMQA q5 (one call over sixteen rows, which must arrive in table order) and a
   tie-break by image id in ECOMM q14 (our program). The runners set all three.
+- **SWAN-AISQL (Jev)** is `run_sembench_typesafe.sh`: `SET ai_typesafe='filter,classify'` (MOVIE:
+  `'filter,classify,score'`) with model `jev-latest`; image-bearing prompts, `ai_complete` and `ai_agg` stay on
+  `gpt-5.6-luna`. Its recorded TypeSafe answers replay from the store like any other call. Per query:
+  `typesafe_comparison_20261120.md`.
 - **MOVIE.** Quality = the suite's macro F1 / count accuracy / Spearman. Palimpzest runs SemBench's own
   Palimpzest programs under its Abacus optimizer; its latency is the execution time it reports per query,
   without the start-up of its own interpreter. Four queries (q1, q2, q5, q6) end in a LIMIT with no ORDER BY.

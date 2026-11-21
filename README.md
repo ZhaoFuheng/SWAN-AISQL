@@ -44,7 +44,10 @@ database: five of its questions, each with the model calls it cost, and a LIMIT 
 ## Results
 
 Every system runs with `gpt-5.6-luna`, 20 requests in flight, every call through a cache proxy that records
-the answer, its latency and its cost. Quality is each benchmark's own metric; calls are model requests; cost is
+the answer, its latency and its cost. The *SWAN-AISQL (Jev)* rows are the one exception: the same engine under
+[`SET ai_typesafe`](docs/SETTINGS.md), where TypeSafe's Jev answers the text filters and classifications (on MOVIE
+also the bounded scores) and `gpt-5.6-luna` the rest ([per query](aisql-bench/typesafe_comparison_20261120.md)).
+Quality is each benchmark's own metric; calls are model requests; cost is
 the provider's price for them; latency is wall-clock over the suite's queries run one after the other. Every
 row is a replay of the recorded calls on one machine (a MacBook Air M5, November 2026): one system at a time, the
 proxy returning each recorded answer after its recorded response time, with no provider reachable. The
@@ -59,6 +62,7 @@ protocol behind each table, and how to rerun every system, is in [aisql-bench/RE
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.761† | 68.5k | $17.88 | 4,778 s |
 | PLOP-DP | 0.729† | 19.2k | $1.70 | 1,649 s |
 | **SWAN-AISQL** | **0.818** | 18.8k | $2.25 | 1,771 s |
+| SWAN-AISQL (Jev) | 0.795 | 18.8k | $0.39 | 458 s |
 
 †Mean of eleven replays: on MOVIE's unordered LIMIT queries these systems return whichever rows arrive first,
 so a single replay varies.
@@ -71,12 +75,14 @@ tables that mix text and images). BlendSQL and PLOP take no images.
 | LOTUS 1.2.4 | 0.639 | 17.8k | $6.41 | 1,546 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.672 | 18.2k | $16.76 | 1,397 s |
 | **SWAN-AISQL** | **0.832** | 15.8k | $6.74 | 1,448 s |
+| SWAN-AISQL (Jev) | 0.814 | 15.7k | $5.77 | 907 s |
 
 | MMQA | quality | calls | cost | latency |
 |---|---|---|---|---|
 | LOTUS 1.2.4 | 0.450 | 19.0k | $2.43 | 1,391 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.687 | 46.3k | $13.79 | 3,244 s |
 | **SWAN-AISQL** | 0.648 | 16.5k | $2.41 | 1,346 s |
+| SWAN-AISQL (Jev) | 0.599 | 14.1k | $1.93 | 1,060 s |
 
 **Hybrid bench** (the 30 agent_bench queries of the PLOP paper, from the authors' public fork
 [Morrila](https://github.com/DMoRanSky/Morrila): relational plans with semantic operators)
