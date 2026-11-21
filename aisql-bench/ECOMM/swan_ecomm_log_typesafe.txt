@@ -34,3 +34,10 @@ q12  lat=   23.3s calls=   603 fresh=    0 tok=  834323 $0.1231  n=63/58  P=0.87
 q13  lat=   45.9s calls=   500 fresh=    0 tok= 1851750 $0.3974  n=12/12  P=0.833 R=0.833 f1=0.833
 q14  lat=   51.0s calls=   536 fresh=    0 tok= 1879110 $0.3786  n=2/2  P=1.0 R=1.0 f1=1.0
 TOTAL(14q)  latency=906.6s  wall=906.7s  cost=$5.7722  tokens=35002051  fresh=0  macro-quality=0.814
+
+== 2026-11-21 02:24:24 MST ==
+SWAN ECOMM gpt-5.6-luna via http://localhost:4001  concurrency=20  sf500  serial  queries=['q9', 'q10', 'q11']
+q9   lat=   76.3s calls=   756 fresh=    0 tok= 5829100 $1.2061  n=49/46  P=0.857 R=0.913 f1=0.884
+q10  lat=   85.7s calls=   804 fresh=    0 tok= 4235664 $0.6389  n=10/8  P=0.8 R=1.0 f1=0.889
+q11  lat=  168.6s calls=  1862 fresh=    0 tok= 7924572 $1.5281  n=36/18  P=0.5 R=1.0 f1=0.667
+TOTAL(14q)  latency=830.3s  wall=330.7s  cost=$5.7726  tokens=35001987  fresh=0  macro-quality=0.814

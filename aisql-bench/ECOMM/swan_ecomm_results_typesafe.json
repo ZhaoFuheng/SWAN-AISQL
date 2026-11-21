@@ -1,7 +1,7 @@
 {
  "model": "gpt-5.6-luna",
  "concurrency": "20",
- "updated": "2026-11-19 20:44:18 MST",
+ "updated": "2026-11-21 02:24:24 MST",
  "per_query": {
   "q1": {
    "latency_s": 13.7,
@@ -140,13 +140,13 @@
    "ran_at": "2026-11-19 20:44:18 MST"
   },
   "q9": {
-   "latency_s": 134.3,
+   "latency_s": 76.3,
    "llm_calls_fresh": 0,
    "llm_calls": 756,
    "cache_hits": 0,
-   "tokens": 5829160,
-   "reasoning_tokens": 7715,
-   "cost_usd": 1.20619,
+   "tokens": 5829100,
+   "reasoning_tokens": 7671,
+   "cost_usd": 1.20612,
    "n_out": 49,
    "n_gold": 46,
    "precision": 0.857,
@@ -154,16 +154,16 @@
    "metric": "f1",
    "quality": 0.884,
    "error": null,
-   "ran_at": "2026-11-19 20:44:18 MST"
+   "ran_at": "2026-11-21 02:24:24 MST"
   },
   "q10": {
-   "latency_s": 100.4,
+   "latency_s": 85.7,
    "llm_calls_fresh": 0,
    "llm_calls": 804,
    "cache_hits": 14,
-   "tokens": 4235666,
+   "tokens": 4235664,
    "reasoning_tokens": 10146,
-   "cost_usd": 0.63831,
+   "cost_usd": 0.63888,
    "n_out": 10,
    "n_gold": 8,
    "precision": 0.8,
@@ -171,16 +171,16 @@
    "metric": "f1",
    "quality": 0.889,
    "error": null,
-   "ran_at": "2026-11-19 20:44:18 MST"
+   "ran_at": "2026-11-21 02:24:24 MST"
   },
   "q11": {
-   "latency_s": 172.2,
+   "latency_s": 168.6,
    "llm_calls_fresh": 0,
    "llm_calls": 1862,
    "cache_hits": 0,
-   "tokens": 7924574,
+   "tokens": 7924572,
    "reasoning_tokens": 17454,
-   "cost_usd": 1.52807,
+   "cost_usd": 1.52806,
    "n_out": 36,
    "n_gold": 18,
    "precision": 0.5,
@@ -188,7 +188,7 @@
    "metric": "f1",
    "quality": 0.667,
    "error": null,
-   "ran_at": "2026-11-19 20:44:18 MST"
+   "ran_at": "2026-11-21 02:24:24 MST"
   },
   "q12": {
    "latency_s": 23.3,
@@ -244,10 +244,10 @@
  },
  "total": {
   "n_queries": 14,
-  "latency_s": 906.6,
-  "sweep_wall_s": 906.7,
-  "cost_usd": 5.7722,
-  "tokens": 35002051,
+  "latency_s": 830.3,
+  "sweep_wall_s": 330.7,
+  "cost_usd": 5.7726,
+  "tokens": 35001987,
   "llm_calls_fresh": 0,
   "macro_quality": 0.814
  }

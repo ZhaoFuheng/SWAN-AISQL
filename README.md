@@ -61,7 +61,7 @@ protocol behind each table, and how to rerun every system, is in [aisql-bench/RE
 | BlendSQL 0.1.27 | 0.718† | 18.7k | $1.44 | 1,163 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.761† | 68.5k | $17.88 | 4,778 s |
 | PLOP-DP | 0.729† | 19.2k | $1.70 | 1,649 s |
-| **SWAN-AISQL** | **0.818** | 18.8k | $2.25 | 1,771 s |
+| **SWAN-AISQL** | **0.818** | 18.8k | $2.25 | 1,487 s |
 | SWAN-AISQL (Jev) | 0.795 | 18.8k | $0.39 | 458 s |
 
 †Mean of eleven replays: on MOVIE's unordered LIMIT queries these systems return whichever rows arrive first,
@@ -74,15 +74,15 @@ tables that mix text and images). BlendSQL and PLOP take no images.
 |---|---|---|---|---|
 | LOTUS 1.2.4 | 0.639 | 17.8k | $6.41 | 1,546 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.672 | 18.2k | $16.76 | 1,397 s |
-| **SWAN-AISQL** | **0.832** | 15.8k | $6.74 | 1,448 s |
-| SWAN-AISQL (Jev) | 0.814 | 15.7k | $5.77 | 907 s |
+| **SWAN-AISQL** | **0.832** | 15.7k | $6.74 | 1,221 s |
+| SWAN-AISQL (Jev) | 0.814 | 15.7k | $5.77 | 830 s |
 
 | MMQA | quality | calls | cost | latency |
 |---|---|---|---|---|
 | LOTUS 1.2.4 | 0.450 | 19.0k | $2.43 | 1,391 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.687 | 46.3k | $13.79 | 3,244 s |
-| **SWAN-AISQL** | 0.648 | 16.5k | $2.41 | 1,346 s |
-| SWAN-AISQL (Jev) | 0.599 | 14.1k | $1.93 | 1,060 s |
+| **SWAN-AISQL** | 0.648 | 16.5k | $2.41 | 1,261 s |
+| SWAN-AISQL (Jev) | 0.599 | 14.1k | $1.93 | 1,005 s |
 
 **Hybrid bench** (the 30 agent_bench queries of the PLOP paper, from the authors' public fork
 [Morrila](https://github.com/DMoRanSky/Morrila): relational plans with semantic operators)
@@ -105,16 +105,16 @@ every system plans itself)
 | | quality | calls | cost | latency |
 |---|---|---|---|---|
 | LOTUS 1.2.4 | 0.752 | 69,204 | $4.04 | 4,026 s |
-| BlendSQL 0.1.27 | 0.761 | 59,620 | $4.95 | 4,961 s |
+| BlendSQL 0.1.27 | 0.761 | 59,620 | $4.95 | 4,958 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.778 | 70,925 | $9.81 | 5,202 s |
 | PLOP-DP | 0.698 | 25,639 | $1.11 | 10,208 s |
-| **SWAN-AISQL** | 0.777 | **18,751** | **$2.01** | **1,927 s** |
+| **SWAN-AISQL** | 0.777 | **18,747** | **$2.01** | **1,688 s** |
 
 Quality is at parity among LOTUS, BlendSQL, Palimpzest and SWAN (the model's verdicts bound it); calls, cost
 and latency are the separation.
 
 **Reproducing the tables.** The recorded answers of every system on every benchmark live in one store,
-`serve/.llm_cache.duckdb` (2.5 M recorded calls, 4.7 GB), which the cache proxy serves to any of them, so a
+`serve/.llm_cache.duckdb` (2.5 M recorded calls, 4.8 GB), which the cache proxy serves to any of them, so a
 replay reproduces a table at zero cost and needs no key. The store is published on Zenodo
 ([10.5281/zenodo.23112764](https://doi.org/10.5281/zenodo.23112764); the DOI resolves to the latest version, which
 is the one behind the tables above); `serve/fetch_cache.sh` downloads, checks and unpacks it (1.0 GB download). The

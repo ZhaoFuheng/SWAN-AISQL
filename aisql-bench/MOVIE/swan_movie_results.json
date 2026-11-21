@@ -1,7 +1,7 @@
 {
  "model": "gpt-5.6-luna",
  "concurrency": "20",
- "updated": "2026-11-11 06:46:23 MST",
+ "updated": "2026-11-21 03:13:44 MST",
  "per_query": {
   "q1": {
    "latency_s": 3.6,
@@ -100,20 +100,20 @@
    "ran_at": "2026-11-11 06:46:23 MST"
   },
   "q7": {
-   "latency_s": 1587.5,
+   "latency_s": 1333.0,
    "llm_calls_fresh": 0,
-   "llm_calls": 16290,
+   "llm_calls": 16256,
    "cache_hits": 0,
-   "tokens": 4251185,
-   "reasoning_tokens": 447543,
-   "cost_usd": 2.01925,
-   "n_out": 33900,
+   "tokens": 4242957,
+   "reasoning_tokens": 447135,
+   "cost_usd": 2.01586,
+   "n_out": 33908,
    "n_gold": 32736,
    "precision": 0.723,
    "recall": 0.829,
    "quality": 0.772,
    "error": null,
-   "ran_at": "2026-11-11 06:46:23 MST"
+   "ran_at": "2026-11-21 03:13:44 MST"
   },
   "q8": {
    "latency_s": 5.7,
@@ -148,28 +148,28 @@
    "ran_at": "2026-11-11 06:46:23 MST"
   },
   "q10": {
-   "latency_s": 131.1,
+   "latency_s": 101.1,
    "llm_calls_fresh": 0,
    "llm_calls": 1864,
    "cache_hits": 0,
-   "tokens": 553669,
-   "reasoning_tokens": 38382,
-   "cost_usd": 0.17672,
+   "tokens": 553616,
+   "reasoning_tokens": 38335,
+   "cost_usd": 0.17666,
    "n_out": 105,
    "n_gold": 116,
    "precision": 0.426,
    "recall": 0.3,
    "quality": 0.426,
    "error": null,
-   "ran_at": "2026-11-11 06:46:23 MST"
+   "ran_at": "2026-11-21 03:13:44 MST"
   }
  },
  "total": {
   "n_queries": 10,
-  "latency_s": 1771.2,
-  "sweep_wall_s": 1771.2,
-  "cost_usd": 2.2512,
-  "tokens": 4939244,
+  "latency_s": 1486.7,
+  "sweep_wall_s": 1434.1,
+  "cost_usd": 2.2477,
+  "tokens": 4930963,
   "llm_calls_fresh": 0,
   "macro_quality": 0.818
  }

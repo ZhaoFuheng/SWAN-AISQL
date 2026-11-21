@@ -1,7 +1,7 @@
 {
   "model": "gpt-5.6-luna",
   "concurrency": "20",
-  "updated": "2026-11-20 10:12:42 MST",
+  "updated": "2026-11-21 02:44:36 MST",
   "per_query": {
     "q1": {
       "latency_s": 2.0,
@@ -164,27 +164,27 @@
       "ran_at": "2026-11-20 10:12:42 MST"
     },
     "q7": {
-      "latency_s": 829.2,
+      "latency_s": 774.1,
       "llm_calls_fresh": 0,
-      "llm_calls": 10781,
+      "llm_calls": 10776,
       "cache_hits": 2400,
-      "tokens": 5278435,
-      "reasoning_tokens": 107626,
-      "cost_usd": 1.53325,
+      "tokens": 5276487,
+      "reasoning_tokens": 107576,
+      "cost_usd": 1.53262,
       "n_out": 149,
       "n_gold": 5,
       "precision": 0.045,
       "recall": 1.0,
       "f1": 0.086,
       "error": null,
-      "ran_at": "2026-11-20 10:12:42 MST"
+      "ran_at": "2026-11-21 02:44:36 MST"
     }
   },
   "total": {
     "n_queries": 11,
-    "latency_s": 1059.9,
-    "cost_usd": 1.9338,
-    "tokens": 6932963,
+    "latency_s": 1004.8,
+    "cost_usd": 1.9332,
+    "tokens": 6931015,
     "macro_f1": 0.599
   }
 }

@@ -123,7 +123,7 @@ recorded prompts replays answers, latency and cost for free; a first run with a 
 the provider.
 
 **SemBench MOVIE** (10 queries over 2,000 Rotten Tomatoes reviews; data, queries, gold answers and every
-system's recorded results are in the repo). SWAN (about 30 minutes replayed; $2.25 recorded):
+system's recorded results are in the repo). SWAN (about 25 minutes replayed; $2.25 recorded):
 
 ```sh
 cd aisql-bench/MOVIE

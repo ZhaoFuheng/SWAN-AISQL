@@ -26,3 +26,7 @@ q6b   lat=  16.3s calls=  176 fresh=   0 tok=  36594 $0.0230  n=1/1  P=1.0 R=1.0
 q6c   lat=  16.3s calls=  176 fresh=   0 tok=  37199 $0.0237  n=5/5  P=1.0 R=1.0 F1=1.0
 q7    lat=1059.0s calls=13184 fresh=   0 tok=6433327 $1.9130  n=222/5  P=0.03 R=1.0 F1=0.059
 TOTAL(11q)  latency=1345.5s  cost=$2.409  tokens=7871006  macro-F1=0.648
+
+=== 2026-11-21 02:57:30 MST  SWAN gpt-5.6-luna via http://localhost:4001  concurrency=20  queries=['q7'] ===
+q7    lat= 974.1s calls=13176 fresh=   0 tok=6430381 $1.9121  n=222/5  P=0.03 R=1.0 F1=0.059
+TOTAL(11q)  latency=1260.6s  cost=$2.408  tokens=7868060  macro-F1=0.648
