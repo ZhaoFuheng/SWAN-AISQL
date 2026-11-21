@@ -1,0 +1,501 @@
+# name: test/sql/functions/null_prompt_rule.test
+# description: The NULL rule for a prompt built from columns, per function and per way of writing the prompt.
+# group: [functions]
+
+#              The rule: a row whose inputs are ALL NULL has nothing to judge, so the answer is NULL and no
+#              call is made; a row with at least one input present is judged on what it has (a missing
+#              input reads as the empty string).
+#
+#              Part 1: the rule holds for every function that takes a prompt (ai_filter, ai_classify,
+#              ai_complete, ai_score) and for every way of joining the inputs: ||, concat(), concat_ws(),
+#              with an input that is a text column, a number, a cast, a function call or arithmetic
+#              (null_prompt_columns.test has the ai_filter || case and the explicit COALESCE).
+#
+#              Part 2: where the rule deliberately does not reach, and the prompt keeps plain SQL semantics:
+#              an input that deals with NULL itself is the query's own decision; an image cannot be left
+#              out of a question about it; a volatile input would be evaluated twice; a prompt that is not a
+#              concatenation has no operands to leave out.
+#
+#              Rows: 1 = both inputs, 2 = only the first, 3 = only the second, 4 = neither. Each check reads
+#              which rows came back NULL and how many calls were made.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE t AS
+SELECT 1 AS id, 'alpha' AS a, 'beta' AS b, 10 AS n, 'http://example.invalid/1.png' AS img UNION ALL
+SELECT 2, 'gamma', NULL, NULL, NULL UNION ALL
+SELECT 3, NULL, 'delta', 30, 'http://example.invalid/3.png' UNION ALL
+SELECT 4, NULL, NULL, NULL, NULL;
+
+# ---------------------------------------------------------------------------------------------------------
+# Part 1: the rule, per function
+# ---------------------------------------------------------------------------------------------------------
+
+# ai_classify, a || b
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_classify('C '||a||' / '||b, ['red', 'blue']) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	false
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# ai_complete, a || b
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_complete('[p=100] w '||a||' / '||b) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	false
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# ai_score, a || b: one missing input used to erase the whole input
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_score('[p=50] S '||a||' / '||b) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	false
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# ai_score with a criterion, a || b
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_score(a||' / '||b, 'quality') IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	false
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# ai_score in a WHERE: the three rows with something to judge are scored, the empty one drops
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT id FROM t WHERE ai_score('[p=50] S '||a||' / '||b) >= 0 ORDER BY id;
+----
+1
+2
+3
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# one input: a missing input is a row with nothing to judge (ai_filter, then ai_score)
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_filter('[p=100] keep? '||a) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	true
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+2
+
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_score('[p=50] S '||a) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	true
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+2
+
+# ---------------------------------------------------------------------------------------------------------
+# Part 1, continued: the rule, per way of writing the prompt
+# ---------------------------------------------------------------------------------------------------------
+
+# concat(a, b): concat() ignores NULLs by itself, so without the rule the row with NO input would be sent
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_filter(concat('[p=100] keep? ', a, ' / ', b)) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	false
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# the same for ai_score
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_score(concat('[p=50] S ', a, ' / ', b)) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	false
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# concat_ws(a, b)
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_filter(concat_ws(' / ', '[p=100] keep?', a, b)) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	false
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# a || n with n an INTEGER column: the binder casts the number before it is joined
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_filter('[p=100] keep? '||a||' / '||n) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	false
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# a || n::VARCHAR: an explicit cast
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_filter('[p=100] keep? '||a||' / '||n::VARCHAR) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	false
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# upper(a) || b: an input inside a function call
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_filter('[p=100] keep? '||upper(a)||' / '||b) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	false
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# the same prompt in a WHERE
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+SELECT id FROM t WHERE ai_filter('[p=100] keep? '||upper(a)||' / '||b) ORDER BY id;
+----
+1
+2
+3
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# substr(a, 1, 3) || b, for another function
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_complete('[p=100] w '||substr(a, 1, 3)||' / '||b) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	false
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# a || (n + 1): arithmetic. The sum is computed as written and joined as text; only its absence is filled in
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_filter('[p=100] keep? '||a||' / '||(n + 1)) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	false
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# concat(upper(a), b)
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_filter(concat('[p=100] keep? ', upper(a), ' / ', b)) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	false
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# an explicit COALESCE beside a function call: the COALESCE is left as written, and its column still counts
+# as an input, so the row with nothing at all is not sent
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_filter('[p=100] keep? '||COALESCE(a, '')||' / '||upper(b)) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	false
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# the rule survives a plan copy: a CTE read twice re-binds the function on the rewritten prompt
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query I
+WITH s AS (SELECT id, ai_filter('[p=100] keep? '||upper(a)||' / '||b) AS v FROM t)
+SELECT count(*) FROM s x JOIN s y USING (id) WHERE x.v AND y.v;
+----
+3
+
+query I
+WITH s AS (SELECT id, ai_score('[p=50] S '||a||' / '||b) AS v FROM t)
+SELECT count(*) FROM s x JOIN s y USING (id) WHERE x.v IS NOT NULL AND y.v IS NOT NULL;
+----
+3
+
+# ---------------------------------------------------------------------------------------------------------
+# Part 2: where the prompt keeps plain SQL semantics
+# ---------------------------------------------------------------------------------------------------------
+
+# an input that deals with NULL itself is the query's own decision: every row is judged, as written
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_filter('[p=100] keep? '||CASE WHEN a IS NULL THEN 'unknown' ELSE a END) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	false
+3	false
+4	false
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+3
+
+# an image is not text that can be left out: a row without its image, or without its text, is not asked
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_filter('[p=100] keep? '||a||' '||ai_image(img)) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	true
+3	true
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+1
+
+# a volatile input would be evaluated twice (once for the test, once for the text): left alone
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_filter('[p=100] keep? '||a||' / '||CASE WHEN random() < 2.0 THEN b END) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	true
+3	true
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+1
+
+# a prompt that is not a concatenation has no operands to leave out
+statement ok
+SELECT ai_usage_reset();
+
+statement ok
+SELECT ai_local_cache_clear();
+
+query II
+SELECT id, ai_filter(format('[p=100] keep? {} / {}', a, b)) IS NULL FROM t ORDER BY id;
+----
+1	false
+2	true
+3	true
+4	true
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+1

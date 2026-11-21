@@ -151,6 +151,8 @@ proxy runs). Failed answers are never cached, so the next query retries. `SET ai
 exponential backoff) bounds the wait. A request that gets no answer is a `NULL` result on every path alike (a
 scalar call, the region's dispatcher, a factor graph), so a filter drops the row, `NOT ai_filter(...)` never
 passes it, and `ai_filter(...) IS NULL` is true for it. A `NULL` prompt is a `NULL` answer too, without a call.
+A prompt joined from several inputs (`||`, `concat`) is `NULL` only when all of them are: a row with some of its
+inputs is still asked, with each missing one read as an empty string.
 
 ### Settings
 

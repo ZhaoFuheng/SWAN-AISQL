@@ -322,9 +322,10 @@ static bool IsConcatCall(const Expression &expr) {
 //! the predicate then sees nothing at all -- not even the columns that DID have values.
 //!
 //! Only column refs sitting directly under a concat are touched, and only when EVERY column ref in
-//! the prompt is in that position; anything used arithmetically (`'x' || (a + 1)`) is left alone,
-//! since coalescing it to a string would change what is computed. Non-VARCHAR columns are cast
-//! first, which is what the concatenation would have done anyway.
+//! the prompt is in that position; a column used arithmetically (`'x' || (a + 1)`) is left alone,
+//! since coalescing it to a string would change what is computed (such a prompt is
+//! CoalesceConcatOperands' case: the whole operand is coalesced there, not the column). Non-VARCHAR
+//! columns are cast first, which is what the concatenation would have done anyway.
 //!
 //! Already-coalesced refs are skipped, so this is idempotent under re-binding like the rest of
 //! AIKeyBind.
@@ -360,6 +361,151 @@ static bool CoalesceConcatColumns(ClientContext &context, unique_ptr<Expression>
 		}
 	});
 	return changed;
+}
+
+//! Does `expr` read a column?
+static bool AIReadsColumn(Expression &expr) {
+	if (expr.GetExpressionType() == ExpressionType::BOUND_COLUMN_REF) {
+		return true;
+	}
+	bool found = false;
+	ExpressionIterator::EnumerateChildren(expr, [&](Expression &child) { found = found || AIReadsColumn(child); });
+	return found;
+}
+
+//! Does `expr` hold an ai_image() call? An image is not text that can be left out of a prompt: a question about
+//! a picture without the picture is a different question.
+static bool AIHoldsImage(Expression &expr) {
+	if (expr.GetExpressionClass() == ExpressionClass::BOUND_FUNCTION &&
+	    expr.Cast<BoundFunctionExpression>().Function().GetName() == "ai_image") {
+		return true;
+	}
+	bool found = false;
+	ExpressionIterator::EnumerateChildren(expr, [&](Expression &child) { found = found || AIHoldsImage(child); });
+	return found;
+}
+
+//! The same rule for a prompt CoalesceConcatColumns leaves alone because one of its columns does not sit
+//! directly in the concatenation: a number (`'x' || n`: the binder puts a cast between them), an explicit cast,
+//! a function call (`upper(a)`, `substr(a, 1, 500)`), arithmetic (`n + 1`). The prompt's inputs are then the
+//! row-varying OPERANDS of its top-level concatenation, whatever their shape: each becomes COALESCE(operand, ''),
+//! so a missing input reads as the empty string, and `inputs` receives what must ALL be NULL for the row to have
+//! nothing to judge. Nothing inside an operand is touched, so what an operand computes is unchanged, and an
+//! operand that deals with NULL itself (CASE WHEN a IS NULL THEN 'unknown' ...) keeps doing so. An operand that
+//! is already a COALESCE -- the user's own, or an earlier bind's -- is left as it is and stands in `inputs` with
+//! the expressions it guards.
+//!
+//! `safe` turns false where the rule cannot be applied without changing what the query does, and the prompt
+//! then keeps plain SQL semantics: a volatile operand or one holding a subquery would be evaluated twice (once
+//! for the test, once for the text) and a nested AI call asked twice; an image cannot be left out (AIHoldsImage);
+//! a concat_ws separator read from a column is not an input.
+static bool CoalesceConcatOperands(ClientContext &context, unique_ptr<Expression> &expr,
+                                   vector<unique_ptr<Expression>> &inputs, bool &safe) {
+	const bool has_separator = expr->Cast<BoundFunctionExpression>().Function().GetName() == "concat_ws";
+	bool changed = false;
+	idx_t position = 0;
+	ExpressionIterator::EnumerateChildren(*expr, [&](unique_ptr<Expression> &child) {
+		const idx_t at = position++;
+		if (!safe) {
+			return;
+		}
+		if (IsConcatCall(*child)) {
+			if (CoalesceConcatOperands(context, child, inputs, safe)) {
+				changed = true;
+			}
+			return;
+		}
+		if (!AIReadsColumn(*child)) {
+			return; // constant text
+		}
+		if ((has_separator && at == 0) || child->IsVolatile() || child->HasSubquery() || AIHoldsImage(*child)) {
+			safe = false;
+			return;
+		}
+		if (child->GetExpressionType() == ExpressionType::OPERATOR_COALESCE) {
+			ExpressionIterator::EnumerateChildren(*child, [&](Expression &guarded) {
+				if (AIReadsColumn(guarded)) {
+					inputs.push_back(guarded.Copy());
+				}
+			});
+			return;
+		}
+		inputs.push_back(child->Copy());
+		auto operand = std::move(child);
+		vector<unique_ptr<Expression>> children;
+		if (operand->GetReturnType() != LogicalType::VARCHAR) {
+			children.push_back(BoundCastExpression::AddCastToType(context, std::move(operand), LogicalType::VARCHAR));
+		} else {
+			children.push_back(std::move(operand));
+		}
+		children.push_back(make_uniq<BoundConstantExpression>(Value("")));
+		auto coalesce = make_uniq<BoundOperatorExpression>(ExpressionType::OPERATOR_COALESCE, LogicalType::VARCHAR);
+		coalesce->GetChildrenMutable() = std::move(children);
+		child = std::move(coalesce);
+		changed = true;
+	});
+	return changed;
+}
+
+//! `e1 IS NULL AND ... AND en IS NULL` over copies of `exprs`.
+static unique_ptr<Expression> AIAllNull(const vector<unique_ptr<Expression>> &exprs) {
+	unique_ptr<Expression> all_null;
+	for (auto &expr : exprs) {
+		auto is_null = make_uniq<BoundOperatorExpression>(ExpressionType::OPERATOR_IS_NULL, LogicalType::BOOLEAN);
+		is_null->GetChildrenMutable().push_back(expr->Copy());
+		if (!all_null) {
+			all_null = std::move(is_null);
+		} else {
+			auto conj = make_uniq<BoundConjunctionExpression>(ExpressionType::CONJUNCTION_AND);
+			conj->GetChildrenMutable().push_back(std::move(all_null));
+			conj->GetChildrenMutable().push_back(std::move(is_null));
+			all_null = std::move(conj);
+		}
+	}
+	return all_null;
+}
+
+//! NULL handling for a prompt built from columns, expressed IN THE EXPRESSION so every evaluation path inherits
+//! it -- the scalar functions, and equally the folded reorder node, which rebuilds its prompts from this
+//! expression and would otherwise need its own copy of the rule.
+//!
+//!     CASE WHEN in1 IS NULL AND ... AND inN IS NULL THEN NULL
+//!          ELSE <prompt with each input coalesced to ''> END
+//!
+//! One missing input no longer erases the prompt: `'name: ' || a || ' desc: ' || b` is NULL in SQL if EITHER is
+//! NULL, so the predicate never saw the column that did have a value. Now it judges what is there. A row with
+//! nothing at all to judge still yields NULL -- unknown is the honest answer, and no call is made for it.
+//!
+//! The inputs are the prompt's columns where every one of them is concatenated directly (CoalesceConcatColumns:
+//! the prompt of that shape is rewritten exactly as before), and otherwise the row-varying operands of the
+//! top-level concatenation (CoalesceConcatOperands). A prompt that is not a concatenation, or one the rule
+//! cannot be applied to safely, keeps plain SQL semantics. `columns` are the prompt's distinct column refs.
+static void AIGuardNullPrompt(ClientContext &context, unique_ptr<Expression> &prompt,
+                              const vector<unique_ptr<Expression>> &columns) {
+	if (columns.empty() || !prompt) {
+		return;
+	}
+	bool all_in_concat = true;
+	auto guarded = prompt->Copy();
+	const bool rewrote = CoalesceConcatColumns(context, guarded, false, all_in_concat);
+	unique_ptr<Expression> all_null;
+	if (rewrote && all_in_concat) {
+		all_null = AIAllNull(columns);
+	} else if (IsConcatCall(*prompt)) {
+		// `rewrote == false` with every operand already a COALESCE means this expression was guarded by an
+		// earlier bind: nothing is wrapped below either, and the CASE is not nested on every re-bind.
+		guarded = prompt->Copy();
+		vector<unique_ptr<Expression>> inputs;
+		bool safe = true;
+		if (!CoalesceConcatOperands(context, guarded, inputs, safe) || !safe || inputs.empty()) {
+			return;
+		}
+		all_null = AIAllNull(inputs);
+	} else {
+		return;
+	}
+	auto null_value = make_uniq<BoundConstantExpression>(Value(LogicalType::VARCHAR));
+	prompt = make_uniq<BoundCaseExpression>(std::move(all_null), std::move(null_value), std::move(guarded));
 }
 
 //! True when the tail of `arguments` already carries `key_exprs`: a RE-BIND. DuckDB re-binds a function whenever
@@ -409,42 +555,10 @@ static unique_ptr<FunctionData> AIKeyBind(BindScalarFunctionInput &input) {
 		throw BinderException("ai_filter takes exactly one argument, the prompt (got %llu)",
 		                      static_cast<uint64_t>(arguments.size()));
 	}
-	// NULL handling for the prompt, expressed IN THE EXPRESSION so every evaluation path inherits
-	// it -- the scalar functions, and equally the folded reorder node, which rebuilds its prompts
-	// from this expression and would otherwise need its own copy of the rule.
-	//
-	//     CASE WHEN c1 IS NULL AND ... AND cn IS NULL THEN NULL
-	//          ELSE <prompt with each column coalesced to ''> END
-	//
-	// One missing column no longer erases the prompt: `'name: ' || a || ' desc: ' || b` is NULL in
-	// SQL if EITHER is NULL, so the predicate never saw the column that did have a value. Now it
-	// judges what is there. A row with nothing at all to judge still yields NULL -- unknown is the
-	// honest answer, and no call is made for it.
+	// The NULL rule for the prompt (AIGuardNullPrompt): a row with no input yields NULL and no call, a row with
+	// some input is judged on what it has.
 	if (!key_exprs.empty() && arguments[0]) {
-		bool all_in_concat = true;
-		auto guarded = arguments[0]->Copy();
-		const bool rewrote = CoalesceConcatColumns(input.GetClientContext(), guarded, false, all_in_concat);
-		// `rewrote == false` means every column ref is already coalesced: this expression was
-		// guarded by an earlier bind, and wrapping it again would nest the CASE on every re-bind.
-		if (rewrote && all_in_concat) {
-			unique_ptr<Expression> all_null;
-			for (auto &key_expr : key_exprs) {
-				auto is_null =
-				    make_uniq<BoundOperatorExpression>(ExpressionType::OPERATOR_IS_NULL, LogicalType::BOOLEAN);
-				is_null->GetChildrenMutable().push_back(key_expr->Copy());
-				if (!all_null) {
-					all_null = std::move(is_null);
-				} else {
-					auto conj = make_uniq<BoundConjunctionExpression>(ExpressionType::CONJUNCTION_AND);
-					conj->GetChildrenMutable().push_back(std::move(all_null));
-					conj->GetChildrenMutable().push_back(std::move(is_null));
-					all_null = std::move(conj);
-				}
-			}
-			auto null_value = make_uniq<BoundConstantExpression>(Value(LogicalType::VARCHAR));
-			arguments[0] =
-			    make_uniq<BoundCaseExpression>(std::move(all_null), std::move(null_value), std::move(guarded));
-		}
+		AIGuardNullPrompt(input.GetClientContext(), arguments[0], key_exprs);
 	}
 	const idx_t key_start = arguments.size();
 	const string pred_text = bound_function.GetName() == "ai_filter" && !arguments.empty() && arguments[0]
@@ -819,6 +933,13 @@ static unique_ptr<FunctionData> AIScoreBind(BindScalarFunctionInput &input) {
 	}
 	if (rebind) {
 		return make_uniq<AIScoreBindData>(declared, key_exprs.size(), has_range, lo, hi, is_int);
+	}
+	// The NULL rule for the input, as for every other function (AIGuardNullPrompt): without it one missing
+	// column erased an input built with `||`, and one built with concat() was scored even with no column present.
+	if (!key_exprs.empty() && arguments[0]) {
+		vector<unique_ptr<Expression>> columns;
+		CollectColumnRefs(*arguments[0], columns);
+		AIGuardNullPrompt(input.GetClientContext(), arguments[0], columns);
 	}
 	const idx_t key_start = arguments.size();
 	for (auto &key_expr : key_exprs) {
