@@ -147,7 +147,7 @@ appending a passthrough column when the consumers above tolerate it), a cross pr
 (it repeats its input's columns per element), the preserved side of a join (both sides of INNER; the left of SEMI, ANTI, LEFT, SINGLE, MARK; the right
 of RIGHT, RIGHT_SEMI, RIGHT_ANTI), and a CTE node's main query; it stops at aggregates, limits,
 sorts, set operations, windows and a CTE body. It also stops below any operator that asks the model
-itself, such as a projection computing `ai_complete(...)`: that operator is asked for every row that
+itself, such as a projection computing `ai_complete(...)` or `ai_agg(...)`: that operator is asked for every row that
 reaches it, so a predicate lifted above it trades its own calls for the operator's (SWAN 2.0
 football-02, a birth-year filter under a height question: 406 calls -> 245). Lifting through any
 other preserving operator never adds a call (the output projected onto the predicate's columns is a
@@ -276,13 +276,15 @@ model orders the rest. `0` leaves the cold phase unbounded.
 A region below a LIMIT that the push-down could not place in it (EXPLAIN: `Unpushed Limit Above: true`, e.g. a
 DISTINCT on a computed key) feeds a consumer that may stop early. Served leaf by leaf, such a region runs ahead of
 that consumer: the pool goes to the first leaf of new rows while the second leaf of rows that have already passed
-waits. So there the region serves its pending calls in row order: a free slot goes to the earliest waiting row,
+waits. So there the region serves its pending calls in row order, cold or warm: a free slot goes to the earliest waiting row,
 whatever its leaf. Rows are finished in the order the source hands them out, and when the consumer stops, only the
 calls in flight were asked for nothing (california_schools-28, `DISTINCT substr(...) ... LIMIT 5`: the same 154
 calls in 14 s instead of 24 s; a synthetic LIMIT 5 over two filters: about 125 calls instead of about 380). The
 flag is set by the LIMIT push-down pass, so with `ai_limit = false` no region carries it; with
 `ai_leaf_lookahead = 0` there is no slot to hand out, and the region keeps its cold gate under such a LIMIT
-instead. Like the ordering above, none of these settings changes a result.
+instead. With the row order there is no cold gate: a cold slice that waited for the calls out would ask a round
+of rows before the consumer read any (an unbounded cold phase: about 400 calls for that LIMIT 5). Like the
+ordering above, none of these settings changes a result.
 
 Measured on SWAN 2.0 against 100-row slices with an unbounded cold phase and lookahead 2, the defaults (20-row
 slices, one cold slice, lookahead 1) cut calls by 4.0% and wall time by 6.0% at identical quality; on the hybrid

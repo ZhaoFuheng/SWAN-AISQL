@@ -114,6 +114,86 @@ SELECT (SELECT count(*) FROM lim4), (SELECT count(*) FROM lim4 WHERE k NOT IN (S
 statement ok
 SET threads=1;
 
+# a cold phase that outlasts the first dispatch (ai_leaf_cold_slices = 0 leaves it unbounded, 2 ends it after
+# the second slice) is served in row order too. Cold, the region submitted each slice's whole first-leaf
+# backlog and held the second leaf back until a concurrency-wide batch of it was pending (500-row slices: 619
+# and 559 calls), and before each new slice it waited for the calls out, a round of calls per slice before the
+# consumer read a row (20-row slices, unbounded: 398)
+statement ok
+SET ai_leaf_slice_rows = 500;
+
+statement ok
+SET ai_leaf_cold_slices = 0;
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE limc0 AS SELECT DISTINCT substr(s.name, 1, 12) AS k FROM school s
+WHERE ai_filter('[sleep=5] [p=10] continuation? '||s.name) AND ai_filter('[sleep=5] [p=80] in the county? '||s.name)
+LIMIT 5;
+
+query II
+SELECT (SELECT count(*) FROM limc0), (SELECT count(*) FROM limc0 WHERE k NOT IN (SELECT substr(name, 1, 12) FROM ref));
+----
+5	0
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT < 250 FROM ai_usage();
+----
+true
+
+statement ok
+SET ai_leaf_cold_slices = 2;
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE limc2 AS SELECT DISTINCT substr(s.name, 1, 12) AS k FROM school s
+WHERE ai_filter('[sleep=5] [p=10] continuation? '||s.name) AND ai_filter('[sleep=5] [p=80] in the county? '||s.name)
+LIMIT 5;
+
+query II
+SELECT (SELECT count(*) FROM limc2), (SELECT count(*) FROM limc2 WHERE k NOT IN (SELECT substr(name, 1, 12) FROM ref));
+----
+5	0
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT < 250 FROM ai_usage();
+----
+true
+
+statement ok
+SET ai_leaf_slice_rows = 20;
+
+statement ok
+SET ai_leaf_cold_slices = 0;
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE limc20 AS SELECT DISTINCT substr(s.name, 1, 12) AS k FROM school s
+WHERE ai_filter('[sleep=5] [p=10] continuation? '||s.name) AND ai_filter('[sleep=5] [p=80] in the county? '||s.name)
+LIMIT 5;
+
+query II
+SELECT (SELECT count(*) FROM limc20), (SELECT count(*) FROM limc20 WHERE k NOT IN (SELECT substr(name, 1, 12) FROM ref));
+----
+5	0
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT < 250 FROM ai_usage();
+----
+true
+
+statement ok
+RESET ai_leaf_cold_slices;
+
+statement ok
+RESET ai_leaf_slice_rows;
+
 # SET ai_leaf_lookahead = 0 submits every pending call at once: no slot to give out, so no row order; the
 # region keeps its cold gate there, and the answer is the same
 statement ok

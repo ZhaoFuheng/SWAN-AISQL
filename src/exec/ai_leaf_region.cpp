@@ -144,11 +144,14 @@ idx_t AILeafRegionState::Append(DataChunk &chunk, idx_t limit_floor, bool &limit
 	const idx_t kSliceRows = MaxValue<idx_t>(AIConfig::Get().leaf_slice_rows, 1);
 	for (idx_t begin = 0; begin < count;) {
 		const idx_t slice = MinValue<idx_t>(kSliceRows, count - begin);
-		if (begin > 0 && limit < 0 && dispatcher && !Warm()) {
+		if (begin > 0 && limit < 0 && dispatcher && !Warm() && !RowOrder()) {
 			// Warm gate: before deciding more rows, wait for the calls already out -- verdicts are coming, and the
 			// model trains on them -- so the next slice is ordered by a model that knows this query's pass
 			// rates. Nothing new is dispatched while waiting, so the wait is bounded by one round of calls, and
-			// it costs nothing when they landed before the next slice was embedded.
+			// it costs nothing when they landed before the next slice was embedded. Not under row order: there
+			// the consumer may stop early, and a round per slice would ask rows it never reads before it reads
+			// any (20-row slices, ai_leaf_cold_slices = 0, DISTINCT ... LIMIT 5: 339 calls); the bounded
+			// dispatch re-decides each row at submission anyway.
 			const auto t0 = std::chrono::steady_clock::now();
 			while (!Warm() && dispatcher->Outstanding() > 0) {
 				WaitAndReap();
@@ -626,9 +629,14 @@ void AILeafRegionState::DispatchPending(bool flush) {
 	if (limit >= 0) {
 		return;
 	}
-	// A region of one leaf has nothing to order, so it dispatches as before.
+	// A region of one leaf has nothing to order, so it dispatches as before. Under an unpushed LIMIT (row order)
+	// every dispatch is bounded, cold or warm: the cold path below submits a leaf's whole backlog and holds the
+	// next leaf back until a concurrency-wide batch of it is pending, so it runs ahead of the consumer on the
+	// first leaf while the rows that passed it wait for their second (DISTINCT ... LIMIT 5 with 500-row slices
+	// and ai_leaf_cold_slices = 0: 619 calls, bounded 120). With the default single cold slice the region is
+	// already warm at its first dispatch.
 	const idx_t lookahead = AIConfig::Get().leaf_lookahead;
-	if (lookahead > 0 && n >= 2 && (flush || Warm())) {
+	if (lookahead > 0 && n >= 2 && (flush || Warm() || RowOrder())) {
 		DispatchBounded(lookahead * MaxValue<idx_t>(AIConfig::Get().max_concurrency, 1));
 		return;
 	}

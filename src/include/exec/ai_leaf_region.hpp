@@ -48,8 +48,9 @@ public:
 	AILeafRegionState(ClientContext &context, const BoundFunctionExpression &eval_call,
 	                  const vector<LogicalType> &child_types, int64_t limit, vector<idx_t> limit_distinct_cols = {});
 	~AILeafRegionState();
-	//! An un-pushed LIMIT above: the consumer may stop early, so pending calls are served in ROW order (the
-	//! earliest waiting row first, see RowOrder), which finishes the rows it reads first before new ones start.
+	//! An un-pushed LIMIT above: the consumer may stop early, so pending calls are served in ROW order, cold or
+	//! warm (the earliest waiting row first, see RowOrder), which finishes the rows it reads first before new ones
+	//! start.
 	bool under_limit = false;
 
 	//! Fold a child chunk in slices of ai_leaf_slice_rows rows (default 20): each slice is deduped, its new

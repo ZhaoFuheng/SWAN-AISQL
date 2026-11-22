@@ -54,10 +54,22 @@ static bool ExprContainsAICall(const Expression &expr) {
 	return found;
 }
 
-//! Does `expr` ask the model: an AI call anywhere in it, a lambda's body included (list_transform(l, x ->
+//! Is `expr` a call that asks the language model: an AI predicate or answer, or ai_agg, whose map-reduce over a
+//! row's list makes one call or more per row? ai_embed is not one: it asks the embedding server, in batches,
+//! for a fraction of an LLM call, so lifting a predicate across it still pays (the predicate's calls on the
+//! rows removed higher up are worth more than the extra embeddings).
+static bool IsModelCallExpr(const Expression &expr) {
+	if (IsAICallExpr(expr)) {
+		return true;
+	}
+	return expr.GetExpressionType() == ExpressionType::BOUND_FUNCTION &&
+	       expr.Cast<BoundFunctionExpression>().Function().GetName() == "ai_agg";
+}
+
+//! Does `expr` ask the model: a model call anywhere in it, a lambda's body included (list_transform(l, x ->
 //! ai_complete(x)) keeps its body outside the expression's children)?
 static bool ExprAsksModel(const Expression &expr) {
-	if (IsAICallExpr(expr)) {
+	if (IsModelCallExpr(expr)) {
 		return true;
 	}
 	if (expr.GetExpressionClass() == ExpressionClass::BOUND_FUNCTION) {
@@ -78,9 +90,9 @@ static bool ExprAsksModel(const Expression &expr) {
 	return found;
 }
 
-//! Does `op` itself ask the model for the rows that reach it: a projection computing ai_complete(...), a join
-//! condition comparing an AI answer, a filter conjunct that is no liftable leaf? (The AI predicates this pass
-//! lifts have left `op` by the time this is asked; a speculative pre-filter makes no call.)
+//! Does `op` itself ask the model for the rows that reach it: a projection computing ai_complete(...) or
+//! ai_agg(...), a join condition comparing an AI answer, a filter conjunct that is no liftable leaf? (The AI predicates
+//! this pass lifts have left `op` by the time this is asked; a speculative pre-filter makes no call.)
 static bool OperatorAsksModel(const LogicalOperator &op) {
 	bool found = false;
 	LogicalOperatorVisitor::EnumerateExpressions(op, [&](const unique_ptr<Expression> *e) {
@@ -251,11 +263,11 @@ static bool Commutes(const LogicalOperator &op, idx_t child_idx, bool &reduces) 
 	if (AIOperatorCanThrowNonAI(op)) {
 		return false;
 	}
-	// an operator that asks the model itself (a projection computing ai_complete(...) over the predicate's rows)
-	// asks it for every row that reaches it: lifted above it, the predicate would let the rows it rejects be
-	// asked first, so the lift trades this predicate's calls for the operator's, whatever removes rows higher up.
-	// SWAN 2.0 european_football_2-02: a birth-year filter lifted above the join on ai_complete's height made the
-	// query ask the height of all 203 players instead of the 46 the filter keeps
+	// an operator that asks the model itself (a projection computing ai_complete(...) or ai_agg(...) over the
+	// predicate's rows) asks it for every row that reaches it: lifted above it, the predicate would let the rows it
+	// rejects be asked first, so the lift trades this predicate's calls for the operator's, whatever removes rows
+	// higher up. SWAN 2.0 european_football_2-02: a birth-year filter lifted above the join on ai_complete's height
+	// made the query ask the height of all 203 players instead of the 46 the filter keeps
 	if (OperatorAsksModel(op)) {
 		return false;
 	}

@@ -7,7 +7,7 @@
 // as it legally can; an AI predicate costs an LLM call per distinct input, so this pass lifts it as
 // high as it legally can, through every operator a filter on its columns commutes with, and settles
 // it above the highest row-reducing operator it crossed. It does not cross an operator that asks the
-// model itself (a projection computing ai_complete): the rows the predicate rejects would be asked
+// model itself (a projection computing ai_complete or ai_agg): the rows the predicate rejects would be asked
 // there first. Where it crossed a row-reducing operator, a speculative pre-filter stays at the
 // original site to prune rows whose verdict is already known to be false.
 //===----------------------------------------------------------------------===//
