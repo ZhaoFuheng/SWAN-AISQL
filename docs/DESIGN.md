@@ -276,15 +276,20 @@ model orders the rest. `0` leaves the cold phase unbounded.
 A region below a LIMIT that the push-down could not place in it (EXPLAIN: `Unpushed Limit Above: true`, e.g. a
 DISTINCT on a computed key) feeds a consumer that may stop early. Served leaf by leaf, such a region runs ahead of
 that consumer: the pool goes to the first leaf of new rows while the second leaf of rows that have already passed
-waits. So there the region serves its pending calls in row order, cold or warm: a free slot goes to the earliest waiting row,
-whatever its leaf. Rows are finished in the order the source hands them out, and when the consumer stops, only the
-calls in flight were asked for nothing (california_schools-28, `DISTINCT substr(...) ... LIMIT 5`: the same 154
-calls in 14 s instead of 24 s; a synthetic LIMIT 5 over two filters: about 125 calls instead of about 380). The
-flag is set by the LIMIT push-down pass, so with `ai_limit = false` no region carries it; with
-`ai_leaf_lookahead = 0` there is no slot to hand out, and the region keeps its cold gate under such a LIMIT
-instead. With the row order there is no cold gate: a cold slice that waited for the calls out would ask a round
-of rows before the consumer read any (an unbounded cold phase: about 400 calls for that LIMIT 5). Like the
-ordering above, none of these settings changes a result.
+waits. So there the region serves its pending calls in row order, cold or warm: a free slot goes to the earliest
+waiting row, whatever its leaf, so rows are asked in the order the source hands them out (california_schools-28,
+`DISTINCT substr(...) ... LIMIT 5`: the same 154 calls in 14 s instead of 24 s; a synthetic LIMIT 5 over two
+filters: about 120 calls instead of about 380). They are not answered in that order: the pool stays full, and
+while an early row waits for its answer every slot that frees goes to a later row. So when the consumer stops,
+the calls asked for nothing are the ones in flight, which the bounded dispatch caps, and the ones already answered
+for rows it never reads, which no setting caps: they grow with how long the earliest unanswered row waits (the
+synthetic LIMIT 5: 37 of its 119 calls are for rows after the fifth passer, at least 17 of them answered before
+the stop; with one 300 ms answer on its first row and 5 ms on the rest, about 860 of 950). The flag is set by
+the LIMIT push-down pass, so with `ai_limit = false` no region carries it; with `ai_leaf_lookahead = 0` there is
+no slot to hand out, and the region keeps its cold gate under such a LIMIT instead. With the row order there is
+no cold gate: a cold slice that waited for the calls out would ask a round of rows before the consumer read any
+(an unbounded cold phase: about 400 calls for that LIMIT 5). Like the ordering above, none of these settings
+changes a result.
 
 Measured on SWAN 2.0 against 100-row slices with an unbounded cold phase and lookahead 2, the defaults (20-row
 slices, one cold slice, lookahead 1) cut calls by 4.0% and wall time by 6.0% at identical quality; on the hybrid

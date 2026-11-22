@@ -5,14 +5,16 @@
 #              more leaves serves its pending calls in ROW order: a free slot goes to the earliest waiting row,
 #              whatever its leaf, so a row that passed its first question asks its second one before any later
 #              row asks its first. The source hands rows out in input order, so this is the order the consumer
-#              can use the answers in, and it stops with only the calls in flight wasted. Served leaf by leaf,
-#              the second question of the early rows waited (for a batch of them while the region was cold,
-#              behind the first leaf's whole backlog once it was warm), and the region asked the first question
-#              of many more rows than the LIMIT needed.
+#              can use the answers in. It is not the order they land in: while an early row waits for its
+#              answer the pool goes on with later rows, so the stop wastes answered calls as well as the ones
+#              in flight (here about 37 calls are for rows after the fifth passer). Served leaf by leaf, the
+#              second question of the early rows waited (for a batch of them while the region was cold, behind
+#              the first leaf's whole backlog once it was warm), and the region asked the first question of
+#              many more rows than the LIMIT needed.
 #              The shape is SWAN 2.0 california_schools-28: DISTINCT on a computed key, LIMIT 5, two filters.
 #              The call bound is wide on both sides: this shape took 379-395 calls served leaf by leaf and takes
-#              116-139 in row order (the fewest possible is 87: every row up to the fifth passer asks the
-#              first question, its passers the second).
+#              116-139 in row order (the fewest possible is 82: every row up to the fifth passer, row 76, asks
+#              the first question, its five passers the second).
 
 require aisql
 

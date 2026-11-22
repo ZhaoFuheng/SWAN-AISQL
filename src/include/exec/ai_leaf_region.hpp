@@ -49,8 +49,8 @@ public:
 	                  const vector<LogicalType> &child_types, int64_t limit, vector<idx_t> limit_distinct_cols = {});
 	~AILeafRegionState();
 	//! An un-pushed LIMIT above: the consumer may stop early, so pending calls are served in ROW order, cold or
-	//! warm (the earliest waiting row first, see RowOrder), which finishes the rows it reads first before new ones
-	//! start.
+	//! warm (the earliest waiting row first, see RowOrder). A slot that frees while an earlier row's answer is out
+	//! still goes to a later row, so an early stop can waste answered calls as well as those in flight.
 	bool under_limit = false;
 
 	//! Fold a child chunk in slices of ai_leaf_slice_rows rows (default 20): each slice is deduped, its new
