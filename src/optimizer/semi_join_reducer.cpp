@@ -1141,22 +1141,71 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 		return true;
 	};
 
-	// FIXED-POINT (bottom-up two-pass reduction): apply reducers until none new. A leaf reduced in one pass
-	// then CARRIES its reducer's selection, so in a later pass it can reduce a neighbor -- this is how a
-	// far-end relational predicate propagates through intermediate tables to shrink the AI table (a multi-hop
-	// chain, the case single-pass edge reduction misses). Result-preserving regardless of order: every reducer
-	// is a SEMI join that only drops non-joining tuples. `applied` fires each (i,j) at most once, so it's
-	// idempotent and terminates (finite pairs, monotonically growing).
+	// THE ORDER. Leaf i takes a copy of leaf j as j is at that moment, so what j has been reduced by so far is
+	// what reaches i: reducing the drivers by the results before the results have been reduced by the races
+	// leaves the races' year filter out of the drivers for good (SWAN 2.0 formula_1-22: the predicate asked 82
+	// drivers where the join admits 35). The rows that cost calls are those of the leaves with an AI stage, so
+	// the reductions run TOWARD those leaves first, the farthest edges before the nearer ones (each leaf has
+	// then been reduced by everything behind it when it reduces the next one), then between leaves at the same
+	// distance, then away from them. A cluster without such a leaf keeps the order of the edge map.
+	const idx_t n_leaves = leaves.size();
+	vector<idx_t> dist(n_leaves, DConstants::INVALID_INDEX); // join edges to the nearest leaf with an AI stage
+	vector<idx_t> frontier;
+	for (idx_t l = 0; l < n_leaves; l++) {
+		if (SubtreeHasAIFunction(*leaves[l].get())) {
+			dist[l] = 0;
+			frontier.push_back(l);
+		}
+	}
+	const bool ai_leaves = !frontier.empty();
+	for (idx_t head = 0; head < frontier.size(); head++) {
+		const idx_t u = frontier[head];
+		for (auto &kv : reductions) {
+			const idx_t v = kv.first.second;
+			if (kv.first.first == u && dist[v] == DConstants::INVALID_INDEX) {
+				dist[v] = dist[u] + 1;
+				frontier.push_back(v);
+			}
+		}
+	}
+	vector<std::pair<idx_t, idx_t>> order;
+	for (auto &kv : reductions) {
+		order.push_back(kv.first);
+	}
+	if (ai_leaves) {
+		// (phase, position in it): 0 = toward an AI stage, far leaves first; 1 = between equals; 2 = away, near first
+		auto rank = [&](const std::pair<idx_t, idx_t> &key) {
+			const idx_t di = MinValue<idx_t>(dist[key.first], n_leaves),
+			            dj = MinValue<idx_t>(dist[key.second], n_leaves);
+			if (di < dj) {
+				return std::make_pair(idx_t(0), n_leaves - di);
+			}
+			return di == dj ? std::make_pair(idx_t(1), idx_t(0)) : std::make_pair(idx_t(2), di);
+		};
+		std::stable_sort(
+		    order.begin(), order.end(),
+		    [&](const std::pair<idx_t, idx_t> &a, const std::pair<idx_t, idx_t> &b) { return rank(a) < rank(b); });
+	}
+
+	// FIXED POINT: apply reducers until none is new. A leaf reduced in one pass then CARRIES its reducer's
+	// selection, so later it can reduce a neighbor -- this is how a far-end relational predicate propagates
+	// through intermediate tables to shrink the AI table. Result-preserving regardless of order: every reducer is a
+	// SEMI join that only drops non-joining tuples. `applied` fires each (i,j) at most once, so it's idempotent and
+	// terminates (finite pairs, monotonically growing).
+	// Each pair fires ONCE, on purpose: a reducer is a deep copy of leaf j with everything j has been reduced by,
+	// so firing a pair again for what j learned later nests copies inside copies. Tried and removed: on a
+	// twelve-table cluster (agent_bench Q26) it took the plan from 315 operators to 4,221 and the query from 27 s
+	// to 45 s for one reduction more. The order above is what carries a far filter to the AI table.
 	std::set<std::pair<idx_t, idx_t>> applied;
 	bool changed = true;
 	while (changed) {
 		changed = false;
-		for (auto &kv : reductions) {
-			if (applied.count(kv.first)) {
+		for (auto &key : order) {
+			if (applied.count(key)) {
 				continue;
 			}
-			const idx_t i = kv.first.first;  // reduced (kept) leaf
-			const idx_t j = kv.first.second; // reducer (build) leaf
+			const idx_t i = key.first;  // reduced (kept) leaf
+			const idx_t j = key.second; // reducer (build) leaf
 			// NOTE: a reducer side estimated at ZERO rows used to be skipped as a degenerate
 			// estimate. That inverts the guard's purpose: an empty neighbour is the case where
 			// reduction is worth MOST, since the semi-join eliminates everything downstream. It
@@ -1191,8 +1240,8 @@ void SemiJoinReducer::InsertReducers(vector<std::reference_wrapper<unique_ptr<Lo
 			if (!do_reduce) {
 				continue; // may become reducible once j is itself reduced -- re-checked next pass
 			}
-			applied.insert(kv.first); // attempt this pair once
-			const bool spliced = apply_reducer(i, j, kv.second);
+			applied.insert(key); // attempt this pair once
+			const bool spliced = apply_reducer(i, j, reductions[key]);
 			if (yann_dbg) {
 				fprintf(stderr, "[yann]   apply %llu <- %llu spliced=%d\n", (unsigned long long)i,
 				        (unsigned long long)j, spliced ? 1 : 0);

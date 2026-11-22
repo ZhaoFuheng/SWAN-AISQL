@@ -399,6 +399,9 @@ void AILeafRegionState::DecideRow(uint32_t row) {
 	if (rep.state == 0) {
 		rep.state = 1;
 		leaf.pending.push_back(rep_id);
+		if (RowOrder()) {
+			row_queue.emplace(row, NumericCast<uint32_t>(next), rep_id);
+		}
 	}
 }
 
@@ -453,12 +456,19 @@ void AILeafRegionState::ApplyVerdict(idx_t l, uint32_t rep_id, bool value, bool 
 	}
 }
 
+bool AILeafRegionState::RowOrder() const {
+	return under_limit && n >= 2 && limit < 0 && AIConfig::Get().leaf_lookahead > 0;
+}
+
 bool AILeafRegionState::Warm() const {
 	if (n < 2) {
 		return true; // nothing to order
 	}
 	const idx_t cold_slices = AIConfig::Get().leaf_cold_slices;
-	if (cold_slices > 0 && !under_limit && slices_ingested >= cold_slices) {
+	// Under an un-pushed LIMIT the bound applies only with the row order: served leaf by leaf, a region warmed
+	// early runs ahead of its consumer (it asks the first leaf of new rows while rows that already passed wait
+	// for their second), so without the row order it keeps the cold gate.
+	if (cold_slices > 0 && (!under_limit || RowOrder()) && slices_ingested >= cold_slices) {
 		return true; // bounded cold phase: a rarely asked leaf would otherwise gate every slice
 	}
 	if (AISelectivityTrainSteps() == 0) {
@@ -518,6 +528,45 @@ void AILeafRegionState::DispatchBounded(idx_t cap) {
 	auto hint_capped = [&](idx_t l) {
 		return has_partner[l] && observed_n[l] < hint_batch && async_inflight[l] >= hint_batch;
 	};
+	// Row order (an un-pushed LIMIT above): the earliest pending row of all leaves takes the slot. Every pending
+	// rep is in row_queue, so the leaf-by-leaf loop below finds nothing left to submit except what a hint cap
+	// holds back.
+	const bool row_order = RowOrder();
+	if (row_order) {
+		vector<RowPending> capped; // of a leaf that may not submit now (hint_capped): put back afterwards
+		while (outstanding() < cap && !row_queue.empty()) {
+			const RowPending top = row_queue.top();
+			row_queue.pop();
+			const idx_t l = std::get<1>(top);
+			const uint32_t rep_id = std::get<2>(top);
+			auto &rep = leaves[l].reps[rep_id];
+			if (rep.state != 1) {
+				continue; // a stale entry: re-decided away, or already submitted
+			}
+			if (hint_capped(l)) {
+				capped.push_back(top);
+				continue;
+			}
+			if (rep.redecided != gen) {
+				rep.redecided = gen;
+				vector<uint32_t> rows = std::move(rep.waiters);
+				rep.waiters.clear();
+				rep.state = 0;
+				rep.has_hint_row = false;
+				RefreshStalePredictions(rows.data(), rows.size());
+				for (const auto row : rows) {
+					DecideRow(row); // may finish the row, move it, or choose this rep again (queued again)
+				}
+				if (rep.state != 1) {
+					continue; // nobody chose it now
+				}
+			}
+			SubmitRep(l, rep_id);
+		}
+		for (const auto &entry : capped) {
+			row_queue.push(entry);
+		}
+	}
 	for (;;) {
 		bool any = false;
 		for (idx_t l = 0; l < n && outstanding() < cap; l++) {
@@ -555,9 +604,19 @@ void AILeafRegionState::DispatchBounded(idx_t cap) {
 		auto &pending = leaves[l].pending;
 		vector<uint32_t> keep;
 		for (idx_t i = head[l]; i < pending.size(); i++) {
-			if (leaves[l].reps[pending[i]].state == 1) {
-				keep.push_back(pending[i]);
+			auto &rep = leaves[l].reps[pending[i]];
+			if (rep.state != 1) {
+				continue;
 			}
+			// the row order takes reps out of the middle of the list, so a rep that was re-decided away and
+			// chosen again is named twice in it: keep it once
+			if (row_order) {
+				if (rep.kept == gen) {
+					continue;
+				}
+				rep.kept = gen;
+			}
+			keep.push_back(pending[i]);
 		}
 		pending.swap(keep);
 	}
