@@ -1,10 +1,10 @@
 {
  "model": "gpt-5.6-luna",
  "concurrency": "20",
- "updated": "2026-11-20 10:05:04 MST",
+ "updated": "2026-11-22 05:34:46 MST",
  "per_query": {
   "q1": {
-   "latency_s": 1.1,
+   "latency_s": 1.0,
    "llm_calls_fresh": 0,
    "llm_calls": 28,
    "cache_hits": 0,
@@ -17,7 +17,7 @@
    "recall": 1.0,
    "quality": 1.0,
    "error": null,
-   "ran_at": "2026-11-20 10:05:04 MST"
+   "ran_at": "2026-11-22 05:34:46 MST"
   },
   "q2": {
    "latency_s": 3.3,
@@ -33,7 +33,7 @@
    "recall": 1.0,
    "quality": 1.0,
    "error": null,
-   "ran_at": "2026-11-20 10:05:04 MST"
+   "ran_at": "2026-11-22 05:34:46 MST"
   },
   "q3": {
    "latency_s": 3.9,
@@ -49,7 +49,7 @@
    "rel_err": 0.3571,
    "quality": 0.643,
    "error": null,
-   "ran_at": "2026-11-20 10:05:04 MST"
+   "ran_at": "2026-11-22 05:34:46 MST"
   },
   "q4": {
    "latency_s": 3.1,
@@ -65,7 +65,7 @@
    "rel_err": 0.4286,
    "quality": 0.571,
    "error": null,
-   "ran_at": "2026-11-20 10:05:04 MST"
+   "ran_at": "2026-11-22 05:34:46 MST"
   },
   "q5": {
    "latency_s": 1.3,
@@ -81,7 +81,7 @@
    "recall": 1.0,
    "quality": 1.0,
    "error": null,
-   "ran_at": "2026-11-20 10:05:04 MST"
+   "ran_at": "2026-11-22 05:34:46 MST"
   },
   "q6": {
    "latency_s": 1.4,
@@ -97,10 +97,10 @@
    "recall": 0.8,
    "quality": 0.842,
    "error": null,
-   "ran_at": "2026-11-20 10:05:04 MST"
+   "ran_at": "2026-11-22 05:34:46 MST"
   },
   "q7": {
-   "latency_s": 428.1,
+   "latency_s": 428.7,
    "llm_calls_fresh": 0,
    "llm_calls": 16256,
    "cache_hits": 0,
@@ -113,7 +113,7 @@
    "recall": 0.854,
    "quality": 0.777,
    "error": null,
-   "ran_at": "2026-11-20 10:05:04 MST"
+   "ran_at": "2026-11-22 05:34:46 MST"
   },
   "q8": {
    "latency_s": 4.1,
@@ -129,7 +129,7 @@
    "rel_err": 0.0404,
    "quality": 0.96,
    "error": null,
-   "ran_at": "2026-11-20 10:05:04 MST"
+   "ran_at": "2026-11-22 05:34:46 MST"
   },
   "q9": {
    "latency_s": 0.9,
@@ -145,7 +145,7 @@
    "recall": 0.569,
    "quality": 0.752,
    "error": null,
-   "ran_at": "2026-11-20 10:05:04 MST"
+   "ran_at": "2026-11-22 05:34:46 MST"
   },
   "q10": {
    "latency_s": 10.6,
@@ -161,13 +161,13 @@
    "recall": 0.281,
    "quality": 0.405,
    "error": null,
-   "ran_at": "2026-11-20 10:05:04 MST"
+   "ran_at": "2026-11-22 05:34:46 MST"
   }
  },
  "total": {
   "n_queries": 10,
-  "latency_s": 457.8,
-  "sweep_wall_s": 458.0,
+  "latency_s": 458.3,
+  "sweep_wall_s": 458.6,
   "cost_usd": 0.3905,
   "tokens": 9670651,
   "llm_calls_fresh": 0,

@@ -1,44 +1,18 @@
 
-== 2026-11-09 19:33:57 MST ==
+== 2026-11-22 04:53:24 MST ==
 SWAN ECOMM gpt-5.6-luna via http://localhost:4001  concurrency=20  sf500  serial  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q11', 'q12', 'q13', 'q14']
 q1   lat=   40.0s calls=   500 fresh=    0 tok=  163488 $0.0612  n=7/7  P=1.0 R=1.0 f1=1.0
-q2   lat=   43.1s calls=   500 fresh=    0 tok= 1708155 $0.3590  n=14/5  P=0.357 R=1.0 f1=0.526
-q3   lat=   23.5s calls=   500 fresh=    0 tok=  121744 $0.0272  n=500/500  P=1.0 R=1.0 ari=0.937
-q4   lat=   18.2s calls=   294 fresh=    0 tok= 1024710 $0.2061  n=294/294  P=1.0 R=1.0 ari=0.69
-q5   lat=   11.0s calls=   228 fresh=    0 tok=  112492 $0.0257  n=228/228  P=1.0 R=1.0 ari=1.0
-q6   lat=   14.9s calls=   228 fresh=    0 tok=  931989 $0.1896  n=228/228  P=1.0 R=1.0 ari=0.753
-q7   lat=  698.6s calls=  7936 fresh=    0 tok= 3618384 $1.0953  n=187/173  P=0.904 R=0.977 f1=0.939
-q8   lat=   43.0s calls=   500 fresh=    0 tok= 2156647 $0.4532  n=2/1  P=0.5 R=1.0 f1=0.667
-q9   lat=  134.3s calls=   756 fresh=    0 tok= 5829160 $1.2062  n=49/46  P=0.857 R=0.913 f1=0.884
-q10  lat=  100.4s calls=   804 fresh=    0 tok= 4235666 $0.6383  n=10/8  P=0.8 R=1.0 f1=0.889
-q11  lat=  173.2s calls=  1862 fresh=    0 tok= 7924574 $1.5281  n=36/18  P=0.5 R=1.0 f1=0.667
-q12  lat=   48.7s calls=   617 fresh=    0 tok=  748827 $0.1731  n=70/58  P=0.786 R=0.948 f1=0.859
-q13  lat=   45.9s calls=   500 fresh=    0 tok= 1851750 $0.3974  n=12/12  P=0.833 R=0.833 f1=0.833
-q14  lat=   51.0s calls=   536 fresh=    0 tok= 1879110 $0.3786  n=2/2  P=1.0 R=1.0 f1=1.0
-TOTAL(14q)  latency=1445.8s  wall=1445.7s  cost=$6.7389  tokens=32306696  fresh=0  macro-quality=0.832
-
-== 2026-11-11 07:16:24 MST ==
-SWAN ECOMM gpt-5.6-luna via http://localhost:4001  concurrency=20  sf500  serial  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q11', 'q12', 'q13', 'q14']
-q1   lat=   40.1s calls=   500 fresh=    0 tok=  163488 $0.0612  n=7/7  P=1.0 R=1.0 f1=1.0
 q2   lat=   43.1s calls=   500 fresh=    0 tok= 1708155 $0.3590  n=14/5  P=0.357 R=1.0 f1=0.526
 q3   lat=   23.6s calls=   500 fresh=    0 tok=  121744 $0.0272  n=500/500  P=1.0 R=1.0 ari=0.937
 q4   lat=   18.3s calls=   294 fresh=    0 tok= 1024710 $0.2061  n=294/294  P=1.0 R=1.0 ari=0.69
 q5   lat=   11.0s calls=   228 fresh=    0 tok=  112492 $0.0257  n=228/228  P=1.0 R=1.0 ari=1.0
 q6   lat=   14.9s calls=   228 fresh=    0 tok=  931989 $0.1896  n=228/228  P=1.0 R=1.0 ari=0.753
-q7   lat=  700.1s calls=  7936 fresh=    0 tok= 3618343 $1.0953  n=187/173  P=0.904 R=0.977 f1=0.939
+q7   lat=  550.3s calls=  7921 fresh=    0 tok= 3612432 $1.0934  n=187/173  P=0.904 R=0.977 f1=0.939
 q8   lat=   43.1s calls=   500 fresh=    0 tok= 2156647 $0.4532  n=2/1  P=0.5 R=1.0 f1=0.667
-q9   lat=  134.3s calls=   756 fresh=    0 tok= 5829160 $1.2062  n=49/46  P=0.857 R=0.913 f1=0.884
-q10  lat=  100.4s calls=   804 fresh=    0 tok= 4235666 $0.6383  n=10/8  P=0.8 R=1.0 f1=0.889
-q11  lat=  173.2s calls=  1862 fresh=    0 tok= 7924574 $1.5281  n=36/18  P=0.5 R=1.0 f1=0.667
+q9   lat=   76.4s calls=   756 fresh=    0 tok= 5829100 $1.2061  n=49/46  P=0.857 R=0.913 f1=0.884
+q10  lat=   86.0s calls=   804 fresh=    0 tok= 4235664 $0.6389  n=10/8  P=0.8 R=1.0 f1=0.889
+q11  lat=  168.5s calls=  1862 fresh=    0 tok= 7924572 $1.5281  n=36/18  P=0.5 R=1.0 f1=0.667
 q12  lat=   48.7s calls=   617 fresh=    0 tok=  748827 $0.1731  n=70/58  P=0.786 R=0.948 f1=0.859
 q13  lat=   45.8s calls=   500 fresh=    0 tok= 1851750 $0.3974  n=12/12  P=0.833 R=0.833 f1=0.833
-q14  lat=   51.1s calls=   536 fresh=    0 tok= 1879110 $0.3786  n=2/2  P=1.0 R=1.0 f1=1.0
-TOTAL(14q)  latency=1447.7s  wall=1447.7s  cost=$6.7389  tokens=32306655  fresh=0  macro-quality=0.832
-
-== 2026-11-21 02:29:55 MST ==
-SWAN ECOMM gpt-5.6-luna via http://localhost:4001  concurrency=20  sf500  serial  queries=['q7', 'q9', 'q10', 'q11']
-q7   lat=  550.3s calls=  7921 fresh=    0 tok= 3612432 $1.0934  n=187/173  P=0.904 R=0.977 f1=0.939
-q9   lat=   76.4s calls=   756 fresh=    0 tok= 5829100 $1.2061  n=49/46  P=0.857 R=0.913 f1=0.884
-q10  lat=   85.7s calls=   804 fresh=    0 tok= 4235664 $0.6389  n=10/8  P=0.8 R=1.0 f1=0.889
-q11  lat=  168.6s calls=  1862 fresh=    0 tok= 7924572 $1.5281  n=36/18  P=0.5 R=1.0 f1=0.667
-TOTAL(14q)  latency=1220.7s  wall=881.0s  cost=$6.7375  tokens=32300680  fresh=0  macro-quality=0.832
+q14  lat=   51.0s calls=   536 fresh=    0 tok= 1879110 $0.3786  n=2/2  P=1.0 R=1.0 f1=1.0
+TOTAL(14q)  latency=1220.7s  wall=1220.8s  cost=$6.7375  tokens=32300680  fresh=0  macro-quality=0.832

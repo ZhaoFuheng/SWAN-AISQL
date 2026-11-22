@@ -19,5 +19,6 @@ for qq in s:
     print(f"| {qq} | {f(cells[0][0],3)} | {f(cells[1][0],3)} | {f(cells[2][0],3)} | {cells[0][1]:,} | {cells[1][1]:,} | {cells[2][1]:,} | "
           f"{f(cells[0][2],1)} | {f(cells[1][2],1)} | {f(cells[2][2],1)} | {f(cells[0][3],4)} | {f(cells[1][3],4)} | {f(cells[2][3],4)} |")
 n = len(s)
+secs = lambda v: f"{int(round(v, 1) + 0.5):,}"  # whole seconds, a half rounded up, as in the README's tables
 print(f"| **macro / Σ** | **{tot['s'][0]/n:.3f}** | **{tot['j'][0]/n:.3f}** | **{tot['l'][0]/n:.3f}** | {tot['s'][1]:,} | {tot['j'][1]:,} | {tot['l'][1]:,} | "
-      f"{tot['s'][2]:,.0f} | {tot['j'][2]:,.0f} | {tot['l'][2]:,.0f} | {tot['s'][3]:.2f} | {tot['j'][3]:.2f} | {tot['l'][3]:.2f} |")
+      f"{secs(tot['s'][2])} | {secs(tot['j'][2])} | {secs(tot['l'][2])} | {tot['s'][3]:.2f} | {tot['j'][3]:.2f} | {tot['l'][3]:.2f} |")

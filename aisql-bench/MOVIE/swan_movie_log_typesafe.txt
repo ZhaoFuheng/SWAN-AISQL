@@ -1,34 +1,14 @@
 
-== 2026-09-25 12:28:15 CDT ==
+== 2026-11-22 05:34:46 MST ==
 SWAN MOVIE gpt-5.6-luna via http://localhost:4001  concurrency=20  sf2000  serial  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10']
-q1   lat=    1.4s calls=    30 fresh=   27 tok=    13885 $0.0005  n=5/1487  P/a=1.0 R/b=1.0 quality=1.0
-q2   lat=    3.6s calls=   119 fresh=    0 tok=    53015 $0.0020  n=5/14  P/a=1.0 R/b=1.0 quality=1.0
-q3   lat=    4.0s calls=   119 fresh=    0 tok=    49649 $0.0020  n=1/1  P/a=9.0 R/b=0.3571 quality=0.643
-q4   lat=    3.3s calls=   119 fresh=  119 tok=    49651 $0.0020  n=1/1  P/a=0.0667 R/b=0.4286 quality=0.571
-q5   lat=    1.9s calls=    36 fresh=   36 tok=    20705 $0.0007  n=10/32288  P/a=1.0 R/b=1.0 quality=1.0
-q6   lat=    2.0s calls=    42 fresh=   42 tok=    23906 $0.0008  n=10/32736  P/a=0.889 R/b=0.8 quality=0.842
-q7   lat=  446.5s calls= 16256 fresh=16214 tok=  8296910 $0.3348  n=36268/32736  P/a=0.712 R/b=0.854 quality=0.777
-q8   lat=    4.1s calls=   119 fresh=    0 tok=    45960 $0.0018  n=2/2  P/a=0.0 R/b=0.0404 quality=0.96
-q9   lat=    9.0s calls=   128 fresh=    0 tok=    39935 $0.0129  n=256/256  P/a=0.749 R/b=0.584 quality=0.749
-q10  lat=  108.8s calls=  1864 fresh=    0 tok=   550711 $0.1732  n=105/116  P/a=0.427 R/b=0.301 quality=0.427
-TOTAL(10q)  latency=584.6s  wall=585.1s  cost=$0.5307  tokens=9144327  fresh=16438  macro-quality=0.797
-
-== 2026-09-26 20:28:43 CDT ==
-SWAN MOVIE gpt-5.6-luna via http://localhost:4001  concurrency=20  sf2000  serial  queries=['q9', 'q10']
-q9   lat=    5.0s calls=   128 fresh=    0 tok=    74262 $0.0030  n=256/256  P=0.759 R=0.581 quality=0.759
-q10  lat=   39.1s calls=  1864 fresh=    0 tok=  1054382 $0.0430  n=105/116  P=0.397 R=0.277 quality=0.397
-TOTAL(10q)  latency=510.9s  wall=44.1s  cost=$0.3906  tokens=9682325  fresh=0  macro-quality=0.795
-
-== 2026-11-20 10:05:04 MST ==
-SWAN MOVIE gpt-5.6-luna via http://localhost:4001  concurrency=20  sf2000  serial  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10']
-q1   lat=    1.1s calls=    28 fresh=    0 tok=    11878 $0.0005  n=5/1487  P=1.0 R=1.0 quality=1.0
+q1   lat=    1.0s calls=    28 fresh=    0 tok=    11878 $0.0005  n=5/1487  P=1.0 R=1.0 quality=1.0
 q2   lat=    3.3s calls=   119 fresh=    0 tok=    50138 $0.0020  n=5/14  P=1.0 R=1.0 quality=1.0
 q3   lat=    3.9s calls=   119 fresh=    0 tok=    49649 $0.0020  n=1/1  value=9.0 rel_err=0.3571 quality=0.643
 q4   lat=    3.1s calls=   119 fresh=    0 tok=    49651 $0.0020  n=1/1  value=0.0667 rel_err=0.4286 quality=0.571
 q5   lat=    1.3s calls=    35 fresh=    0 tok=    17455 $0.0007  n=10/32288  P=1.0 R=1.0 quality=1.0
 q6   lat=    1.4s calls=    41 fresh=    0 tok=    20366 $0.0008  n=10/32736  P=0.889 R=0.8 quality=0.842
-q7   lat=  428.1s calls= 16256 fresh=    0 tok=  8296910 $0.3348  n=36268/32736  P=0.712 R=0.854 quality=0.777
+q7   lat=  428.7s calls= 16256 fresh=    0 tok=  8296910 $0.3348  n=36268/32736  P=0.712 R=0.854 quality=0.777
 q8   lat=    4.1s calls=   119 fresh=    0 tok=    45960 $0.0018  n=2/2  value=0.0 rel_err=0.0404 quality=0.96
 q9   lat=    0.9s calls=   128 fresh=    0 tok=    74262 $0.0030  n=256/256  P=0.752 R=0.569 quality=0.752
 q10  lat=   10.6s calls=  1864 fresh=    0 tok=  1054382 $0.0430  n=105/116  P=0.405 R=0.281 quality=0.405
-TOTAL(10q)  latency=457.8s  wall=458.0s  cost=$0.3905  tokens=9670651  fresh=0  macro-quality=0.795
+TOTAL(10q)  latency=458.3s  wall=458.6s  cost=$0.3905  tokens=9670651  fresh=0  macro-quality=0.795

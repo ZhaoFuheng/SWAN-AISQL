@@ -26206,35 +26206,23 @@
  "q10": {
   "predicted": [
    [
-    "black_panther_2018",
-    "4.5"
+    "thor_love_and_thunder",
+    "2.923076923076923"
    ],
    [
-    "nomadland",
-    "4.0"
+    "roma_2018",
+    "4.6"
    ],
    [
-    "captain_america_civil_war",
-    "4.0"
+    "spider_man_into_the_spider_verse",
+    "4.8"
    ],
    [
-    "avengers_infinity_war",
-    "3.9210526315789473"
+    "moonlight_2016",
+    "4.6"
    ],
    [
-    "suicide_squad_2016",
-    "2.2"
-   ],
-   [
-    "shazam",
-    "4.142857142857143"
-   ],
-   [
-    "deadpool_2",
-    "4.125"
-   ],
-   [
-    "no_time_to_die_2021",
+    "rocketman_2019",
     "3.6"
    ],
    [
@@ -26326,50 +26314,6 @@
     "4.285714285714286"
    ],
    [
-    "jurassic_world_fallen_kingdom",
-    "3.1666666666666665"
-   ],
-   [
-    "cruella",
-    "3.5"
-   ],
-   [
-    "snow_white_and_the_huntsman",
-    "2.90625"
-   ],
-   [
-    "halloween_2018",
-    "3.6"
-   ],
-   [
-    "glass_onion_a_knives_out_mystery",
-    "4.0"
-   ],
-   [
-    "everything_everywhere_all_at_once",
-    "4.6"
-   ],
-   [
-    "batman_v_superman_dawn_of_justice",
-    "2.2142857142857144"
-   ],
-   [
-    "the_lion_king_2019",
-    "3.3333333333333335"
-   ],
-   [
-    "28_days_later",
-    "3.6538461538461537"
-   ],
-   [
-    "justice_league_2017",
-    "1.6666666666666667"
-   ],
-   [
-    "bohemian_rhapsody",
-    "2.857142857142857"
-   ],
-   [
     "captain_marvel",
     "3.702127659574468"
    ],
@@ -26400,6 +26344,30 @@
    [
     "stillwater_2020",
     "4.0"
+   ],
+   [
+    "everything_everywhere_all_at_once",
+    "4.6"
+   ],
+   [
+    "batman_v_superman_dawn_of_justice",
+    "2.2142857142857144"
+   ],
+   [
+    "the_lion_king_2019",
+    "3.3333333333333335"
+   ],
+   [
+    "28_days_later",
+    "3.6538461538461537"
+   ],
+   [
+    "justice_league_2017",
+    "1.6666666666666667"
+   ],
+   [
+    "bohemian_rhapsody",
+    "2.857142857142857"
    ],
    [
     "star_wars_the_last_jedi",
@@ -26452,6 +26420,26 @@
    [
     "it_2017",
     "4.2"
+   ],
+   [
+    "jurassic_world_fallen_kingdom",
+    "3.1666666666666665"
+   ],
+   [
+    "cruella",
+    "3.5"
+   ],
+   [
+    "snow_white_and_the_huntsman",
+    "2.90625"
+   ],
+   [
+    "halloween_2018",
+    "3.6"
+   ],
+   [
+    "glass_onion_a_knives_out_mystery",
+    "4.0"
    ],
    [
     "dunkirk_2017",
@@ -26574,26 +26562,6 @@
     "3.0"
    ],
    [
-    "thor_love_and_thunder",
-    "2.923076923076923"
-   ],
-   [
-    "roma_2018",
-    "4.6"
-   ],
-   [
-    "spider_man_into_the_spider_verse",
-    "4.8"
-   ],
-   [
-    "moonlight_2016",
-    "4.6"
-   ],
-   [
-    "rocketman_2019",
-    "3.6"
-   ],
-   [
     "ant_man_and_the_wasp_quantumania",
     "2.8515625"
    ],
@@ -26624,6 +26592,38 @@
    [
     "i_tonya",
     "4.2"
+   ],
+   [
+    "black_panther_2018",
+    "4.5"
+   ],
+   [
+    "nomadland",
+    "4.0"
+   ],
+   [
+    "captain_america_civil_war",
+    "4.0"
+   ],
+   [
+    "avengers_infinity_war",
+    "3.9210526315789473"
+   ],
+   [
+    "suicide_squad_2016",
+    "2.2"
+   ],
+   [
+    "shazam",
+    "4.142857142857143"
+   ],
+   [
+    "deadpool_2",
+    "4.125"
+   ],
+   [
+    "no_time_to_die_2021",
+    "3.6"
    ]
   ]
  }
