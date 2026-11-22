@@ -1,15 +1,14 @@
 # name: test/sql/region/cold_slices_under_limit.test
-# description: SET ai_leaf_cold_slices bounds the leaf region's cold phase, except under a LIMIT that couldn't
+# description: SET ai_leaf_cold_slices bounds the leaf region's cold phase, also under a LIMIT that couldn't
 # group: [region]
 
-#              be pushed into the region (Unpushed Limit Above): there the consumer may stop early, and a region warmed
-#              early runs ahead of it (SWAN 2.0 california_schools-28, DISTINCT substr(...) ... LIMIT 5).
-#              Either way the answer is the per-row answer.
+#              be pushed into the region (Unpushed Limit Above): there the consumer may stop early, and the
+#              region serves its pending calls in row order so that it does not run ahead of it (SWAN 2.0
+#              california_schools-28, DISTINCT substr(...) ... LIMIT 5; the call count of that shape is asserted
+#              in test/sql/limit/limit_above_row_order.test). Either way the answer is the per-row answer.
 #              WHY THE CALL-COUNT ASSERT IS SAFE HERE: with calibrated ordering and the mock's 5 ms per call, the
 #              shape at the end is count-stable (2,656 calls with 100-row slices, 2,621 with 20 in every run), so
-#              the smaller slice is asserted with a 20-call margin, which fails when the setting is a no-op. The
-#              flag's own effect (no overshoot under an un-pushed LIMIT) doesn't reproduce against the mock, so it
-#              is asserted on the plan and on the answer, not on the count.
+#              the smaller slice is asserted with a 20-call margin, which fails when the setting is a no-op.
 
 require aisql
 
@@ -65,7 +64,7 @@ SELECT count(*) FROM (
 ----
 0
 
-# under the un-pushed LIMIT (cap ignored): exactly k distinct keys, each from a row that passes both filters
+# under the un-pushed LIMIT: exactly k distinct keys, each from a row that passes both filters
 statement ok
 CREATE TABLE limited AS SELECT DISTINCT substr(s.name, 1, 8) AS k FROM school s
 WHERE ai_filter('[p=50] continuation? '||s.name) AND ai_filter('[p=50] in the county? '||s.name)

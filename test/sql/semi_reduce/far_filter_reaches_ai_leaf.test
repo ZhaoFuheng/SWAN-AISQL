@@ -1,0 +1,191 @@
+# name: test/sql/semi_reduce/far_filter_reaches_ai_leaf.test
+# description: A relational filter two joins away from the AI table must reach it. Leaf i is reduced by a copy
+# group: [semi_reduce]
+
+#              of leaf j as j is at that moment, so the order of the reductions decides what reaches i: the
+#              reducer runs them TOWARD the leaves that hold an AI stage, the farthest edges first. In the
+#              order of the edge map it reduced the drivers by the results before the results had been
+#              reduced by the races, and the races' year filter never reached the drivers.
+#              The shape is SWAN 2.0 formula_1-22 (drivers - results - races, a year filter on the races, the
+#              AI predicate on the driver): 82 calls where the join admits 35 drivers. Here: 1,352 drivers
+#              have a result with a lap speed, 822 of them in a race since 2014; the predicate must be asked
+#              822 times. This file discriminates: with the old order the count is 1,352.
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE drivers AS SELECT i AS driverId, 'fore '||i::VARCHAR AS forename, 'sur '||i::VARCHAR AS surname FROM range(1690) r(i);
+
+statement ok
+CREATE TABLE races AS SELECT i AS raceId, 1950 + (i % 70) AS year FROM range(800) r(i);
+
+statement ok
+CREATE TABLE results AS SELECT i AS resultId, (i * 31) % 800 AS raceId, i % 1690 AS driverId,
+  CASE WHEN i % 5 = 0 THEN NULL ELSE (i % 97)::VARCHAR END AS fastestLapSpeed FROM range(20000) r(i);
+
+# the drivers the join can admit, by plain SQL
+query II
+SELECT (SELECT count(DISTINCT driverId) FROM results WHERE fastestLapSpeed IS NOT NULL),
+       (SELECT count(DISTINCT r.driverId) FROM results r JOIN races ra ON ra.raceId = r.raceId
+        WHERE r.fastestLapSpeed IS NOT NULL AND ra.year >= 2014);
+----
+1352	822
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE res AS WITH driver_data AS (SELECT *, drivers.forename || ' ' || drivers.surname AS driver FROM drivers)
+SELECT driver_data.forename, driver_data.surname, CAST(results.fastestLapSpeed AS DOUBLE) AS speed
+FROM results INNER JOIN races ON races.raceId = results.raceId INNER JOIN driver_data ON driver_data.driverId = results.driverId
+WHERE races.year >= 2014 AND results.fastestLapSpeed IS NOT NULL AND ai_filter('[p=30] german? '||driver_data.driver)
+ORDER BY speed DESC, driver_data.forename, driver_data.surname LIMIT 1;
+
+# one call per driver the join can admit, no more
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT FROM ai_usage();
+----
+822
+
+# the same answer without any reduction
+statement ok
+SET ai_semi_reduce = false;
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+query I
+WITH driver_data AS (SELECT *, drivers.forename || ' ' || drivers.surname AS driver FROM drivers),
+q AS (SELECT driver_data.forename, driver_data.surname, CAST(results.fastestLapSpeed AS DOUBLE) AS speed
+  FROM results INNER JOIN races ON races.raceId = results.raceId INNER JOIN driver_data ON driver_data.driverId = results.driverId
+  WHERE races.year >= 2014 AND results.fastestLapSpeed IS NOT NULL AND ai_filter('[p=30] german? '||driver_data.driver)
+  ORDER BY speed DESC, driver_data.forename, driver_data.surname LIMIT 1)
+SELECT count(*) FROM q JOIN res USING (forename, surname, speed);
+----
+1
+
+statement ok
+RESET ai_semi_reduce;
+
+# a filter THREE joins away (drivers - results - races - circuits): one call per driver the whole chain admits
+statement ok
+CREATE TABLE circuits AS SELECT i AS circuitId, i % 5 AS zone FROM range(40) r(i);
+
+statement ok
+CREATE TABLE races2 AS SELECT raceId, year, raceId % 40 AS circuitId FROM races;
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE res4 AS SELECT d.forename, count(*) AS n
+FROM results r JOIN races2 ra ON ra.raceId = r.raceId JOIN circuits c ON c.circuitId = ra.circuitId
+JOIN drivers d ON d.driverId = r.driverId
+WHERE c.zone = 3 AND r.fastestLapSpeed IS NOT NULL AND ai_filter('[p=30] german? '||d.forename)
+GROUP BY d.forename;
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT = (
+  SELECT count(DISTINCT r.driverId) FROM results r JOIN races2 ra ON ra.raceId = r.raceId
+  JOIN circuits c ON c.circuitId = ra.circuitId WHERE c.zone = 3 AND r.fastestLapSpeed IS NOT NULL)
+FROM ai_usage();
+----
+true
+
+# two tables with a predicate each (the driver and the race): the year filter reaches the driver through the
+# results, and neither predicate is asked for a row the joins cannot admit
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE res2 AS SELECT d.forename, ra.raceId
+FROM results r JOIN races ra ON ra.raceId = r.raceId JOIN drivers d ON d.driverId = r.driverId
+WHERE ra.year >= 2014 AND r.fastestLapSpeed IS NOT NULL
+  AND ai_filter('[p=30] german? '||d.forename) AND ai_filter('[p=50] wet race? '||ra.raceId::VARCHAR);
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT <= (
+  SELECT count(DISTINCT r.driverId) + count(DISTINCT r.raceId) FROM results r JOIN races ra ON ra.raceId = r.raceId
+  WHERE r.fastestLapSpeed IS NOT NULL AND ra.year >= 2014)
+FROM ai_usage();
+----
+true
+
+# a cycle of joins (results - races - circuits - results): the reductions still end, and nothing changes the answer
+statement ok
+CREATE TABLE results3 AS SELECT resultId, raceId, driverId, fastestLapSpeed, resultId % 40 AS circuitId FROM results;
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE res3 AS SELECT d.forename, count(*) AS n
+FROM results3 r JOIN races2 ra ON ra.raceId = r.raceId JOIN circuits c ON c.circuitId = ra.circuitId AND c.circuitId = r.circuitId
+JOIN drivers d ON d.driverId = r.driverId
+WHERE c.zone = 3 AND ai_filter('[p=30] german? '||d.forename)
+GROUP BY d.forename;
+
+# the three answers again with the reduction switched off
+statement ok
+SET ai_semi_reduce = false;
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM (
+  (SELECT d.forename, count(*) AS n
+   FROM results r JOIN races2 ra ON ra.raceId = r.raceId JOIN circuits c ON c.circuitId = ra.circuitId
+   JOIN drivers d ON d.driverId = r.driverId
+   WHERE c.zone = 3 AND r.fastestLapSpeed IS NOT NULL AND ai_filter('[p=30] german? '||d.forename)
+   GROUP BY d.forename
+   EXCEPT ALL SELECT * FROM res4)
+  UNION ALL
+  (SELECT * FROM res4 EXCEPT ALL
+   SELECT d.forename, count(*) AS n
+   FROM results r JOIN races2 ra ON ra.raceId = r.raceId JOIN circuits c ON c.circuitId = ra.circuitId
+   JOIN drivers d ON d.driverId = r.driverId
+   WHERE c.zone = 3 AND r.fastestLapSpeed IS NOT NULL AND ai_filter('[p=30] german? '||d.forename)
+   GROUP BY d.forename));
+----
+0
+
+query I
+SELECT count(*) FROM (
+  (SELECT d.forename, ra.raceId
+   FROM results r JOIN races ra ON ra.raceId = r.raceId JOIN drivers d ON d.driverId = r.driverId
+   WHERE ra.year >= 2014 AND r.fastestLapSpeed IS NOT NULL
+     AND ai_filter('[p=30] german? '||d.forename) AND ai_filter('[p=50] wet race? '||ra.raceId::VARCHAR)
+   EXCEPT ALL SELECT * FROM res2)
+  UNION ALL
+  (SELECT * FROM res2 EXCEPT ALL
+   SELECT d.forename, ra.raceId
+   FROM results r JOIN races ra ON ra.raceId = r.raceId JOIN drivers d ON d.driverId = r.driverId
+   WHERE ra.year >= 2014 AND r.fastestLapSpeed IS NOT NULL
+     AND ai_filter('[p=30] german? '||d.forename) AND ai_filter('[p=50] wet race? '||ra.raceId::VARCHAR)));
+----
+0
+
+query I
+SELECT count(*) FROM (
+  (SELECT d.forename, count(*) AS n
+   FROM results3 r JOIN races2 ra ON ra.raceId = r.raceId JOIN circuits c ON c.circuitId = ra.circuitId AND c.circuitId = r.circuitId
+   JOIN drivers d ON d.driverId = r.driverId
+   WHERE c.zone = 3 AND ai_filter('[p=30] german? '||d.forename)
+   GROUP BY d.forename
+   EXCEPT ALL SELECT * FROM res3)
+  UNION ALL
+  (SELECT * FROM res3 EXCEPT ALL
+   SELECT d.forename, count(*) AS n
+   FROM results3 r JOIN races2 ra ON ra.raceId = r.raceId JOIN circuits c ON c.circuitId = ra.circuitId AND c.circuitId = r.circuitId
+   JOIN drivers d ON d.driverId = r.driverId
+   WHERE c.zone = 3 AND ai_filter('[p=30] german? '||d.forename)
+   GROUP BY d.forename));
+----
+0
+
+statement ok
+RESET ai_semi_reduce;

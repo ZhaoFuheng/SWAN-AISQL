@@ -23,6 +23,9 @@
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 
 #include <chrono>
+#include <functional>
+#include <queue>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -45,7 +48,9 @@ public:
 	AILeafRegionState(ClientContext &context, const BoundFunctionExpression &eval_call,
 	                  const vector<LogicalType> &child_types, int64_t limit, vector<idx_t> limit_distinct_cols = {});
 	~AILeafRegionState();
-	//! An un-pushed LIMIT above: ai_leaf_cold_slices doesn't apply (warming early makes the region go broad).
+	//! An un-pushed LIMIT above: the consumer may stop early, so pending calls are served in ROW order, cold or
+	//! warm (the earliest waiting row first, see RowOrder). A slot that frees while an earlier row's answer is out
+	//! still goes to a later row, so an early stop can waste answered calls as well as those in flight.
 	bool under_limit = false;
 
 	//! Fold a child chunk in slices of ai_leaf_slice_rows rows (default 20): each slice is deduped, its new
@@ -123,6 +128,7 @@ private:
 		bool has_hint_row = false;
 		bool async_inflight = false; //! submitted to the async dispatcher and not yet landed
 		uint32_t redecided = 0;      //! the DispatchBounded call that last re-decided its waiters
+		uint32_t kept = 0;           //! row order: the DispatchBounded call that last kept it in its pending list
 	};
 	struct Leaf {
 		vector<idx_t> key_cols;
@@ -164,6 +170,18 @@ private:
 	void DispatchBounded(idx_t cap);
 	void SubmitRep(idx_t l, uint32_t rep_id);
 	uint32_t dispatch_gen = 0;
+	//! Under an un-pushed LIMIT (two or more leaves, ai_leaf_lookahead on) a free slot goes to the pending rep
+	//! whose row is the EARLIEST, whatever its leaf: a row that passed its first leaf asks its next one before
+	//! any later row asks its first. The source hands rows out in input order, so this is the order in which
+	//! the consumer can use the answers, and the calls in flight when it stops are the only ones wasted. The
+	//! leaf-by-leaf order of DispatchBounded serves leaf 0's queue first; there the rows already half decided
+	//! wait while the region asks the first question of the whole input.
+	bool RowOrder() const;
+	//! Row order: every rep that turned pending, as (the row it turned pending for, leaf, rep), smallest row on
+	//! top. Entries are not removed when their rep is submitted or re-decided away; a popped entry whose rep is
+	//! no longer pending is dropped.
+	typedef std::tuple<uint32_t, uint32_t, uint32_t> RowPending;
+	std::priority_queue<RowPending, vector<RowPending>, std::greater<RowPending>> row_queue;
 	//! Every leaf has a batch of verdicts and the model has trained on them (always true for one leaf), or
 	//! ai_leaf_cold_slices slices are in.
 	bool Warm() const;

@@ -17,6 +17,8 @@
 #include "duckdb/planner/operator/logical_join.hpp"
 #include "duckdb/planner/operator/logical_projection.hpp"
 #include "duckdb/planner/expression_iterator.hpp"
+#include "duckdb/planner/logical_operator_visitor.hpp"
+#include "duckdb/function/lambda_functions.hpp"
 #include "duckdb/planner/operator/logical_any_join.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/planner/operator/logical_cross_product.hpp"
@@ -46,6 +48,55 @@ static bool ExprContainsAICall(const Expression &expr) {
 	bool found = false;
 	ExpressionIterator::EnumerateChildren(expr, [&](const Expression &child) {
 		if (!found && ExprContainsAICall(child)) {
+			found = true;
+		}
+	});
+	return found;
+}
+
+//! Is `expr` a call that asks the language model: an AI predicate or answer, or ai_agg, whose map-reduce over a
+//! row's list makes one call or more per row? ai_embed is not one: it asks the embedding server, in batches,
+//! for a fraction of an LLM call, so lifting a predicate across it still pays (the predicate's calls on the
+//! rows removed higher up are worth more than the extra embeddings).
+static bool IsModelCallExpr(const Expression &expr) {
+	if (IsAICallExpr(expr)) {
+		return true;
+	}
+	return expr.GetExpressionType() == ExpressionType::BOUND_FUNCTION &&
+	       expr.Cast<BoundFunctionExpression>().Function().GetName() == "ai_agg";
+}
+
+//! Does `expr` ask the model: a model call anywhere in it, a lambda's body included (list_transform(l, x ->
+//! ai_complete(x)) keeps its body outside the expression's children)?
+static bool ExprAsksModel(const Expression &expr) {
+	if (IsModelCallExpr(expr)) {
+		return true;
+	}
+	if (expr.GetExpressionClass() == ExpressionClass::BOUND_FUNCTION) {
+		auto &fn = expr.Cast<BoundFunctionExpression>();
+		if (fn.Function().HasBindLambdaCallback() && fn.BindInfo()) {
+			auto body = fn.BindInfo()->Cast<LambdaFunctionData>().GetLambdaExpression();
+			if (body && ExprAsksModel(*body)) {
+				return true;
+			}
+		}
+	}
+	bool found = false;
+	ExpressionIterator::EnumerateChildren(expr, [&](const Expression &child) {
+		if (!found && ExprAsksModel(child)) {
+			found = true;
+		}
+	});
+	return found;
+}
+
+//! Does `op` itself ask the model for the rows that reach it: a projection computing ai_complete(...) or
+//! ai_agg(...), a join condition comparing an AI answer, a filter conjunct that is no liftable leaf? (The AI predicates
+//! this pass lifts have left `op` by the time this is asked; a speculative pre-filter makes no call.)
+static bool OperatorAsksModel(const LogicalOperator &op) {
+	bool found = false;
+	LogicalOperatorVisitor::EnumerateExpressions(op, [&](const unique_ptr<Expression> *e) {
+		if (!found && *e && ExprAsksModel(**e)) {
 			found = true;
 		}
 	});
@@ -210,6 +261,14 @@ static bool Commutes(const LogicalOperator &op, idx_t child_idx, bool &reduces) 
 	// join condition) evaluates them on every row it sees: lifted above it, the predicate would let the rows it
 	// rejects reach them first -- plain DuckDB computes a SELECT list only on the rows WHERE kept
 	if (AIOperatorCanThrowNonAI(op)) {
+		return false;
+	}
+	// an operator that asks the model itself (a projection computing ai_complete(...) or ai_agg(...) over the
+	// predicate's rows) asks it for every row that reaches it: lifted above it, the predicate would let the rows it
+	// rejects be asked first, so the lift trades this predicate's calls for the operator's, whatever removes rows
+	// higher up. SWAN 2.0 european_football_2-02: a birth-year filter lifted above the join on ai_complete's height
+	// made the query ask the height of all 203 players instead of the 46 the filter keeps
+	if (OperatorAsksModel(op)) {
 		return false;
 	}
 	switch (op.type) {

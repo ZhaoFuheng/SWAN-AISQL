@@ -26226,6 +26226,70 @@
     "4.0"
    ],
    [
+    "black_panther_2018",
+    "4.5227272727272725"
+   ],
+   [
+    "nomadland",
+    "4.090909090909091"
+   ],
+   [
+    "captain_america_civil_war",
+    "4.3"
+   ],
+   [
+    "avengers_infinity_war",
+    "3.8947368421052633"
+   ],
+   [
+    "suicide_squad_2016",
+    "1.0"
+   ],
+   [
+    "shazam",
+    "4.142857142857143"
+   ],
+   [
+    "deadpool_2",
+    "4.125"
+   ],
+   [
+    "no_time_to_die_2021",
+    "3.4"
+   ],
+   [
+    "ant_man_and_the_wasp_quantumania",
+    "2.7578125"
+   ],
+   [
+    "la_la_land",
+    "4.333333333333333"
+   ],
+   [
+    "elvis",
+    "3.0"
+   ],
+   [
+    "the_invisible_man_2020",
+    "4.285714285714286"
+   ],
+   [
+    "mad_max_fury_road",
+    "3.7857142857142856"
+   ],
+   [
+    "blue_is_the_warmest_color",
+    "4.166666666666667"
+   ],
+   [
+    "marriage_story_2019",
+    "3.2"
+   ],
+   [
+    "i_tonya",
+    "4.2"
+   ],
+   [
     "mission_impossible_fallout",
     "4.466666666666667"
    ],
@@ -26442,30 +26506,6 @@
     "4.0"
    ],
    [
-    "joker_2019",
-    "3.1153846153846154"
-   ],
-   [
-    "dune_2021",
-    "3.875"
-   ],
-   [
-    "eternals",
-    "1.8"
-   ],
-   [
-    "wonder_woman_2017",
-    "4.575757575757576"
-   ],
-   [
-    "birds_of_prey_2020",
-    "3.6875"
-   ],
-   [
-    "alien_covenant",
-    "3.0"
-   ],
-   [
     "dunkirk_2017",
     "4.407407407407407"
    ],
@@ -26518,38 +26558,6 @@
     "4.1"
    ],
    [
-    "ant_man_and_the_wasp_quantumania",
-    "2.7578125"
-   ],
-   [
-    "la_la_land",
-    "4.333333333333333"
-   ],
-   [
-    "elvis",
-    "3.0"
-   ],
-   [
-    "the_invisible_man_2020",
-    "4.285714285714286"
-   ],
-   [
-    "mad_max_fury_road",
-    "3.7857142857142856"
-   ],
-   [
-    "blue_is_the_warmest_color",
-    "4.166666666666667"
-   ],
-   [
-    "marriage_story_2019",
-    "3.2"
-   ],
-   [
-    "i_tonya",
-    "4.2"
-   ],
-   [
     "taken_3",
     "1.775"
    ],
@@ -26594,36 +26602,28 @@
     "3.0"
    ],
    [
-    "black_panther_2018",
-    "4.5227272727272725"
+    "joker_2019",
+    "3.1153846153846154"
    ],
    [
-    "nomadland",
-    "4.090909090909091"
+    "dune_2021",
+    "3.875"
    ],
    [
-    "captain_america_civil_war",
-    "4.3"
+    "eternals",
+    "1.8"
    ],
    [
-    "avengers_infinity_war",
-    "3.8947368421052633"
+    "wonder_woman_2017",
+    "4.575757575757576"
    ],
    [
-    "suicide_squad_2016",
-    "1.0"
+    "birds_of_prey_2020",
+    "3.6875"
    ],
    [
-    "shazam",
-    "4.142857142857143"
-   ],
-   [
-    "deadpool_2",
-    "4.125"
-   ],
-   [
-    "no_time_to_die_2021",
-    "3.4"
+    "alien_covenant",
+    "3.0"
    ]
   ]
  }

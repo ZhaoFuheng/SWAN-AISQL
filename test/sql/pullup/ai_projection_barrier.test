@@ -1,0 +1,167 @@
+# name: test/sql/pullup/ai_projection_barrier.test
+# description: The pull-up does not lift an AI predicate across an operator that asks the model itself. A
+# group: [pullup]
+
+#              projection computing ai_complete(...) or ai_agg(...) over the predicate's rows asks it for every
+#              row that reaches it, so a predicate lifted above it lets the rows it rejects be asked first: the lift
+#              trades the predicate's calls for the projection's, whatever removes rows higher up.
+#              The shape is SWAN 2.0 european_football_2-02: a CTE filters players by an AI predicate and
+#              computes an AI answer for the ones it keeps; the query compares that answer with its average
+#              over the same CTE. The comparison is an inner join that removes rows, so the predicate used to
+#              settle above it in the COUNT branch, and the answer was asked for every player (406 calls where
+#              245 do: 203 predicates, 42 answers).
+
+require aisql
+
+statement ok
+CALL ai_mock_start();
+
+statement ok
+CREATE TABLE player AS SELECT i AS id, 'player '||i::VARCHAR AS name FROM range(300) r(i);
+
+# the predicate stays below the AI projection in both branches: nothing is lifted, so no pre-filter is left behind
+query II
+EXPLAIN WITH grp AS (
+  SELECT p.name, CASE WHEN lower(ai_complete('Return a single yes or no. [p=50] tall? '||p.name)) = 'yes' THEN 190 ELSE 170 END AS height
+  FROM player p WHERE ai_filter('[p=30] born in the nineties? '||p.name))
+SELECT count(*) FROM grp WHERE grp.height > (SELECT avg(g2.height) FROM grp g2);
+----
+physical_plan	<!REGEX>:(?s).*speculative_ai_function_with_embed.*
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+statement ok
+CREATE TABLE res AS WITH grp AS (
+  SELECT p.name, CASE WHEN lower(ai_complete('Return a single yes or no. [p=50] tall? '||p.name)) = 'yes' THEN 190 ELSE 170 END AS height
+  FROM player p WHERE ai_filter('[p=30] born in the nineties? '||p.name))
+SELECT count(*) AS n FROM grp WHERE grp.height > (SELECT avg(g2.height) FROM grp g2);
+
+# one predicate per player, one answer per player the predicate keeps (about 90 of 300): the second branch
+# reads the first one's answers. Lifted, the answer was asked for all 300 (600 calls).
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT <= 450 FROM ai_usage();
+----
+true
+
+# the answer is the one the query gives without the pull-up
+statement ok
+SET ai_pullup = false;
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+query I
+WITH grp AS (
+  SELECT p.name, CASE WHEN lower(ai_complete('Return a single yes or no. [p=50] tall? '||p.name)) = 'yes' THEN 190 ELSE 170 END AS height
+  FROM player p WHERE ai_filter('[p=30] born in the nineties? '||p.name))
+SELECT count(*) = (SELECT n FROM res) FROM grp WHERE grp.height > (SELECT avg(g2.height) FROM grp g2);
+----
+true
+
+statement ok
+RESET ai_pullup;
+
+# a filter on the AI answer itself: the answer is needed for every row the filter sees, so the predicate goes
+# first (300 predicates + about 80 answers; lifted above the filter it was 300 answers + 150 predicates)
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM (
+  SELECT p.id, lower(ai_complete('Return a single yes or no. [p=50] tall? '||p.name)) AS c
+  FROM player p WHERE ai_filter('[p=30] born in the nineties? '||p.name)) q
+WHERE q.c = 'yes';
+----
+44
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT <= 400 FROM ai_usage();
+----
+true
+
+statement ok
+CREATE TABLE team AS SELECT i AS id FROM range(0, 300, 10) r(i);
+
+# a join on a plain key above the AI projection: the key reduction already runs below both AI steps, so
+# keeping the predicate first costs nothing (30 predicates + 26 answers; lifted it was 30 + 30)
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+query II
+SELECT max(length(q.c)), count(*) FROM (
+  SELECT p.id, ai_complete('Return a single yes or no. [p=50] tall? '||p.name) AS c
+  FROM player p WHERE ai_filter('[p=90] plays? '||p.name)) q
+JOIN team t ON t.id = q.id;
+----
+3	26
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT <= 58 FROM ai_usage();
+----
+true
+
+# a projection that asks nothing is still crossed: the predicate settles above the join that removes rows,
+# and its pre-filter stays at the scan
+query II
+EXPLAIN SELECT count(*) FROM (SELECT p.id, upper(p.name) AS shout FROM player p WHERE ai_filter('[p=30] born in the nineties? '||p.name)) q
+JOIN team t ON t.id = q.id;
+----
+physical_plan	<REGEX>:(?s).*speculative_ai_function_with_embed.*
+
+# ai_agg asks the model too (a map-reduce over the row's list, one call or more per row): the same barrier.
+# A filter on its answer: lifted above it, the predicate let all 300 rows be summarized (600 calls); kept
+# below it, 300 predicates + 86 summaries
+statement ok
+CREATE TABLE tagged AS SELECT i AS id, 'player '||i::VARCHAR AS name, ['tag a '||i::VARCHAR, 'tag b '||i::VARCHAR] AS tags
+FROM range(300) r(i);
+
+query II
+EXPLAIN SELECT count(*) FROM (SELECT t.id, ai_agg(t.tags, 'summarize the tags') AS s FROM tagged t
+  WHERE ai_filter('[p=30] born in the nineties? '||t.name)) q WHERE q.s = 'x';
+----
+physical_plan	<!REGEX>:(?s).*speculative_ai_function_with_embed.*
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM (SELECT t.id, ai_agg(t.tags, 'summarize the tags') AS s FROM tagged t
+  WHERE ai_filter('[p=30] born in the nineties? '||t.name)) q WHERE q.s = 'x';
+----
+86
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT <= 400 FROM ai_usage();
+----
+true
+
+statement ok
+SET ai_pullup = false;
+
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+query I
+SELECT count(*) FROM (SELECT t.id, ai_agg(t.tags, 'summarize the tags') AS s FROM tagged t
+  WHERE ai_filter('[p=30] born in the nineties? '||t.name)) q WHERE q.s = 'x';
+----
+86
+
+statement ok
+RESET ai_pullup;
+
+# a join on a plain key above it: 30 predicates + 26 summaries (lifted, 30 + 30)
+statement ok
+SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
+
+query II
+SELECT max(length(q.s)), count(*) FROM (SELECT t.id, ai_agg(t.tags, 'summarize the tags') AS s FROM tagged t
+  WHERE ai_filter('[p=90] plays? '||t.name)) q JOIN team tm ON tm.id = q.id;
+----
+1	26
+
+query I
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT <= 58 FROM ai_usage();
+----
+true

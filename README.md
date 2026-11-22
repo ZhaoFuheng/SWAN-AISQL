@@ -75,14 +75,14 @@ tables that mix text and images). BlendSQL and PLOP take no images.
 | LOTUS 1.2.4 | 0.639 | 17.8k | $6.41 | 1,546 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.672 | 18.2k | $16.76 | 1,397 s |
 | **SWAN-AISQL** | **0.832** | 15.7k | $6.74 | 1,221 s |
-| SWAN-AISQL (Jev) | 0.814 | 15.7k | $5.77 | 830 s |
+| SWAN-AISQL (Jev) | 0.814 | 15.7k | $5.77 | 831 s |
 
 | MMQA | quality | calls | cost | latency |
 |---|---|---|---|---|
 | LOTUS 1.2.4 | 0.450 | 19.0k | $2.43 | 1,391 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.687 | 46.3k | $13.79 | 3,244 s |
 | **SWAN-AISQL** | 0.648 | 16.5k | $2.41 | 1,261 s |
-| SWAN-AISQL (Jev) | 0.599 | 14.1k | $1.93 | 1,005 s |
+| SWAN-AISQL (Jev) | 0.599 | 14.1k | $1.93 | 1,004 s |
 
 **Hybrid bench** (the 30 agent_bench queries of the PLOP paper, from the authors' public fork
 [Morrila](https://github.com/DMoRanSky/Morrila): relational plans with semantic operators)
@@ -93,7 +93,7 @@ tables that mix text and images). BlendSQL and PLOP take no images.
 | BlendSQL 0.1.27 | 0.714* | 25,441 | $2.91 | 1,954 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.735* | 25,777 | $6.82 | 2,040 s |
 | PLOP-DP | 1.000 | 13,328 | $0.50 | 905 s |
-| **SWAN-AISQL** | **1.000** | **10,997** | **$0.28** | **731 s** |
+| **SWAN-AISQL** | **1.000** | **10,995** | **$0.28** | **732 s** |
 
 SWAN and PLOP consume the same recorded verdict per shared prompt, so both match the ground truth (PLOP's
 un-rewritten execution) by construction; *the other systems' verdicts are independent samples, so their
@@ -108,7 +108,7 @@ every system plans itself)
 | BlendSQL 0.1.27 | 0.761 | 59,620 | $4.95 | 4,958 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.778 | 70,925 | $9.81 | 5,202 s |
 | PLOP-DP | 0.698 | 25,639 | $1.11 | 10,208 s |
-| **SWAN-AISQL** | 0.777 | **18,747** | **$2.01** | **1,688 s** |
+| **SWAN-AISQL** | 0.777 | **18,548** | **$2.00** | **1,673 s** |
 
 Quality is at parity among LOTUS, BlendSQL, Palimpzest and SWAN (the model's verdicts bound it); calls, cost
 and latency are the separation.
