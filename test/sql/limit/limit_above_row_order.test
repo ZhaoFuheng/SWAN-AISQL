@@ -12,13 +12,14 @@
 #              backlog once it was warm), and the region asked the first question of many more rows than the
 #              LIMIT needed.
 #              The shape is SWAN 2.0 california_schools-28: DISTINCT on a computed key, LIMIT 5, two filters.
-#              The call bounds run on 4 slots (ai_concurrency) with 20 ms answers. How far the pool runs ahead
-#              grows with the time the ingestion and a late answer take against its pace, so with 20 slots of
-#              5 ms answers a loaded machine made up to 700 calls (over 250 on CI, three test files at once).
-#              Four slots of 20 ms ask 20 times slower: 48-51 calls, also with 20 copies of this file at once.
-#              The fewest possible is 42 (every row up to the fifth passer, row 36, asks the first question, its
-#              five passers the second); served leaf by leaf the shape takes 276 calls, and the cold paths below
-#              took 276 to 551, so the bound of 150 is wide on both sides.
+#              The call bounds run on one slot (ai_concurrency = 1) with 20 ms answers. The consumer reads
+#              nothing before the input is in, and while it comes in the region refills its pool between slices,
+#              up to a pool's worth per slice: on a slow machine the 100 slices of 20 rows asked up to 400 calls
+#              on 4 slots (CI went past 150) and 700 on 20. On one slot that is at most one call per slice, in
+#              row order, so any machine stays near 100 or below (43 calls here). The fewest possible is 42
+#              (every row up to the fifth passer, row 36, asks the first question, its five passers the second);
+#              served leaf by leaf the shape takes 264 calls, and the cold paths below took 264 to 542, so the
+#              bound of 150 is wide on both sides.
 
 require aisql
 
@@ -44,9 +45,9 @@ LIMIT 5;
 ----
 physical_plan	<REGEX>:(?s).*Ai Region.*Unpushed Limit Above: true.*
 
-# the call bounds run on 4 slots (see the header)
+# the call bounds run on one slot (see the header)
 statement ok
-SET ai_concurrency = 4;
+SET ai_concurrency = 1;
 
 statement ok
 SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
@@ -129,11 +130,13 @@ SET threads=1;
 
 # a cold phase that outlasts the first dispatch (ai_leaf_cold_slices = 0 leaves it unbounded, 2 ends it after
 # the second slice) is served in row order too. Cold, the region submitted each slice's whole first-leaf
-# backlog and held the second leaf back until a concurrency-wide batch of it was pending (500-row slices: 551
-# and 510 calls), and before each new slice it waited for the calls out, a round of calls per slice before the
-# consumer read a row (20-row slices, unbounded: 276). On the same 4 slots as above.
+# backlog and held the second leaf back until a concurrency-wide batch of it was pending (500-row slices: 542
+# and 506 calls), and before each new slice it waited for the calls out, a round of calls per slice before the
+# consumer read a row (20-row slices, unbounded: 264). On the same one slot as above. The wait alone, with the
+# backlog fixed, costs one call per slice (100 here), which a slow machine's ingestion matches: no call bound
+# catches it.
 statement ok
-SET ai_concurrency = 4;
+SET ai_concurrency = 1;
 
 statement ok
 SET ai_leaf_slice_rows = 500;
