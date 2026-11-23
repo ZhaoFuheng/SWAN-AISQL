@@ -1,3 +1,4 @@
+import json
 import os
 import pandas as pd
 import palimpzest as pz
@@ -45,37 +46,46 @@ def run(pz_config, data_dir: str):
         ],
     )
 
-    # Project JSON
+    # Project JSON. CHANGED from SemBench's program, which asked ONE generated string field (product_id) to
+    # hold the whole JSON: Palimpzest left that field empty for 47 of the 63 products and returned the other
+    # 16 as parsed objects, so the query scored 0.0 whatever the answers. Here the model generates the two
+    # semantic values (SemBench's own instructions, one call per product) and the JSON is assembled from
+    # them and the product id, as the SWAN-AISQL query assembles it.
     styles_details = styles_details.sem_add_columns(
         cols=[
             {
-                "name": "product_id",
+                "name": "brand",
                 "type": str,
-                "description": """
-                    You are given a product description and an image of the product as well as the product id.
-                    The product contains a fashion item (clothing, shoes, accessories, etc).
-                    There might be multiple fashion items in the image, especially when a model is presenting them.
-                    If this is the case, focus only on the primary fashion item and use the description to determine which item in the image is of interest.
-
-                    For each product, generate the following JSON:
-                    ```
-                    {
-                    "id": <product id> (integer),
-                    "brand": <extract the brand name from the description and/or image. use lower-case letters for the brand name>",
-                    "category": <classify the images into 'accessories', 'apparel', 'footwear'>
-                    }
-                    ```
-
-                    Output the json in a single line.
-                    Keep the order of the keys in the JSON as given in the description.
-                    Do not use spaces between { or keys and values in the JSON, i.e., do no use spaces anywhere in the JSON structure.
-                    Use normal quotes in the JSON; do not use single quotes.
-                """
-            }
+                "description": "Extract the brand name from the description and/or image. Use lower-case letters for the brand name.",
+            },
+            {
+                "name": "category",
+                "type": str,
+                "description": "Classify the image into 'accessories', 'apparel', 'footwear'.",
+            },
         ],
-        depends_on=["prod_id", "productDisplayName", "productDescriptors", "image_file_path"],
+        desc="""
+            You are given a product description and an image of the product.
+            The product contains a fashion item (clothing, shoes, accessories, etc).
+            There might be multiple fashion items in the image, especially when a model is presenting them.
+            If this is the case, focus only on the primary fashion item and use the description to determine which item in the image is of interest.
+        """,
+        depends_on=["productDisplayName", "productDescriptors", "image_file_path"],
     )
-    
+    styles_details = styles_details.add_columns(
+        udf=lambda row: {
+            "product_id": json.dumps(
+                {
+                    "id": int(row["prod_id"]),
+                    "brand": str(row["brand"] or "").strip().lower(),
+                    "category": str(row["category"] or "").strip().lower(),
+                },
+                separators=(",", ":"),
+            )
+        },
+        cols=[{"name": "product_id", "type": str, "description": ""}],
+    )
+
     styles_details = styles_details.project(["product_id"])
 
     output = styles_details.run(pz_config)

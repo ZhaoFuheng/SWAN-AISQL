@@ -3,7 +3,7 @@
  "optimizer": "pareto",
  "policy": "MaxQuality",
  "concurrency": 20,
- "updated": "2026-11-19 19:25:12 MST",
+ "updated": "2026-11-23 00:24:35 MST",
  "per_query": {
   "q1": {
    "latency_s": 28.3,
@@ -413,41 +413,41 @@
    "ran_at": "2026-11-19 19:25:12 MST"
   },
   "q12": {
-   "latency_s": 38.9,
-   "wall_s": 43.1,
+   "latency_s": 33.3,
+   "wall_s": 38.3,
    "llm_calls_fresh": 0,
    "llm_calls": 540,
    "cache_hits": null,
-   "tokens": 685181,
+   "tokens": 671399,
    "reasoning_tokens": null,
-   "cost_usd": 0.20835,
+   "cost_usd": 0.19379,
    "cost_is_estimate": true,
    "optimizer": "pareto",
    "policy": "MaxQuality",
    "pz_stats": {
     "optimization_time": 0.0,
     "optimization_cost": 0.0,
-    "plan_execution_time": 38.89298629760742,
+    "plan_execution_time": 33.322137117385864,
     "plan_execution_cost": 0.0,
-    "total_execution_time": 38.89298629760742,
+    "total_execution_time": 33.322137117385864,
     "total_execution_cost": 0.0,
     "input_text_tokens": 0.0,
     "input_audio_tokens": 0.0,
     "input_image_tokens": 0.0,
     "cache_read_tokens": 0.0,
     "cache_creation_tokens": 0.0,
-    "output_text_tokens": 21172.0,
+    "output_text_tokens": 14824.0,
     "embedding_input_tokens": 0.0,
-    "start_time": 1795142830.0790489
+    "start_time": 1795418679.5356119
    },
    "n_out": 63,
    "n_gold": 58,
-   "precision": 0.0,
-   "recall": 0.0,
+   "precision": 0.905,
+   "recall": 0.983,
    "metric": "f1",
-   "quality": 0.0,
+   "quality": 0.942,
    "error": null,
-   "ran_at": "2026-11-19 19:25:12 MST"
+   "ran_at": "2026-11-23 00:24:35 MST"
   },
   "q13": {
    "latency_s": 34.7,
@@ -526,11 +526,11 @@
  },
  "total": {
   "n_queries": 14,
-  "latency_s": 1397.2,
-  "cost_usd": 16.7584,
+  "latency_s": 1391.6,
+  "cost_usd": 16.7439,
   "cost_is_estimate": true,
-  "tokens": 62534255,
+  "tokens": 62520473,
   "llm_calls": 18194,
-  "macro_quality": 0.672
+  "macro_quality": 0.739
  }
 }

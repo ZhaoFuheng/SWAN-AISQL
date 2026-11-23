@@ -45,8 +45,9 @@ them. Running the PLOP fork: `PLOP_FORK.md`.
 
 Palimpzest: `MOVIE/palimpzest_queries.py`, `MMQA/palimpzest_queries.py` and `ECOMM/palimpzest_queries/qN.py`
 are **SemBench's own Palimpzest programs**, copied from the SemBench repository (MOVIE q1–q10, MMQA all
-eleven, ECOMM q1–q13; SemBench wrote none for ECOMM q14, so `ECOMM/palimpzest_queries/q14.py` is **our program**, the
-same shape as the SWAN and LOTUS copies: white-socks filter, join on the description, best image per product), run by `palimpzest_<suite>.py` through
+eleven, ECOMM q1–q13, of which q12 is changed, see ECOMM below; SemBench wrote none for ECOMM q14, so
+`ECOMM/palimpzest_queries/q14.py` is **our program**, the same shape as the SWAN and LOTUS copies: white-socks
+filter, join on the description, best image per product), run by `palimpzest_<suite>.py` through
 `palimpzest_exec.py` in Palimpzest's own interpreter (`setup_palimpzest.sh`) with SemBench's Palimpzest
 settings and the Abacus optimizer's pareto plan search (SemBench ran 0.8.2 with it off; we run 1.5.3, the
 current release); Palimpzest's sample-based cost estimation runs only with a validator or training set,
@@ -185,7 +186,10 @@ the image assets, which are not in git (see above). PLOP and BlendSQL do not sup
 compare SWAN with LOTUS on the full suite and with Palimpzest on SemBench's programs for it: Palimpzest runs
 SemBench's own programs for ECOMM q1–q13 and our program for q14 (SemBench wrote none; it mirrors the SWAN and
 LOTUS copies) and all of MMQA; its cost is computed from its tokens and its latency is the execution time it
-reports, without its interpreter's start-up.
+reports, without its interpreter's start-up. One SemBench program is changed: ECOMM q12 asked one generated
+text field for the whole JSON, which Palimpzest returned empty or as a parsed object for every product (0.0
+whatever the answers); ours generates the brand and the category in the same call and assembles the JSON from
+them and the product id, as the SWAN query does.
 
 **Hybrid bench (agent_bench Q1–Q30).** The 30 hybrid queries (relational plans with semantic operators over
 DataAgentBench and TPC-H data) are the benchmark introduced by the PLOP paper; the queries and data ship in the

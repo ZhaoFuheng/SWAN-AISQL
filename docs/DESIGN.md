@@ -511,7 +511,7 @@ latency column also compares the provider's load on those days. Quality, calls a
 | benchmark | SWAN | SWAN + Jev (ai_filter/ai_classify on TypeSafe) | LOTUS / BlendSQL / Palimpzest / PLOP |
 |---|---|---|---|
 | SemBench MOVIE (10q) | **0.818**, 18.8k calls, $2.25, 1,487s | 0.795, 18.8k, **$0.39**, 458s | LOTUS 0.780, 201k, $14.45, 10,579s; BlendSQL 0.718‡, 18.7k, $1.44, 1,163s; Palimpzest 1.5.3 (Abacus optimizer) 0.761‡, 68.5k, $17.88, 4,778s; PLOP-DP 0.729‡, 19.2k, $1.70, 1,649s |
-| SemBench ECOMM (14q) | **0.832**, 15.7k, $6.74, 1,221s | 0.814, 15.7k, $5.77, 831s | LOTUS 0.639, 17.8k, $6.41, 1,546s; Palimpzest 0.672, 18.2k, $16.76, 1,397s (q14 is our program, SemBench wrote none) |
+| SemBench ECOMM (14q) | **0.832**, 15.7k, $6.74, 1,221s | 0.814, 15.7k, $5.77, 831s | LOTUS 0.639, 17.8k, $6.41, 1,546s; Palimpzest 0.739, 18.2k, $16.74, 1,392s (q14 is our program, SemBench wrote none; q12 assembles its JSON from two generated fields) |
 | SemBench MMQA (11q) | 0.648, 16.5k, $2.41, 1,261s | 0.599, 14.1k, $1.93, 1,004s | LOTUS 0.450, 19.0k, $2.43, 1,391s; Palimpzest 0.687, 46.3k, $13.79, 3,244s |
 | agent_bench Q1–Q30 | **1.000**, 10,995 calls, $0.28, 732s | — | LOTUS 0.632*, 25,741, $2.90, 1,789s; BlendSQL 0.714*, 25,441, $2.91, 1,954s; Palimpzest 1.5.3 (Abacus optimizer) 0.735*, 25,777, $6.82, 2,040s; PLOP-DP (public Morrila fork) 1.000, 13,328, $0.50, 905s |
 | SWAN 2.0 (120q, 4 BIRD databases) | 0.777, **18,548** calls, **$2.00**, **1,673s** | — | LOTUS 0.752, 69,204, $4.04, 4,026s; BlendSQL 0.761, 59,620, $4.95, 4,958s; Palimpzest (Abacus optimizer) 0.778, 70,925, $9.81, 5,202s; PLOP-DP 0.698, 25,639, $1.11, 10,208s |

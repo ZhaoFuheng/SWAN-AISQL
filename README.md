@@ -73,7 +73,7 @@ tables that mix text and images). BlendSQL and PLOP take no images.
 | ECOMM | quality | calls | cost | latency |
 |---|---|---|---|---|
 | LOTUS 1.2.4 | 0.639 | 17.8k | $6.41 | 1,546 s |
-| Palimpzest 1.5.3 (Abacus optimizer) | 0.672 | 18.2k | $16.76 | 1,397 s |
+| Palimpzest 1.5.3 (Abacus optimizer) | 0.739 | 18.2k | $16.74 | 1,392 s |
 | **SWAN-AISQL** | **0.832** | 15.7k | $6.74 | 1,221 s |
 | SWAN-AISQL (Jev) | 0.814 | 15.7k | $5.77 | 831 s |
 
