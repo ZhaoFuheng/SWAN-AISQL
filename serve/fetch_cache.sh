@@ -8,8 +8,9 @@
 # Without a URL the script asks Zenodo for the LATEST version of the record (concept DOI
 # 10.5281/zenodo.23112764; published versions are immutable, so an updated cache is always a new version),
 # checks the download against the md5 Zenodo publishes for it, and unpacks it (the published file is the
-# gzip-compressed DuckDB file: about 1 GB to download, about 4.8 GB on disk). A URL ending in .gz is
-# unpacked the same way; any other URL is taken as the DuckDB file itself.
+# gzip-compressed DuckDB file: about 1 GB to download, about 4.8 GB on disk). A download cut short resumes
+# where it stopped, also when the script is run again. A URL ending in .gz is unpacked the same way; any
+# other URL is taken as the DuckDB file itself.
 #
 # Replay serves byte-identical requests only: the repository's queries, model gpt-5.6-luna, the engine's
 # default prompts and schemas. An edited query sends a fresh request, which needs OPENAI_API_KEY in .env.
@@ -40,10 +41,23 @@ if [ -z "$URL" ]; then
 	[ -n "$id" ] || { echo "could not find the latest record id in Zenodo's answer"; exit 1; }
 	URL="https://zenodo.org/records/$id/files/$FILE?download=1"
 	echo "latest version: https://zenodo.org/records/$id"
+else
+	FILE="$(basename "${URL%%\?*}")"
 fi
-PART="$DEST.download"
+# One partial file per file name, so a cut download is resumed (curl -C -) and never resumed into from another
+# version. A transfer slower than 1 KB/s for a minute counts as cut. After five attempts the script stops; run it
+# again and it resumes from the same place.
+PART="$DEST.download-$FILE"
 echo "downloading $URL"
-curl -L --fail --progress-bar -o "$PART" "$URL"
+n=1
+until curl -L --fail --progress-bar -C - --speed-limit 1024 --speed-time 60 -o "$PART" "$URL"; do
+	rc=$?
+	[ $rc -eq 33 ] && rm -f "$PART"   # the server cannot resume: the next attempt starts over
+	[ $n -lt 5 ] || { echo "download stopped $n times (curl exit $rc); run the script again to resume"; exit 1; }
+	echo "download stopped (curl exit $rc); attempt $((n + 1)) of 5 in 10 s"
+	n=$((n + 1))
+	sleep 10
+done
 if [ -n "$MD5" ]; then
 	if command -v md5sum >/dev/null 2>&1; then sum=$(md5sum "$PART" | cut -d' ' -f1)
 	elif command -v md5 >/dev/null 2>&1; then sum=$(md5 -q "$PART")
