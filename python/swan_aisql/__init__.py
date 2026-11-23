@@ -38,7 +38,7 @@ try:  # the installed distribution's version (pyproject.toml), so this never goe
 
     __version__ = _dist_version("swan-aisql")
 except Exception:  # noqa: BLE001 -- an uninstalled checkout
-    __version__ = "0.3.1"
+    __version__ = "0.3.2"
 __all__ = [
     "connect",
     "load",
