@@ -1,6 +1,6 @@
 # SemBench: SWAN vs SWAN+Jev (TypeSafe System One for ai_filter/ai_classify, and the bounded ai_score of MOVIE q9/q10) vs LOTUS -- 2026-11-20
 
-SWAN+Jev = `SET ai_typesafe='filter,classify'` (MOVIE: `'filter,classify,score'`) with jev-latest; text-only prompts; image-bearing filters/classifies, ai_complete, ai_agg and every other ai_score form stay on gpt-5.6-luna. Same SQL, same prompts; how a function is routed and its typed answer re-encoded: docs/DESIGN.md §7 (TypeSafe System One backend). Every column is a replay on one machine (a MacBook Air M5; SWAN 2026-11-11/21, LOTUS 2026-11-19/20, SWAN+Jev 2026-11-19/20/21): one system at a time, each recorded answer returned after its recorded response time, no provider reachable. Runner: run_sembench_typesafe.sh; this file: `compare3.py SUITE`.
+SWAN+Jev = `SET ai_typesafe='filter,classify'` (MOVIE: `'filter,classify,score'`) with jev-latest; text-only prompts; image-bearing filters/classifies, ai_complete, ai_agg and every other ai_score form stay on gpt-5.6-luna. Same SQL, same prompts; how a function is routed and its typed answer re-encoded: docs/DESIGN.md §7 (TypeSafe System One backend). Every column is a replay on one machine (a MacBook Air M5; SWAN 2026-11-11/21, LOTUS 2026-11-19/20 and 2026-11-23 for six MMQA queries, SWAN+Jev 2026-11-19/20/21): one system at a time, each recorded answer returned after its recorded response time, no provider reachable. Runner: run_sembench_typesafe.sh; this file: `compare3.py SUITE`.
 
 ## MOVIE
 
@@ -40,17 +40,19 @@ SWAN+Jev = `SET ai_typesafe='filter,classify'` (MOVIE: `'filter,classify,score'`
 
 ## MMQA
 
+LOTUS q2a, q2b, q6a–c and q7 are the 2026-11-23 recording with the SWAN prompts; before, our LOTUS copy carried its own wording there, and q6 lacked the SWAN prompt's sentence pinning the answer to the listed destinations (LOTUS was 0.450).
+
 | q | SWAN | SWAN+Jev | LOTUS | SWAN calls | +Jev calls | LOTUS calls | SWAN lat (s) | +Jev lat (s) | LOTUS lat (s) | SWAN $ | +Jev $ | LOTUS $ |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | q1 | 1.000 | 1.000 | 1.000 | 1 | 1 | 200 | 2.0 | 2.0 | 17.2 | 0.0000 | 0.0000 | 0.0120 |
-| q2a | 0.101 | 0.101 | 0.065 | 1,200 | 1,200 | 2,600 | 98.0 | 97.9 | 196.2 | 0.1902 | 0.1902 | 0.3580 |
-| q2b | 0.101 | 0.101 | 0.065 | 1,210 | 1,210 | 2,749 | 99.0 | 99.1 | 205.6 | 0.1904 | 0.1904 | 0.3706 |
+| q2a | 0.101 | 0.101 | 0.059 | 1,200 | 1,200 | 2,600 | 98.0 | 97.9 | 195.8 | 0.1902 | 0.1902 | 0.3681 |
+| q2b | 0.101 | 0.101 | 0.059 | 1,210 | 1,210 | 2,697 | 99.0 | 99.1 | 201.2 | 0.1904 | 0.1904 | 0.3743 |
 | q3a | 0.722 | 0.491 | 0.722 | 200 | 200 | 200 | 17.6 | 5.2 | 11.7 | 0.0215 | 0.0040 | 0.0145 |
 | q3f | 0.857 | 0.429 | 1.000 | 200 | 200 | 200 | 16.3 | 5.6 | 10.2 | 0.0215 | 0.0040 | 0.0131 |
 | q4 | 0.626 | 0.626 | 0.611 | 24 | 24 | 24 | 3.3 | 3.3 | 3.5 | 0.0022 | 0.0022 | 0.0032 |
 | q5 | 1.000 | 1.000 | 1.000 | 1 | 1 | 1 | 1.6 | 1.6 | 1.2 | 0.0006 | 0.0006 | 0.0007 |
-| q6a | 0.667 | 1.000 | 0.105 | 176 | 176 | 200 | 16.2 | 5.5 | 12.0 | 0.0227 | 0.0031 | 0.0153 |
-| q6b | 1.000 | 1.000 | 0.083 | 176 | 176 | 200 | 16.3 | 5.4 | 13.7 | 0.0230 | 0.0031 | 0.0178 |
-| q6c | 1.000 | 0.750 | 0.222 | 176 | 176 | 200 | 16.3 | 5.1 | 13.2 | 0.0237 | 0.0031 | 0.0179 |
-| q7 | 0.059 | 0.086 | 0.075 | 13,176 | 10,776 | 12,400 | 973.9 | 773.5 | 906.4 | 1.9121 | 1.5326 | 1.6107 |
-| **macro / Σ** | **0.648** | **0.599** | **0.450** | 16,540 | 14,140 | 18,974 | 1,261 | 1,004 | 1,391 | 2.41 | 1.93 | 2.43 |
+| q6a | 0.667 | 1.000 | 1.000 | 176 | 176 | 200 | 16.2 | 5.5 | 9.6 | 0.0227 | 0.0031 | 0.0077 |
+| q6b | 1.000 | 1.000 | 1.000 | 176 | 176 | 200 | 16.3 | 5.4 | 11.8 | 0.0230 | 0.0031 | 0.0095 |
+| q6c | 1.000 | 0.750 | 1.000 | 176 | 176 | 200 | 16.3 | 5.1 | 10.2 | 0.0237 | 0.0031 | 0.0116 |
+| q7 | 0.059 | 0.086 | 0.020 | 13,176 | 10,776 | 12,400 | 973.9 | 773.5 | 883.3 | 1.9121 | 1.5326 | 1.6976 |
+| **macro / Σ** | **0.648** | **0.599** | **0.679** | 16,540 | 14,140 | 18,922 | 1,261 | 1,004 | 1,356 | 2.41 | 1.93 | 2.51 |

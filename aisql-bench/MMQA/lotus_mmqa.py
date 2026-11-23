@@ -86,6 +86,9 @@ MOVIES16 = ['Love Is the Drug','Crashing','Cloverfield',"My Best Friend's Girl",
     'Queens of Country','Item 47','The Night Before','Now You See Me 2','Allied','Extinction','Cobweb']
 
 # ---- queries: each returns (output_iterable, gold_iterable) ----
+# Every prompt is the SWAN query's text. q2a/q2b/q6/q7 were brought in line on 2026-11-23: before, they
+# carried their own wording, and q6 lacked the SWAN prompt's sentence pinning the answer to the listed
+# destinations (LOTUS then answered from what it knows about the airline: 27-61 rows for 1-5 gold).
 
 def q1():  # director (table+text). bigquery uses AI.GENERATE("Extract the director name...") over EVERY row
     # then merges+filters -- extract-all (~200 calls), the naive dataflow. LOTUS's AI.GENERATE equivalent is
@@ -123,10 +126,11 @@ def q5():  # actor in ALL 16 movies (text agg)
     col = newcol(sub, r)
     return [str(r.iloc[0][col])], gt("q5")
 
-def q6(place, key):  # airlines with destinations in <place>
+def q6(place, key):  # airlines with destinations in <place>; the SWAN Q6 text, grounding sentence included
     tampa = load("tampa_international_airport")
     r = tampa.sem_filter("Given destinations '{Destinations}' of {Airlines}, the airline has flights to "
-                         + place + ".")
+                         + place + ". Base your answer ONLY on the listed destinations, not on outside "
+                         "knowledge about the airline.")
     return list(r["Airlines"]), gt(key)
 
 IMGDIR = os.path.join(DATA, "images")
@@ -140,7 +144,8 @@ def _q2_matches():  # (ID, Track, image_filename) rows where the image is the tr
     w = load("ap_warrior")[["ID", "Track"]]
     cross = w.merge(_images_df(), how="cross")
     cross["image"] = ImageArray(list(cross["image"]))  # re-wrap: merge drops the extension dtype
-    return cross.sem_filter("The image {image} shows the logo of the racetrack: {Track}")
+    return cross.sem_filter("You will be provided with a horse racetrack name and an image. Determine if the "
+                            "image shows the logo of the racetrack. Racetrack: {Track}, Image: {image}")
 
 def q2a():  # racetrack logos (table+image): (ID, image) pairs
     r = _q2_matches()
@@ -150,8 +155,8 @@ def q2a():  # racetrack logos (table+image): (ID, image) pairs
 def q2b():  # q2a + the logo's dominant color: (ID, image, color) triples
     r = _q2_matches()
     if len(r):
-        r = r.sem_map("What is the single dominant color of the logo in this image? Answer with ONE color "
-                      "word only. Image: {image}", suffix="color")
+        r = r.sem_map("What's the color of the logo in the image if available: {image} Only respond with the "
+                      "color name.", suffix="color")
     out = [(int(t.ID), t.image_filename, norm(getattr(t, "color", ""))) for t in r.itertuples()]
     return out, [(int(a), b, norm(c)) for a, b, c in gt("q2b")]
 
@@ -161,7 +166,8 @@ def q7():  # for each Europe airline, its logo (table+image). Chains from the Eu
                               "to Europe.")
     cross = europe[["Airlines"]].merge(_images_df(), how="cross")
     cross["image"] = ImageArray(list(cross["image"]))
-    r = cross.sem_filter("The image {image} shows the logo of the airline: {Airlines}")
+    r = cross.sem_filter("You will be provided with an airline name and an image. Determine if the image shows "
+                         "the logo of the airline. Airline: {Airlines}, Image: {image}")
     out = [(t.Airlines, t.image_filename) for t in r.itertuples()]
     return out, [(a, b) for a, b in gt("q7")]
 
