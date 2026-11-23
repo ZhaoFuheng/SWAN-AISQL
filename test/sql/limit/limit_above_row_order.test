@@ -5,16 +5,20 @@
 #              more leaves serves its pending calls in ROW order: a free slot goes to the earliest waiting row,
 #              whatever its leaf, so a row that passed its first question asks its second one before any later
 #              row asks its first. The source hands rows out in input order, so this is the order the consumer
-#              can use the answers in. It is not the order they land in: while an early row waits for its
-#              answer the pool goes on with later rows, so the stop wastes answered calls as well as the ones
-#              in flight (here about 37 calls are for rows after the fifth passer). Served leaf by leaf, the
-#              second question of the early rows waited (for a batch of them while the region was cold, behind
-#              the first leaf's whole backlog once it was warm), and the region asked the first question of
-#              many more rows than the LIMIT needed.
+#              can use the answers in. It is not the order they land in: while the region still ingests its
+#              input, or an early row waits for its answer, the pool goes on with later rows, so the stop wastes
+#              answered calls as well as the ones in flight. Served leaf by leaf, the second question of the
+#              early rows waited (for a batch of them while the region was cold, behind the first leaf's whole
+#              backlog once it was warm), and the region asked the first question of many more rows than the
+#              LIMIT needed.
 #              The shape is SWAN 2.0 california_schools-28: DISTINCT on a computed key, LIMIT 5, two filters.
-#              The call bound is wide on both sides: this shape took 379-395 calls served leaf by leaf and takes
-#              116-139 in row order (the fewest possible is 82: every row up to the fifth passer, row 76, asks
-#              the first question, its five passers the second).
+#              The call bounds run on 4 slots (ai_concurrency) with 20 ms answers. How far the pool runs ahead
+#              grows with the time the ingestion and a late answer take against its pace, so with 20 slots of
+#              5 ms answers a loaded machine made up to 700 calls (over 250 on CI, three test files at once).
+#              Four slots of 20 ms ask 20 times slower: 48-51 calls, also with 20 copies of this file at once.
+#              The fewest possible is 42 (every row up to the fifth passer, row 36, asks the first question, its
+#              five passers the second); served leaf by leaf the shape takes 276 calls, and the cold paths below
+#              took 276 to 551, so the bound of 150 is wide on both sides.
 
 require aisql
 
@@ -30,22 +34,26 @@ CREATE TABLE school AS SELECT i AS id, 'school '||lpad(i::VARCHAR, 5, '0') AS na
 # what every row answers, asked without a LIMIT
 statement ok
 CREATE TABLE ref AS SELECT s.name FROM school s
-WHERE ai_filter('[sleep=5] [p=10] continuation? '||s.name) AND ai_filter('[sleep=5] [p=80] in the county? '||s.name);
+WHERE ai_filter('[sleep=20] [p=10] continuation? '||s.name) AND ai_filter('[sleep=20] [p=80] in the county? '||s.name);
 
 # the LIMIT stays above the region
 query II
 EXPLAIN SELECT DISTINCT substr(s.name, 1, 12) AS k FROM school s
-WHERE ai_filter('[sleep=5] [p=10] continuation? '||s.name) AND ai_filter('[sleep=5] [p=80] in the county? '||s.name)
+WHERE ai_filter('[sleep=20] [p=10] continuation? '||s.name) AND ai_filter('[sleep=20] [p=80] in the county? '||s.name)
 LIMIT 5;
 ----
 physical_plan	<REGEX>:(?s).*Ai Region.*Unpushed Limit Above: true.*
+
+# the call bounds run on 4 slots (see the header)
+statement ok
+SET ai_concurrency = 4;
 
 statement ok
 SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_cache_clear();
 
 statement ok
 CREATE TABLE lim AS SELECT DISTINCT substr(s.name, 1, 12) AS k FROM school s
-WHERE ai_filter('[sleep=5] [p=10] continuation? '||s.name) AND ai_filter('[sleep=5] [p=80] in the county? '||s.name)
+WHERE ai_filter('[sleep=20] [p=10] continuation? '||s.name) AND ai_filter('[sleep=20] [p=80] in the county? '||s.name)
 LIMIT 5;
 
 # five rows, each of them a row of the full answer
@@ -56,9 +64,12 @@ SELECT (SELECT count(*) FROM lim), (SELECT count(*) FROM lim WHERE k NOT IN (SEL
 
 # and the region did not run ahead of the LIMIT
 query I
-SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT < 250 FROM ai_usage();
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT < 150 FROM ai_usage();
 ----
 true
+
+statement ok
+RESET ai_concurrency;
 
 # three leaves, one of them under an OR: the same rule, the answer stands
 statement ok
@@ -91,7 +102,7 @@ SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_c
 query I
 SELECT count(*) = (SELECT count(DISTINCT substr(name, 1, 12)) FROM ref) FROM (
   SELECT DISTINCT substr(s.name, 1, 12) AS k FROM school s
-  WHERE ai_filter('[sleep=5] [p=10] continuation? '||s.name) AND ai_filter('[sleep=5] [p=80] in the county? '||s.name)
+  WHERE ai_filter('[sleep=20] [p=10] continuation? '||s.name) AND ai_filter('[sleep=20] [p=80] in the county? '||s.name)
   LIMIT 100000);
 ----
 true
@@ -105,7 +116,7 @@ SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_c
 
 statement ok
 CREATE TABLE lim4 AS SELECT DISTINCT substr(s.name, 1, 12) AS k FROM school s
-WHERE ai_filter('[sleep=5] [p=10] continuation? '||s.name) AND ai_filter('[sleep=5] [p=80] in the county? '||s.name)
+WHERE ai_filter('[sleep=20] [p=10] continuation? '||s.name) AND ai_filter('[sleep=20] [p=80] in the county? '||s.name)
 LIMIT 5;
 
 query II
@@ -118,9 +129,12 @@ SET threads=1;
 
 # a cold phase that outlasts the first dispatch (ai_leaf_cold_slices = 0 leaves it unbounded, 2 ends it after
 # the second slice) is served in row order too. Cold, the region submitted each slice's whole first-leaf
-# backlog and held the second leaf back until a concurrency-wide batch of it was pending (500-row slices: 619
-# and 559 calls), and before each new slice it waited for the calls out, a round of calls per slice before the
-# consumer read a row (20-row slices, unbounded: 398)
+# backlog and held the second leaf back until a concurrency-wide batch of it was pending (500-row slices: 551
+# and 510 calls), and before each new slice it waited for the calls out, a round of calls per slice before the
+# consumer read a row (20-row slices, unbounded: 276). On the same 4 slots as above.
+statement ok
+SET ai_concurrency = 4;
+
 statement ok
 SET ai_leaf_slice_rows = 500;
 
@@ -132,7 +146,7 @@ SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_c
 
 statement ok
 CREATE TABLE limc0 AS SELECT DISTINCT substr(s.name, 1, 12) AS k FROM school s
-WHERE ai_filter('[sleep=5] [p=10] continuation? '||s.name) AND ai_filter('[sleep=5] [p=80] in the county? '||s.name)
+WHERE ai_filter('[sleep=20] [p=10] continuation? '||s.name) AND ai_filter('[sleep=20] [p=80] in the county? '||s.name)
 LIMIT 5;
 
 query II
@@ -141,7 +155,7 @@ SELECT (SELECT count(*) FROM limc0), (SELECT count(*) FROM limc0 WHERE k NOT IN 
 5	0
 
 query I
-SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT < 250 FROM ai_usage();
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT < 150 FROM ai_usage();
 ----
 true
 
@@ -153,7 +167,7 @@ SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_c
 
 statement ok
 CREATE TABLE limc2 AS SELECT DISTINCT substr(s.name, 1, 12) AS k FROM school s
-WHERE ai_filter('[sleep=5] [p=10] continuation? '||s.name) AND ai_filter('[sleep=5] [p=80] in the county? '||s.name)
+WHERE ai_filter('[sleep=20] [p=10] continuation? '||s.name) AND ai_filter('[sleep=20] [p=80] in the county? '||s.name)
 LIMIT 5;
 
 query II
@@ -162,7 +176,7 @@ SELECT (SELECT count(*) FROM limc2), (SELECT count(*) FROM limc2 WHERE k NOT IN 
 5	0
 
 query I
-SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT < 250 FROM ai_usage();
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT < 150 FROM ai_usage();
 ----
 true
 
@@ -177,7 +191,7 @@ SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_c
 
 statement ok
 CREATE TABLE limc20 AS SELECT DISTINCT substr(s.name, 1, 12) AS k FROM school s
-WHERE ai_filter('[sleep=5] [p=10] continuation? '||s.name) AND ai_filter('[sleep=5] [p=80] in the county? '||s.name)
+WHERE ai_filter('[sleep=20] [p=10] continuation? '||s.name) AND ai_filter('[sleep=20] [p=80] in the county? '||s.name)
 LIMIT 5;
 
 query II
@@ -186,7 +200,7 @@ SELECT (SELECT count(*) FROM limc20), (SELECT count(*) FROM limc20 WHERE k NOT I
 5	0
 
 query I
-SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT < 250 FROM ai_usage();
+SELECT (sum(llm_calls)-sum(embed_calls))::BIGINT < 150 FROM ai_usage();
 ----
 true
 
@@ -195,6 +209,9 @@ RESET ai_leaf_cold_slices;
 
 statement ok
 RESET ai_leaf_slice_rows;
+
+statement ok
+RESET ai_concurrency;
 
 # SET ai_leaf_lookahead = 0 submits every pending call at once: no slot to give out, so no row order; the
 # region keeps its cold gate there, and the answer is the same
@@ -206,7 +223,7 @@ SELECT ai_selectivity_reset(), ai_training_reset(), ai_usage_reset(), ai_local_c
 
 statement ok
 CREATE TABLE lim0 AS SELECT DISTINCT substr(s.name, 1, 12) AS k FROM school s
-WHERE ai_filter('[sleep=5] [p=10] continuation? '||s.name) AND ai_filter('[sleep=5] [p=80] in the county? '||s.name)
+WHERE ai_filter('[sleep=20] [p=10] continuation? '||s.name) AND ai_filter('[sleep=20] [p=80] in the county? '||s.name)
 LIMIT 5;
 
 query II
