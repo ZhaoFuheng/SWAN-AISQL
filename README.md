@@ -114,7 +114,7 @@ Quality is at parity among LOTUS, BlendSQL, Palimpzest and SWAN (the model's ver
 and latency are the separation.
 
 **Reproducing the tables.** The recorded answers of every system on every benchmark live in one store,
-`serve/.llm_cache.duckdb` (2.5 M recorded calls, 4.8 GB), which the cache proxy serves to any of them, so a
+`serve/.llm_cache.duckdb` (2.6 M recorded calls, 4.8 GB), which the cache proxy serves to any of them, so a
 replay reproduces a table at zero cost and needs no key. The store is published on Zenodo
 ([10.5281/zenodo.23112764](https://doi.org/10.5281/zenodo.23112764); the DOI resolves to the latest version, which
 is the one behind the tables above); `serve/fetch_cache.sh` downloads, checks and unpacks it (1.0 GB download). The
