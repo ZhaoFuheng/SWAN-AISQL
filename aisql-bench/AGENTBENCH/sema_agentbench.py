@@ -28,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -91,9 +92,30 @@ def ensure_tpch():
                 os.remove(f)
 
 
+def proxy_replays_latency():
+    """Whether the cache proxy returns recorded answers after their recorded response time (its /cache/stats
+    `simulate_latency`); None when the endpoint does not say (not the cache proxy)."""
+    try:
+        with urllib.request.urlopen(PROXY.rstrip("/") + "/cache/stats", timeout=10) as r:
+            return json.load(r).get("simulate_latency")
+    except Exception:
+        return None
+
+
+def timing(fresh, replays_latency):
+    """How a query's latency was measured: "live" when some of its calls were new to the cache (asked of the
+    provider during the run), "replay" when the cache answered every call after its recorded response time."""
+    if fresh is None:
+        return None
+    if fresh:
+        return "live"
+    return {True: "replay", False: "replay without recorded latency"}.get(replays_latency)
+
+
 def main():
     which = sys.argv[1:] or [f"Q{i}" for i in range(1, 31)]
     ensure_tpch()
+    replays_latency = proxy_replays_latency()
     os.makedirs(os.path.join(HERE, "results", TAG), exist_ok=True)
     stamp = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     path = os.path.join(HERE, "results", TAG + "_agentbench_results.json")
@@ -119,8 +141,9 @@ def main():
                 err = (p.stderr.strip().split("\n")[-1] or "nonzero exit")[:300]
             out = p.stdout.strip()
             rows = max(0, len(out.split("\n")) - 1) if out else 0
+            fresh = (m1 - m0) if (m0 is not None and m1 is not None) else None
             rec = {"latency_s": round(dt, 1), "llm_calls": use["requests"], "errors": use["errors"],
-                   "llm_calls_fresh": (m1 - m0) if (m0 is not None and m1 is not None) else None,
+                   "llm_calls_fresh": fresh, "timing": timing(fresh, replays_latency), "batch": BATCH or "default",
                    "tokens": use["prompt_tokens"] + use["completion_tokens"],
                    "reasoning_tokens": use["reasoning_tokens"], "cost_usd": round(use["cost_usd"], 5),
                    "rows": rows, "error": err, "ran_at": stamp}
