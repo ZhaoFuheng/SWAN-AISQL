@@ -9,9 +9,10 @@ its own prompts, so its answers are independent samples. Every request passes th
 into aisql-bench/swanbench_meter.py), which forwards it to the cache proxy and counts it the way SWAN 2.0 counts
 every system's: requests (retries included),
 tokens from the response's usage, and cost from the cost header the proxy replays (litellm's gpt-5.6-luna
-prices). Sema runs with its own settings: a lone filter or map asks one row per request (semantic_batch_size 1).
-SEMA_BATCH=k sets semantic_batch_size, and semantic_filter_batch_size for its multi-filter executor, to k rows per
-prompt; SEMA_EXTRA_SET adds other SET statements.
+prices). Sema runs at its default settings, where a lone filter or map asks one row per request
+(semantic_batch_size 1); the results file records the settings Sema reports. A results file that already holds
+queries takes more only from a run with the same model and settings; any other run stops before it writes
+anything (use another SWAN_TAG).
 
 Concurrency is the other runners' 20: sema_fork.patch reads SEMA_LLM_MAX_CONNECTIONS (requests in flight per
 thread; Sema's own limit is 50) and SEMA_LLM_TIMEOUT_S (Sema's 30 s request timeout runs from the moment a request
@@ -20,8 +21,7 @@ with SET threads=1 so the cap holds for the process. The relational work here is
 
   run (from aisql-bench/MOVIE):  python3 sema_movie.py [q1 q2 ...]
   env:  SEMA_BIN (default ../../../Sema/build/release/duckdb), AI_PROXY_URL (:4001), AI_MODEL (gpt-5.6-luna),
-        AI_MAX_CONCURRENCY (20), SEMA_LLM_TIMEOUT_S (1800), SEMA_BATCH (unset: Sema's own), SEMA_EXTRA_SET,
-        SWAN_TAG (suffix of the result files)
+        AI_MAX_CONCURRENCY (20), SEMA_LLM_TIMEOUT_S (1800), SWAN_TAG (suffix of the result files)
 """
 import csv
 import io
@@ -46,10 +46,7 @@ MODEL = os.environ.get("AI_MODEL", "gpt-5.6-luna")
 TAG = os.environ.get("SWAN_TAG", "")
 CONC = os.environ.get("AI_MAX_CONCURRENCY", "20")
 TIMEOUT_S = os.environ.get("SEMA_LLM_TIMEOUT_S", "1800")
-BATCH = os.environ.get("SEMA_BATCH", "")
-EXTRA = ("SET threads=1;\n"
-         + (f"SET semantic_batch_size={BATCH};\nSET semantic_filter_batch_size={BATCH};\n" if BATCH else "")
-         + os.environ.get("SEMA_EXTRA_SET", ""))
+EXTRA = "SET threads=1;\n"  # the only SET besides the endpoint: Sema's own settings stay at their defaults
 ENV = {**os.environ, "DUCKDB_AGENT_MODE": "0", "SEMA_LLM_MAX_CONNECTIONS": CONC, "SEMA_LLM_TIMEOUT_S": TIMEOUT_S}
 SETTINGS = ("semantic_batch_size", "semantic_voting_rounds", "semantic_filter_batch_size",
             "semantic_filter_voting_rounds", "semantic_filter_accuracy_threshold", "semantic_filter_latency_first",
@@ -138,12 +135,16 @@ def main():
         except Exception:
             return {}
 
-    per_query = _load(res_p).get("per_query", {})
+    saved = _load(res_p)
+    per_query = saved.get("per_query", {})
     raw = _load(raw_p)
     ensure_db()
-    settings = effective_settings()
+    settings = {**effective_settings(), "max_connections": CONC, "request_timeout_s": TIMEOUT_S}
+    if per_query and (saved.get("model"), saved.get("settings")) != (MODEL, settings):
+        raise SystemExit(f"{os.path.basename(res_p)} holds queries run with {saved.get('model')} and settings "
+                         f"{saved.get('settings')}; this run has {MODEL} and {settings}. Nothing written: use another "
+                         f"SWAN_TAG, or move the sema_movie_*{TAG} files away first")
     stamp = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-    settings = {**settings, "max_connections": CONC, "request_timeout_s": TIMEOUT_S}
     header = f"SEMA MOVIE {MODEL} via meter -> {PROXY}  sf2000  serial  settings={settings}  queries={which}"
     print(header + "\n", flush=True)
     lines = []

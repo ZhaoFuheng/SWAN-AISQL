@@ -6,6 +6,7 @@ Reads results/{<SWAN_TAG>,plop,lotus,blendsql,palimpzest,sema}_agentbench_result
 and writes results/agentbench_comparison_three_way.md.
 
   SWAN_TAG=swan_20261111 python3 report_three_way.py     (the committed table; SWAN_TAG=swan for your own run)
+  SEMA_TAG picks the Sema run the same way (default sema, the committed one); it must be Sema at its defaults.
 """
 import importlib.util
 import json
@@ -14,8 +15,9 @@ from datetime import date
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SWAN_TAG = os.environ.get("SWAN_TAG", "swan")
+SEMA_TAG = os.environ.get("SEMA_TAG", "sema")
 SYSTEMS = [("LOTUS", "lotus")]
-for name, tag in (("BlendSQL", "blendsql"), ("Palimpzest", "palimpzest"), ("Sema", "sema")):
+for name, tag in (("BlendSQL", "blendsql"), ("Palimpzest", "palimpzest"), ("Sema", SEMA_TAG)):
     if os.path.exists(os.path.join(HERE, "results", tag + "_agentbench_results.json")):
         SYSTEMS.append((name, tag))
 SYSTEMS += [("PLOP", "plop"), ("SWAN", SWAN_TAG)]
@@ -27,7 +29,7 @@ exec(compile(ev_src, "eval_agentbench.py", "exec"), ev.__dict__)
 
 HEADER = """# agent_bench Q1-Q30: {title} (gpt-5.6-luna) -- {today}
 
-Quality = deterministic scorer (eval_agentbench.py): LIMIT-free PLOP execution as ground truth; LIMIT queries scored sound+complete. Calls = true request counts through the cache proxy. Each system's columns are {coverage} of the 30 queries ({runs}), {timing}, one system at a time; SWAN replays PLOP's samples via the shared-verdict alias. LOTUS translations are ours (aisql-bench/README.md, provenance table). SWAN run: results/{swan_tag}.
+Quality = deterministic scorer (eval_agentbench.py): LIMIT-free PLOP execution as ground truth; LIMIT queries scored sound+complete. Calls = true request counts through the cache proxy. Each system's columns are {coverage} of the 30 queries ({runs}), {timing}, one system at a time; SWAN replays PLOP's samples via the shared-verdict alias. LOTUS translations are ours (aisql-bench/README.md, provenance table). SWAN run: results/{swan_tag}.{sema_run}
 
 **Read the LOTUS quality column with care.** SWAN and PLOP consume the *same* recorded verdict for every
 shared prompt (the proxy's shared-verdict alias), so they agree with the ground truth by construction
@@ -41,7 +43,7 @@ the same position as LOTUS: independent samples. Palimpzest (Abacus optimizer; t
 programs with their semantic operators served by Palimpzest; cost estimated from its token counts) likewise{sema}.
 
 """
-SEMA_CLAUSE = ",\nand Sema (the authors' fork{settings}; PLOP's queries in its s'...' dialect, translate_to_sema.py)"
+SEMA_CLAUSE = ",\nand Sema (the authors' fork at its default settings; PLOP's queries in its s'...' dialect, translate_to_sema.py)"
 PARTIAL_NOTE = ("A system with fewer than 30 queries recorded shows n/a for the others; its macro and sums, marked with "
                 "the number of queries they cover, are not comparable with the full-suite ones.")
 
@@ -69,12 +71,6 @@ def run_mode(per_query):
     return "/".join(sorted(modes))
 
 
-def batch_sizes(run):
-    """The batch settings a run recorded (per query, or for the whole file in older records)."""
-    sizes = {r.get("batch") for r in run["per_query"].values()} - {None}
-    return sizes or ({run["batch"]} if run.get("batch") else set())
-
-
 def run_label(name, run):
     parts = []
     if len(run["per_query"]) < 30:
@@ -82,9 +78,6 @@ def run_label(name, run):
     mode = run_mode(run["per_query"])
     if mode not in (None, "replay"):
         parts.append(mode)
-    sizes = batch_sizes(run)
-    if sizes:
-        parts.append("default batching" if sizes == {"default"} else "batch " + "/".join(sorted(sizes)))
     return f"{name} {run_days(run['per_query'])}" + (f" ({'; '.join(parts)})" if parts else "")
 
 
@@ -100,10 +93,15 @@ def main():
     unusual = [n for n, _ in SYSTEMS if run_mode(runs[n]) not in (None, "replay")]
     timing = "a replay of its recorded calls with their recorded response times" + (
         f" (except as marked for {', '.join(unusual)})" if unusual else "")
-    sema = ""
+    sema = sema_run = ""
     if "Sema" in files:
-        sema = SEMA_CLAUSE.format(settings=" at its default settings" if batch_sizes(files["Sema"]) == {"default"} else "")
-    lines = [HEADER.format(title=title, today=date.today().isoformat(), swan_tag=SWAN_TAG,
+        # only Sema at its defaults is compared: a run of an earlier runner that batched rows does not belong here
+        batched = ({r.get("batch") for r in runs["Sema"].values()} | {files["Sema"].get("batch")}) - {None, "default"}
+        if batched:
+            raise SystemExit(f"results/{SEMA_TAG} was run by an earlier runner with batch setting "
+                             f"{'/'.join(sorted(batched))}; the comparison shows Sema at its default settings only")
+        sema, sema_run = SEMA_CLAUSE, f" Sema run: results/{SEMA_TAG}."
+    lines = [HEADER.format(title=title, today=date.today().isoformat(), swan_tag=SWAN_TAG, sema_run=sema_run,
                            coverage="one run" if partial else "one full run", timing=timing, sema=sema,
                            runs=", ".join(run_label(name, files[name]) for name, _ in SYSTEMS),
                            empty="/".join(empty), lotus_rows=lotus_rows).rstrip("\n"), "", table_header()]

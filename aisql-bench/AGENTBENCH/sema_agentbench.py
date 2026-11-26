@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sema on the agent_bench 30 queries -- the authors' DuckDB fork (Sema, VLDB 2026; github.com/BITQiKangK/Sema at
 a86cb62, built with aisql-bench/setup_sema.sh) on sema_queries/ (translate_to_sema.py: PLOP's queries in Sema's
-s'...' dialect, prompt text verbatim), with Sema's own settings (one row per request; SEMA_BATCH=k batches k).
+s'...' dialect, prompt text verbatim), at Sema's default settings (a lone filter or map asks one row per request).
 
 Every request passes through SWANBench's meter (copied into aisql-bench/swanbench_meter.py), which forwards it to
 the cache proxy and counts it the way SWAN 2.0 counts every system's (requests incl. retries, tokens from usage,
@@ -18,7 +18,9 @@ writes dataset/tpch_sema.duckdb with the same column types; the queries attach i
   run:  python3 sema_agentbench.py [Q1 Q2 ...]
   env:  SEMA_BIN (default ../../../Sema/build/release/duckdb), SWAN_BIN (default ../../build/release/duckdb),
         AI_PROXY_URL (:4001), AI_MODEL (gpt-5.6-luna), AI_MAX_CONCURRENCY (20), SEMA_LLM_TIMEOUT_S (1800),
-        SEMA_BATCH (unset: Sema's own), SEMA_TAG (default sema)
+        SEMA_TAG (default sema)
+A tag that already holds results takes more queries only from a run with the same model and request limits; any
+other run stops before it writes anything (use another SEMA_TAG).
 """
 import csv
 import io
@@ -42,9 +44,9 @@ PROXY = os.environ.get("AI_PROXY_URL", "http://localhost:4001")
 MODEL = os.environ.get("AI_MODEL", "gpt-5.6-luna")
 CONC = os.environ.get("AI_MAX_CONCURRENCY", "20")
 TIMEOUT_S = os.environ.get("SEMA_LLM_TIMEOUT_S", "1800")
-BATCH = os.environ.get("SEMA_BATCH", "")
 TAG = os.environ.get("SEMA_TAG", "sema")
 ENV = {**os.environ, "DUCKDB_AGENT_MODE": "0", "SEMA_LLM_MAX_CONNECTIONS": CONC, "SEMA_LLM_TIMEOUT_S": TIMEOUT_S}
+CONFIG = {"model": MODEL, "workers": CONC, "request_timeout_s": TIMEOUT_S}  # Sema's own settings are its defaults
 TPCH_TABLES = ("part", "supplier", "customer", "lineitem", "orders", "partsupp", "nation", "region")
 TPCH_DB = os.path.join(HERE, "dataset", "tpch_sema.duckdb")
 NULL = "\\N"
@@ -112,21 +114,34 @@ def timing(fresh, replays_latency):
     return {True: "replay", False: "replay without recorded latency"}.get(replays_latency)
 
 
+def incompatible(saved):
+    """Why a saved run cannot take this run's queries (another model or request limits, or a batched run of an
+    earlier version of this runner), or None."""
+    for key, now in CONFIG.items():
+        if key in saved and str(saved[key]) != str(now):
+            return f"its {key} is {saved[key]}, this run's is {now}"
+    if saved.get("batch", "default") != "default":
+        return f"it batched {saved['batch']} rows per prompt, this run uses Sema's defaults"
+    return None
+
+
 def main():
     which = sys.argv[1:] or [f"Q{i}" for i in range(1, 31)]
+    path = os.path.join(HERE, "results", TAG + "_agentbench_results.json")
+    why = incompatible(json.load(open(path))) if os.path.exists(path) else None
+    if why:
+        raise SystemExit(f"results/{TAG} holds a run of another configuration ({why}): nothing written; use another "
+                         f"SEMA_TAG, or move results/{TAG} and {os.path.basename(path)} away first")
     ensure_tpch()
     replays_latency = proxy_replays_latency()
     os.makedirs(os.path.join(HERE, "results", TAG), exist_ok=True)
     stamp = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-    path = os.path.join(HERE, "results", TAG + "_agentbench_results.json")
-    print(f"SEMA agent_bench {MODEL} via meter -> {PROXY}  batch={BATCH or 'default'}  concurrency={CONC}  "
-          f"queries={which}", flush=True)
-    batching = f"SET semantic_batch_size={BATCH};\nSET semantic_filter_batch_size={BATCH};\n" if BATCH else ""
+    print(f"SEMA agent_bench {MODEL} via meter -> {PROXY}  concurrency={CONC}  queries={which}", flush=True)
     with Meter(PROXY) as meter:
         for name in which:
             script = (".bail on\n"
                       f"SET llm_url='{meter.url}/v1/chat/completions';\nSET llm_model='{MODEL}';\n"
-                      f"SET llm_api_key='sk-test';\nSET threads=1;\n{batching}"
+                      "SET llm_api_key='sk-test';\nSET threads=1;\n"
                       f".read sema_queries/{name}.sql\n")
             meter.reset()
             m0 = meter.upstream_misses()
@@ -143,7 +158,7 @@ def main():
             rows = max(0, len(out.split("\n")) - 1) if out else 0
             fresh = (m1 - m0) if (m0 is not None and m1 is not None) else None
             rec = {"latency_s": round(dt, 1), "llm_calls": use["requests"], "errors": use["errors"],
-                   "llm_calls_fresh": fresh, "timing": timing(fresh, replays_latency), "batch": BATCH or "default",
+                   "llm_calls_fresh": fresh, "timing": timing(fresh, replays_latency),
                    "tokens": use["prompt_tokens"] + use["completion_tokens"],
                    "reasoning_tokens": use["reasoning_tokens"], "cost_usd": round(use["cost_usd"], 5),
                    "rows": rows, "error": err, "ran_at": stamp}
@@ -152,7 +167,7 @@ def main():
                   f"fresh={str(rec['llm_calls_fresh']):>6} tok={rec['tokens']:>8} ${rec['cost_usd']:.4f} rows={rows}"
                   + (f"  ERR {err}" if err else ""), flush=True)
             old = json.load(open(path)) if os.path.exists(path) else {"per_query": {}}
-            old.update({"model": MODEL, "batch": BATCH or "default", "workers": CONC, "updated": stamp})
+            old.update({**CONFIG, "updated": stamp})
             old["per_query"][name] = rec
             tot = old["per_query"]
             old["total"] = {"n_queries": len(tot),
