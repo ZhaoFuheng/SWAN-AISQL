@@ -1,0 +1,197 @@
+diff --git a/src/llm_client/llm_client.cpp b/src/llm_client/llm_client.cpp
+index 2c8e7b6..0e7b81b 100644
+--- a/src/llm_client/llm_client.cpp
++++ b/src/llm_client/llm_client.cpp
+@@ -6,8 +6,14 @@
+ #include "duckdb/common/string_util.hpp"
+ #include "duckdb/logging/logging.hpp"
+ #include "duckdb/main/config.hpp"
++#if defined(__linux__)
+ #include <sys/epoll.h>
++#else
++// macOS has no epoll: the event loop below polls the sockets libcurl registered (socket_map_) instead
++#include <poll.h>
++#endif
+ #include <unistd.h>
++#include <cstdlib>
+ #include <chrono>
+ #include <errno.h>
+ #include <random>
+@@ -29,12 +35,16 @@ ThreadLocalCurlManager::ThreadLocalCurlManager() {
+         throw std::runtime_error("Failed to initialize CURLM handle");
+     }
+     
++#if defined(__linux__)
+     // Initialize epoll
+     epoll_fd_ = epoll_create1(EPOLL_CLOEXEC);
+     if (epoll_fd_ == -1) {
+         curl_multi_cleanup(multi_handle_);
+         throw std::runtime_error("Failed to create epoll instance");
+     }
++#else
++    epoll_fd_ = -1;
++#endif
+     
+     // Set socket and timer callbacks
+     curl_multi_setopt(multi_handle_, CURLMOPT_SOCKETFUNCTION, SocketCallback);
+@@ -43,8 +53,19 @@ ThreadLocalCurlManager::ThreadLocalCurlManager() {
+     curl_multi_setopt(multi_handle_, CURLMOPT_TIMERDATA, this);
+     
+     // Optimize multi handle for local vLLM service
+-    curl_multi_setopt(multi_handle_, CURLMOPT_MAX_TOTAL_CONNECTIONS, 200L);  // Increase max connections
+-    curl_multi_setopt(multi_handle_, CURLMOPT_MAX_HOST_CONNECTIONS, 50L);    // Increase per-host connections
++    // SEMA_LLM_MAX_CONNECTIONS (benchmark harness): cap the requests in flight per thread, so a comparison can give
++    // every system the same concurrency; unset keeps the original 200 total / 50 per host
++    long max_total_connections = 200L;
++    long max_host_connections = 50L;
++    if (const char *cap = std::getenv("SEMA_LLM_MAX_CONNECTIONS")) {
++        long value = std::strtol(cap, nullptr, 10);
++        if (value > 0) {
++            max_total_connections = value;
++            max_host_connections = value;
++        }
++    }
++    curl_multi_setopt(multi_handle_, CURLMOPT_MAX_TOTAL_CONNECTIONS, max_total_connections);  // Increase max connections
++    curl_multi_setopt(multi_handle_, CURLMOPT_MAX_HOST_CONNECTIONS, max_host_connections);    // Increase per-host connections
+     curl_multi_setopt(multi_handle_, CURLMOPT_PIPELINING, CURLPIPE_MULTIPLEX); // Enable HTTP/2 multiplexing
+     curl_multi_setopt(multi_handle_, CURLMOPT_MAXCONNECTS, 200L);            // Increase connection cache
+ }
+@@ -96,23 +117,27 @@ int ThreadLocalCurlManager::SocketCallback(CURL* easy, curl_socket_t s, int what
+     ThreadLocalCurlManager* manager = static_cast<ThreadLocalCurlManager*>(userp);
+     
+     if (what == CURL_POLL_REMOVE) {
++#if defined(__linux__)
+         // Remove socket from epoll
+         epoll_ctl(manager->epoll_fd_, EPOLL_CTL_DEL, s, nullptr);
++#endif
+         manager->socket_map_.erase(s);
+     } else {
++#if defined(__linux__)
+         struct epoll_event event;
+         event.data.fd = s;
+         event.events = 0;
+-        
++
+         if (what & CURL_POLL_IN) {
+             event.events |= EPOLLIN;
+         }
+         if (what & CURL_POLL_OUT) {
+             event.events |= EPOLLOUT;
+         }
+-        
++
+         int op = (manager->socket_map_.find(s) == manager->socket_map_.end()) ? EPOLL_CTL_ADD : EPOLL_CTL_MOD;
+         epoll_ctl(manager->epoll_fd_, op, s, &event);
++#endif
+         manager->socket_map_[s] = what;
+     }
+     
+@@ -185,7 +210,16 @@ void ThreadLocalCurlManager::ExecuteBatch(ClientContext& context, const vector<s
+         curl_easy_setopt(easy_handle, CURLOPT_WRITEDATA, &responses[i]);
+         
+         // Optimized timeouts for local vLLM service
+-        curl_easy_setopt(easy_handle, CURLOPT_TIMEOUT, 30L);  // 30s timeout for local service
++        // SEMA_LLM_TIMEOUT_S (benchmark harness): libcurl starts this clock when the request is queued, not sent, so
++        // with a connection cap and a remote API the queued tail of a chunk times out and is retried; unset keeps 30 s
++        long request_timeout_s = 30L;
++        if (const char *limit = std::getenv("SEMA_LLM_TIMEOUT_S")) {
++            long value = std::strtol(limit, nullptr, 10);
++            if (value > 0) {
++                request_timeout_s = value;
++            }
++        }
++        curl_easy_setopt(easy_handle, CURLOPT_TIMEOUT, request_timeout_s);  // 30s timeout for local service
+         curl_easy_setopt(easy_handle, CURLOPT_CONNECTTIMEOUT, 3L);  // 2s timeout for local connection
+         curl_easy_setopt(easy_handle, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+         
+@@ -249,8 +283,10 @@ void ThreadLocalCurlManager::ExecuteBatch(ClientContext& context, const vector<s
+     }
+     
+     // Event loop using epoll with optimized timeout for local vLLM service
++#if defined(__linux__)
+     const int max_events = 2048;
+     struct epoll_event events[max_events];
++#endif
+     // Optimized timeout calculation for local vLLM service
+     const int base_timeout_ms = 60000;   // 60 seconds base timeout for local service
+     const int per_request_ms = 30000;    // 30 seconds per request for local service
+@@ -289,8 +325,9 @@ void ThreadLocalCurlManager::ExecuteBatch(ClientContext& context, const vector<s
+             break;
+         }
+         
++#if defined(__linux__)
+         int num_events = epoll_wait(epoll_fd_, events, max_events, remaining_timeout);
+-        
++
+         if (num_events < 0) {
+             if (errno == EINTR) {
+                 continue; // Interrupted by signal, retry
+@@ -301,7 +338,7 @@ void ThreadLocalCurlManager::ExecuteBatch(ClientContext& context, const vector<s
+             curl_multi_socket_action(multi_handle_, CURL_SOCKET_TIMEOUT, 0, &still_running);
+             continue;
+         }
+-        
++
+         // Process epoll events efficiently
+         for (int i = 0; i < num_events; i++) {
+             int ev_bitmask = 0;
+@@ -314,9 +351,58 @@ void ThreadLocalCurlManager::ExecuteBatch(ClientContext& context, const vector<s
+             if (events[i].events & EPOLLERR) {
+                 ev_bitmask |= CURL_CSELECT_ERR;
+             }
+-            
++
+             curl_multi_socket_action(multi_handle_, events[i].data.fd, ev_bitmask, &still_running);
+         }
++#else
++        // Same level-triggered wait as epoll_wait above, over a snapshot of the sockets libcurl registered
++        // (SocketCallback edits socket_map_ while curl_multi_socket_action runs)
++        vector<struct pollfd> poll_fds;
++        poll_fds.reserve(socket_map_.size());
++        for (const auto &entry : socket_map_) {
++            struct pollfd pfd;
++            pfd.fd = entry.first;
++            pfd.events = 0;
++            pfd.revents = 0;
++            if (entry.second & CURL_POLL_IN) {
++                pfd.events |= POLLIN;
++            }
++            if (entry.second & CURL_POLL_OUT) {
++                pfd.events |= POLLOUT;
++            }
++            poll_fds.push_back(pfd);
++        }
++        int num_events = poll(poll_fds.data(), static_cast<nfds_t>(poll_fds.size()), remaining_timeout);
++
++        if (num_events < 0) {
++            if (errno == EINTR) {
++                continue; // Interrupted by signal, retry
++            }
++            break; // Serious error, exit
++        } else if (num_events == 0) {
++            // Timeout - trigger timeout action
++            curl_multi_socket_action(multi_handle_, CURL_SOCKET_TIMEOUT, 0, &still_running);
++            continue;
++        }
++
++        for (const auto &pfd : poll_fds) {
++            if (pfd.revents == 0) {
++                continue;
++            }
++            int ev_bitmask = 0;
++            if (pfd.revents & (POLLIN | POLLHUP)) {
++                ev_bitmask |= CURL_CSELECT_IN;
++            }
++            if (pfd.revents & POLLOUT) {
++                ev_bitmask |= CURL_CSELECT_OUT;
++            }
++            if (pfd.revents & (POLLERR | POLLNVAL)) {
++                ev_bitmask |= CURL_CSELECT_ERR;
++            }
++
++            curl_multi_socket_action(multi_handle_, pfd.fd, ev_bitmask, &still_running);
++        }
++#endif
+         
+         // Check for completed transfers and get HTTP status codes
+         CURLMsg* msg;

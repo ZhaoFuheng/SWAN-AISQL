@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-query table of every recorded system (SWAN, PLOP, BlendSQL, Palimpzest, LOTUS) for one SemBench suite.
+"""Per-query table of every recorded system (SWAN, PLOP, BlendSQL, Palimpzest, Sema, LOTUS) for one SemBench suite.
 
   python3 compare.py MOVIE            (from aisql-bench/; also ECOMM, MMQA)
   SWAN_TAG=_x python3 compare.py MOVIE   compare a tagged SWAN run (swan_movie_results_x.json)
@@ -27,7 +27,8 @@ def fmt(v, digits):
     return ("%.*f" % (digits, v)) if isinstance(v, (int, float)) else "-"
 
 
-SYSTEMS = (("LOTUS", "lotus"), ("BlendSQL", "blendsql"), ("Palimpzest", "palimpzest"), ("PLOP", "plop"), ("SWAN", "swan"))
+SYSTEMS = (("LOTUS", "lotus"), ("BlendSQL", "blendsql"), ("Palimpzest", "palimpzest"), ("PLOP", "plop"), ("Sema", "sema"),
+           ("SWAN", "swan"))
 
 
 def main():
