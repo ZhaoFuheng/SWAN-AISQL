@@ -5,8 +5,9 @@ s'...' semantic expressions), with the same data, model, proxy and metrics (movi
 lotus_movie.py and plop_movie.py.
 
 Sema calls an OpenAI-compatible chat-completions endpoint (its llm_url / llm_model / llm_api_key settings) with
-its own prompts, so its answers are independent samples. Every request passes through SWAN_bench's Meter, which
-forwards it to the cache proxy and counts it the way it counts every system's: requests (retries included),
+its own prompts, so its answers are independent samples. Every request passes through SWANBench's meter (copied
+into aisql-bench/swanbench_meter.py), which forwards it to the cache proxy and counts it the way SWAN 2.0 counts
+every system's: requests (retries included),
 tokens from the response's usage, and cost from the cost header the proxy replays (litellm's gpt-5.6-luna
 prices). Sema runs with its own settings: a lone filter or map asks one row per request (semantic_batch_size 1).
 SEMA_BATCH=k sets semantic_batch_size, and semantic_filter_batch_size for its multi-filter executor, to k rows per
@@ -35,8 +36,8 @@ from movie_common import gt, metric_fields, metric_tag, score
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-sys.path.insert(0, os.path.join(ROOT, "SWAN_bench", "src"))
-from swan_bench.meter import Meter  # noqa: E402 -- stdlib-only module of the sibling SWAN_bench checkout
+sys.path.insert(0, os.path.dirname(HERE))
+from swanbench_meter import Meter  # noqa: E402 -- aisql-bench/swanbench_meter.py, SWANBench's meter (stdlib only)
 
 BIN = os.environ.get("SEMA_BIN", os.path.join(ROOT, "Sema", "build", "release", "duckdb"))
 DB = os.path.join(HERE, "movie_sema.db")  # Sema (a DuckDB 1.2-era fork) cannot open movie.db (DuckDB 2.0 storage)
@@ -62,10 +63,23 @@ def sema(script, db=DB, readonly=True):
 
 
 def ensure_db():
-    if not os.path.exists(DB):
-        p = sema(open(os.path.join(HERE, "setup.sql")).read(), readonly=False)
+    """movie_sema.db from setup.sql, written by Sema's shell under a temporary name and renamed once both tables are
+    in it, so a failed or interrupted build never leaves a file that a later run would take as built."""
+    if os.path.exists(DB):
+        return
+    part = f"{DB}.tmp{os.getpid()}"
+    try:
+        p = sema(".bail on\n" + open(os.path.join(HERE, "setup.sql")).read(), db=part, readonly=False)
         if p.returncode != 0:
             raise SystemExit("could not build movie_sema.db: " + p.stderr.strip())
+        p = sema("SELECT (SELECT count(*) FROM movies) > 0 AND (SELECT count(*) FROM reviews) > 0;\n", db=part)
+        if p.returncode != 0 or "true" not in p.stdout:
+            raise SystemExit("could not build movie_sema.db: the movies or reviews table is missing or empty")
+        os.replace(part, DB)
+    finally:
+        for f in (part, part + ".wal"):
+            if os.path.exists(f):
+                os.remove(f)
 
 
 def effective_settings():
