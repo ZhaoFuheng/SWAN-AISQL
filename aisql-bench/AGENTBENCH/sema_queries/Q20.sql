@@ -23,11 +23,11 @@ WITH semantic_parking AS (
 		yb.business_id,
 		yb.attributes,
 		yb.description
-	FROM yelp_business yb
+	FROM yelp_business yb CROSS JOIN LATERAL (SELECT COALESCE(CAST(yb.business_id AS VARCHAR), '') AS business_id, COALESCE(CAST(yb.attributes AS VARCHAR), '') AS attributes, COALESCE(CAST(yb.description AS VARCHAR), '') AS description) yb_text
 	WHERE s'Return true if the business offers customer parking (lot, garage, street, or valet) or any form of bike parking. Use the provided attributes and description to decide.
-Business ID: {yb.business_id}
-Attributes: {yb.attributes}
-Description: {yb.description}
+Business ID: {yb_text.business_id}
+Attributes: {yb_text.attributes}
+Description: {yb_text.description}
 Respond with true or false only.'
 ),
 reviews_link AS (

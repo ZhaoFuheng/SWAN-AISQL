@@ -24,12 +24,12 @@ WITH semantic_category AS (
 		yb.name,
 		yb.attributes,
 		yb.description
-	FROM yelp_business yb
+	FROM yelp_business yb CROSS JOIN LATERAL (SELECT COALESCE(CAST(yb.business_id AS VARCHAR), '') AS business_id, COALESCE(CAST(yb.name AS VARCHAR), '') AS name, COALESCE(CAST(yb.attributes AS VARCHAR), '') AS attributes, COALESCE(CAST(yb.description AS VARCHAR), '') AS description) yb_text
 	WHERE s'Return true if the description makes the primary business category explicit (for example, Italian restaurant, dental clinic, yoga studio). Favor entries where you can clearly read at least one category phrase.
-Business ID: {yb.business_id}
-Name: {yb.name}
-Attributes: {yb.attributes}
-Description: {yb.description}
+Business ID: {yb_text.business_id}
+Name: {yb_text.name}
+Attributes: {yb_text.attributes}
+Description: {yb_text.description}
 Answer true or false only.'
 ),
 category_text AS (

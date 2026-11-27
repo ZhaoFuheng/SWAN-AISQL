@@ -27,7 +27,8 @@ SELECT name, exp_id, quality_tier
 FROM (
     -- Subquery: semantic projection on 100 businesses
     SELECT name, description,
-           CASE COALESCE(TRY_CAST(regexp_extract(s'Classify business quality: (1) Poor (2) Fair (3) Good (4) Excellent. Return only number: {name} - {description}', '^\s*([-+]?[0-9]+)', 1) AS INTEGER), 0)
+           CASE COALESCE(TRY_CAST(regexp_extract(s'Classify business quality: (1) Poor (2) Fair (3) Good (4) Excellent. Return only number: {name} - {description}
+ Return a single integer, do not contain any other words.', '^\s*([-+]?[0-9]+)', 1) AS INTEGER), 0)
                WHEN 1 THEN 'Poor'
                WHEN 2 THEN 'Fair'
                WHEN 3 THEN 'Good'

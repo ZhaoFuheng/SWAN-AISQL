@@ -74,12 +74,12 @@ semantic_category AS (
 		yb.business_id,
 		yb.attributes,
 		yb.description
-	FROM yelp_business yb
+	FROM yelp_business yb CROSS JOIN LATERAL (SELECT COALESCE(CAST(yb.business_id AS VARCHAR), '') AS business_id, COALESCE(CAST(yb.attributes AS VARCHAR), '') AS attributes, COALESCE(CAST(yb.description AS VARCHAR), '') AS description) yb_text
 	JOIN active_businesses ab ON ab.business_id = yb.business_id
 	WHERE s'Return true if the business description clearly lists multiple categories or service types that can be tokenized. Focus on entries with explicit category phrases.
-Business ID: {yb.business_id}
-Attributes: {yb.attributes}
-Description: {yb.description}
+Business ID: {yb_text.business_id}
+Attributes: {yb_text.attributes}
+Description: {yb_text.description}
 Respond with true or false only.'
 ),
 category_text AS (

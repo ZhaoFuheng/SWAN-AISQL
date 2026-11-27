@@ -23,11 +23,11 @@ WITH semantic_credit AS (
 		yb.business_id,
 		yb.attributes,
 		yb.description
-	FROM yelp_business yb
+	FROM yelp_business yb CROSS JOIN LATERAL (SELECT COALESCE(CAST(yb.business_id AS VARCHAR), '') AS business_id, COALESCE(CAST(yb.attributes AS VARCHAR), '') AS attributes, COALESCE(CAST(yb.description AS VARCHAR), '') AS description) yb_text
 	WHERE s'Return true if the business clearly accepts credit card payments. Prefer explicit evidence from attributes or the narrative.
-Business ID: {yb.business_id}
-Attributes: {yb.attributes}
-Description: {yb.description}
+Business ID: {yb_text.business_id}
+Attributes: {yb_text.attributes}
+Description: {yb_text.description}
 Answer true or false only.'
 ),
 normalized_categories AS (

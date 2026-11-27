@@ -24,15 +24,15 @@ sem_popular AS (
 		-- semantic boolean filter on metadata fields for post-2016 candidates (used as WHERE filter)
 		SELECT DISTINCT b.book_id,
 					 b.title
-		FROM books_info b
+		FROM books_info b CROSS JOIN LATERAL (SELECT COALESCE(CAST(b.title AS VARCHAR), '') AS title, COALESCE(CAST(b.subtitle AS VARCHAR), '') AS subtitle, COALESCE(CAST(b.author AS VARCHAR), '') AS author, COALESCE(CAST(b.categories AS VARCHAR), '') AS categories, COALESCE(CAST(b.description AS VARCHAR), '') AS description) b_text
 		JOIN post2016_books p ON p.book_id = b.book_id
 		WHERE b.title IS NOT NULL
 			AND s'Is this book recently popular since 2016?
-				Title: {b.title}
-				Subtitle: {b.subtitle}
-				Author: {b.author}
-				Categories: {b.categories}
-				Description: {b.description}
+				Title: {b_text.title}
+				Subtitle: {b_text.subtitle}
+				Author: {b_text.author}
+				Categories: {b_text.categories}
+				Description: {b_text.description}
 				'
 )
 

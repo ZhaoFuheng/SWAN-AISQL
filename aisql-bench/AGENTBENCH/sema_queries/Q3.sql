@@ -27,7 +27,8 @@ SELECT name, e, location_type
 FROM (
     -- Subquery: semantic projection on 79 businesses
     SELECT name, state, description,
-           CASE COALESCE(TRY_CAST(regexp_extract(s'Classify location: (1) Urban (2) Suburban (3) Rural. Return only number: {name} in {state}. Description: {description}', '^\s*([-+]?[0-9]+)', 1) AS INTEGER), 0)
+           CASE COALESCE(TRY_CAST(regexp_extract(s'Classify location: (1) Urban (2) Suburban (3) Rural. Return only number: {name} in {state}. Description: {description}
+ Return a single integer, do not contain any other words.', '^\s*([-+]?[0-9]+)', 1) AS INTEGER), 0)
                WHEN 1 THEN 'Urban'
                WHEN 2 THEN 'Suburban'
                ELSE 'Rural'

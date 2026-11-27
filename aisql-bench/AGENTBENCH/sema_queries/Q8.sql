@@ -21,16 +21,16 @@ candidates AS (
 		CAST(SPLIT_PART(b.book_id, '_', 2) AS INTEGER) AS book_idx,
 		b.book_id,
 		b.title
-	FROM books_info b
+	FROM books_info b CROSS JOIN LATERAL (SELECT COALESCE(CAST(b.title AS VARCHAR), '') AS title, COALESCE(CAST(b.subtitle AS VARCHAR), '') AS subtitle, COALESCE(CAST(b.author AS VARCHAR), '') AS author, COALESCE(CAST(b.categories AS VARCHAR), '') AS categories, COALESCE(CAST(b.description AS VARCHAR), '') AS description, COALESCE(CAST(b.features AS VARCHAR), '') AS features, COALESCE(CAST(b.details AS VARCHAR), '') AS details) b_text
 	WHERE b.title IS NOT NULL
-		AND s'Confirm this is the second edition of Make: Electronics, the hands-on beginner''s electronics guide from the Make magazine team that highlights colorful diagrams and step-by-step experiments.
-Title: {b.title}
-Subtitle: {b.subtitle}
-Author: {b.author}
-Categories: {b.categories}
-Description: {b.description}
-Features: {b.features}
-Details: {b.details}'
+		AND s'Confirm this is the second edition of Make: Electronics, the hands-on beginner’s electronics guide from the Make magazine team that highlights colorful diagrams and step-by-step experiments.
+Title: {b_text.title}
+Subtitle: {b_text.subtitle}
+Author: {b_text.author}
+Categories: {b_text.categories}
+Description: {b_text.description}
+Features: {b_text.features}
+Details: {b_text.details}'
 ),
 
 reviews_filtered AS (

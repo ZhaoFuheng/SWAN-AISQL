@@ -27,7 +27,8 @@ FROM (
     -- Subquery: semantic projection on 200 books
     -- Classify into one of 5 fixed categories instead of generating free text
     SELECT title, 
-           CASE COALESCE(TRY_CAST(regexp_extract(s'Which category best fits this book? (1) Fiction (2) Non-Fiction (3) Memoir (4) Biography (5) Self-Help. Return only the number: {title} by {author}', '^\s*([-+]?[0-9]+)', 1) AS INTEGER), 0)
+           CASE COALESCE(TRY_CAST(regexp_extract(s'Which category best fits this book? (1) Fiction (2) Non-Fiction (3) Memoir (4) Biography (5) Self-Help. Return only the number: {title} by {author}
+ Return a single integer, do not contain any other words.', '^\s*([-+]?[0-9]+)', 1) AS INTEGER), 0)
                WHEN 1 THEN 'Fiction'
                WHEN 2 THEN 'Non-Fiction'
                WHEN 3 THEN 'Memoir'
