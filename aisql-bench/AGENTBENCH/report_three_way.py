@@ -11,8 +11,8 @@ cost and writes results/agentbench_comparison_three_way.md.
 The table compares the systems on one model with one number of requests in flight, both read from the summaries:
 it is not written when the selected runs (or the ground truth's model) differ. A query a system did not run is n/a
 (eval_agentbench.py decides, so the two commands agree) and its aggregates say how many queries they cover; a query
-a system could not run is "failed" (it scores 0). A run is called a replay only where its records say so: a live
-run, a replay without the recorded latency and a run that does not record its timing are each marked. The Sema run
+a system could not run is "failed" (it scores 0). A run whose records show that it was timed live (some of its
+calls were new to the cache, llm_calls_fresh) or replayed without the recorded latency is marked. The Sema run
 must record Sema's shipped settings and, for every query, the text of sema_queries/ it ran (sema_common.py).
 """
 import importlib.util
@@ -85,13 +85,13 @@ def run_days(per_query):
 
 def run_modes(per_query):
     """How a run's latencies were measured, one word per kind of record: the runner's own `timing` where it wrote
-    one, else "replay" when no call was new to the cache and "live" when some were, and "timing not recorded" for
-    a record that says neither."""
+    one, else "live" when some of the query's calls were new to the cache (llm_calls_fresh) and "replay" when none
+    were. A record without that count (written before its runner kept one, or with the proxy's counter out of
+    reach) shows nothing to mark and reads as a replay, which is how every committed run was made."""
     modes = set()
     for r in per_query.values():
-        fresh = r.get("llm_calls_fresh")
-        modes.add(r.get("timing") or ("timing not recorded" if fresh is None else "live" if fresh else "replay"))
-    return modes or {"timing not recorded"}
+        modes.add(r.get("timing") or ("live" if r.get("llm_calls_fresh") else "replay"))
+    return modes or {"replay"}
 
 
 def n_run(per_query):

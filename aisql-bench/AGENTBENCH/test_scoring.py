@@ -6,7 +6,7 @@ report_three_way.py must agree on what a run is.
   - a query that ran and failed scores 0 in all three; the report calls it "failed" and marks its sums
   - the report is of one model and one number of requests in flight: it stops, writing nothing, when the selected
     runs (or the ground truth's model) differ, and its title names the model it read
-  - the report calls a run a replay only where its records say so
+  - the report marks a run whose records show it was timed live or replayed without the recorded latency
   - the report shows Sema at its default settings only, from the run SEMA_TAG names: that run must record Sema's
     shipped settings and the query texts it ran
 
@@ -242,17 +242,20 @@ def test_the_report_shows_sema_at_its_default_settings_only():
         b.refused("Q3 ran another text than sema_queries/ now holds")
 
 
-def test_the_report_calls_a_run_a_replay_only_where_its_records_say_so():
+def test_the_report_marks_a_run_its_records_show_was_not_a_replay_at_the_recorded_pace():
     with Bench() as b:
         b.run("sema", sema=True, record={"llm_calls_fresh": 2, "timing": "live"})
         p, _, text = b.report()
         assert p.returncode == 0, p.stderr
         assert "Sema 2026-01-02 (live)" in text and "(except as marked for Sema)" in text, text[:900]
         b.run("sema", sema=True, record={"timing": "replay without recorded latency"})
-        b.run("swan", record={"llm_calls_fresh": None})  # a summary that does not say whether calls were fresh
+        b.run("lotus", record={"llm_calls_fresh": 3})    # a runner that writes the count alone: some calls were fresh
+        b.run("swan", record={"llm_calls_fresh": None})  # no count on record: nothing to mark
         p, _, text = b.report()
-        assert "Sema 2026-01-02 (replay without recorded latency)" in text and "SWAN 2026-01-02 (timing not recorded)" in text
-        assert "(except as marked for Sema, SWAN)" in text and "LOTUS 2026-01-02," in text, text[:900]
+        assert p.returncode == 0, p.stderr
+        assert "LOTUS 2026-01-02 (live)" in text and "Sema 2026-01-02 (replay without recorded latency)" in text
+        assert "(except as marked for LOTUS, Sema)" in text and "SWAN 2026-01-02)" in text, text[:900]
+        assert "not recorded" not in text
 
 
 if __name__ == "__main__":

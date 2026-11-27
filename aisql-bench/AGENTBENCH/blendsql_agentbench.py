@@ -6,7 +6,9 @@ and are scored by eval_agentbench.py like every other system's.
 
 BlendSQL's LLMMap prompt carries a built-in one-shot example; it is stripped so every system is zero-shot.
 Calls and tokens are BlendSQL's own accounting of the query (true requests, streamed usage); cost is priced
-from those tokens at the SWAN 2.0 meter's gpt-5.6-luna prices (an estimate, like PLOP's).
+from those tokens at the SWAN 2.0 meter's gpt-5.6-luna prices (an estimate, like PLOP's). Fresh calls
+(llm_calls_fresh, as every other runner records them) = the requests the proxy had to send on to the provider
+while the query ran, its miss-counter delta: 0 in a replay. Run it with nothing else on the proxy.
 
   run:  <python with blendsql> blendsql_agentbench.py [Q1 Q2 ...]      (SWAN_bench/.venv has it)
   env:  AI_PROXY_URL (:4001), AI_MODEL (gpt-5.6-luna), AI_MAX_CONCURRENCY (20),
@@ -17,6 +19,7 @@ import os
 import re
 import sys
 import time
+import urllib.request
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -32,6 +35,15 @@ _ONE_SHOT = re.compile(r" An example is shown below\.\n\n.*?\n---\n\n", re.DOTAL
 
 def _zero_shot(prompt):
     return _ONE_SHOT.sub("\n\n", prompt, count=1)
+
+
+def cache_misses():
+    """The requests the cache proxy has sent on to the provider so far (its /cache/stats), or None when that
+    cannot be read: the endpoint is not the cache proxy, so what was fresh is not known."""
+    try:
+        return int(json.load(urllib.request.urlopen(PROXY + "/cache/stats", timeout=5))["misses"])
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def make_engine(setup):
@@ -69,6 +81,7 @@ def main():
     per_query = {}
     for name in which:
         setup, query = split_file(open(os.path.join(HERE, "blendsql_queries", name + ".sql")).read())
+        m0 = cache_misses()
         t0 = time.time()
         err, out, meta = None, pd.DataFrame(), None
         try:
@@ -79,15 +92,17 @@ def main():
         except Exception as e:  # noqa: BLE001 - a failed query is reported and scores 0
             err = repr(e)[:300]
         dt = time.time() - t0
+        m1 = cache_misses()
+        fresh = m1 - m0 if m0 is not None and m1 is not None else None
         calls = getattr(meta, "num_generation_calls", 0) or 0
         p_tok, c_tok = getattr(meta, "prompt_tokens", 0) or 0, getattr(meta, "completion_tokens", 0) or 0
         cost = round(p_tok / 1e6 * P_IN + c_tok / 1e6 * P_OUT, 5)
-        rec = {"latency_s": round(dt, 1), "llm_calls": calls, "llm_calls_fresh": None, "tokens": p_tok + c_tok,
+        rec = {"latency_s": round(dt, 1), "llm_calls": calls, "llm_calls_fresh": fresh, "tokens": p_tok + c_tok,
                "cost_usd": cost, "cost_is_estimate": True, "rows": len(out), "error": err, "ran_at": stamp}
         per_query[name] = rec
         out.to_csv(os.path.join(HERE, "results", TAG, name + ".csv"), index=False)
-        print(f"{name:>4} lat={dt:7.1f}s calls={calls:>6} tok={p_tok + c_tok:>8} ~${cost:.4f} rows={len(out)}"
-              + (f"  ERR {err}" if err else ""), flush=True)
+        print(f"{name:>4} lat={dt:7.1f}s calls={calls:>6} fresh={str(fresh):>6} tok={p_tok + c_tok:>8} ~${cost:.4f} "
+              f"rows={len(out)}" + (f"  ERR {err}" if err else ""), flush=True)
         # accumulate after each query so an interrupted run keeps partials
         path = os.path.join(HERE, "results", TAG + "_agentbench_results.json")
         old = json.load(open(path)) if os.path.exists(path) else {"per_query": {}}

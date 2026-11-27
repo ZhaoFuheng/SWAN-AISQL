@@ -7,8 +7,8 @@
 Reads SUITE/<system>_<suite>_results.json (SWAN's with the tag) and prints a markdown table (quality, LLM calls,
 latency, cost per query and in total) and the macro quality. The table compares the systems on one model with one
 number of requests in flight, both read from the summaries: it is not printed when the runs differ. Under the
-table it names every run that was not a replay at the recorded pace (timed live, replayed without the recorded
-latency, or not recording which) and every query a system could not run. The Sema run must record Sema's shipped
+table it names every run whose records show it was not a replay at the recorded pace (timed live, or replayed
+without the recorded latency) and every query a system could not run. The Sema run must record Sema's shipped
 settings and, for every query, the text of sema_queries/ it ran (sema_common.py).
 """
 import json
@@ -37,13 +37,13 @@ def in_flight(summary):
 
 def run_modes(per_query):
     """How a run's latencies were measured, one word per kind of record: the runner's own `timing` where it wrote
-    one, else "replay" when no call was new to the cache and "live" when some were, and "timing not recorded" for
-    a record that says neither."""
+    one, else "live" when some of the query's calls were new to the cache (llm_calls_fresh) and "replay" when none
+    were. A record without that count (written before its runner kept one, or with the proxy's counter out of
+    reach) shows nothing to mark and reads as a replay, which is how every committed run was made."""
     modes = set()
     for r in per_query.values():
-        fresh = r.get("llm_calls_fresh")
-        modes.add(r.get("timing") or ("timing not recorded" if fresh is None else "live" if fresh else "replay"))
-    return modes or {"timing not recorded"}
+        modes.add(r.get("timing") or ("live" if r.get("llm_calls_fresh") else "replay"))
+    return modes or {"replay"}
 
 
 def sema_problem(suite, summary):
@@ -136,7 +136,7 @@ def main():
               "the full-suite ones.")
     marked = [f"{n} ({'/'.join(sorted(run_modes(r)))})" for n, r in runs if run_modes(r) != {"replay"}]
     if marked:
-        print("\nRuns whose records do not show a replay at the recorded pace: " + ", ".join(marked) + ".")
+        print("\nRuns whose records show something other than a replay at the recorded pace: " + ", ".join(marked) + ".")
     failed = [f"{n} {q}" for q in queries for n, r in runs if (r.get(q) or {}).get("error")]
     if failed:
         print("\nfailed marks a query a system could not run (it scores 0; what it had spent is in the sums): "

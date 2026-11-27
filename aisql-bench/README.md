@@ -227,6 +227,7 @@ python3 eval_agentbench.py swan lotus plop blendsql palimpzest sema   # quality 
 SWAN_TAG=swan python3 report_three_way.py      # per-query table of every system -> results/agentbench_comparison_three_way.md
                                                # (the committed table is SWAN_TAG=swan_20261111, the run behind the README row)
 python3 test_scoring.py                        # checks of the scoring commands themselves, on made-up results
+python3 test_runners.py                        # checks of the SWAN and BlendSQL runners' call counts, on stand-ins
 python3 ../test_sema.py                        # checks of the Sema port (runners and translator), without Sema or a model
 ```
 

@@ -5,7 +5,9 @@ reviews, through the same proxy, model, concurrency and metrics (movie_common) a
 
 BlendSQL's LLMMap prompt carries a built-in one-shot example; it is stripped so every system here is
 zero-shot (the same rule as the SWAN 2.0 benchmark). Calls and tokens come from BlendSQL's own model counters
-(true requests, streamed); cost is priced from those tokens at the SWAN 2.0 meter's gpt-5.6-luna prices.
+(true requests, streamed); cost is priced from those tokens at the SWAN 2.0 meter's gpt-5.6-luna prices. Fresh
+calls (llm_calls_fresh, as every other runner records them) = the requests the proxy had to send on to the
+provider while the query ran, its miss-counter delta: 0 in a replay. Run it with nothing else on the proxy.
 
   run:  <python with blendsql> blendsql_movie.py [q1 q2 ...]      (SWAN_bench/.venv has it)
   env:  AI_PROXY_URL (:4001), AI_MODEL (gpt-5.6-luna), AI_MAX_CONCURRENCY (20)
@@ -15,6 +17,7 @@ import os
 import re
 import sys
 import time
+import urllib.request
 from datetime import datetime, timezone
 
 from movie_common import gt, metric_fields, metric_tag, score
@@ -33,6 +36,15 @@ _ONE_SHOT = re.compile(r" An example is shown below\.\n\n.*?\n---\n\n", re.DOTAL
 
 def _zero_shot(prompt):
     return _ONE_SHOT.sub("\n\n", prompt, count=1)
+
+
+def cache_misses():
+    """The requests the cache proxy has sent on to the provider so far (its /cache/stats), or None when that
+    cannot be read: the endpoint is not the cache proxy, so what was fresh is not known."""
+    try:
+        return int(json.load(urllib.request.urlopen(PROXY + "/cache/stats", timeout=5))["misses"])
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def make_engine():
@@ -56,6 +68,7 @@ def make_engine():
 def run_one(name, stamp):
     engine, llm = make_engine()  # a fresh engine per query: no temporary tables or counters carry over
     sql = open(os.path.join(HERE, "blendsql_queries", f"{name}.sql")).read()
+    m0 = cache_misses()
     t0 = time.time()
     err, out, meta = None, [], None
     try:
@@ -65,19 +78,21 @@ def run_one(name, stamp):
     except Exception as ex:  # noqa: BLE001 - a failed query scores 0 and is reported
         err = "blendsql: " + str(ex).strip().splitlines()[-1][:200]
     dt = time.time() - t0
+    m1 = cache_misses()
+    fresh = m1 - m0 if m0 is not None and m1 is not None else None
     calls = getattr(meta, "num_generation_calls", 0) or 0
     p_tok, c_tok = getattr(meta, "prompt_tokens", 0) or 0, getattr(meta, "completion_tokens", 0) or 0
     gold = gt(name)
     P, R, M = score(name, out, gold) if err is None else (0.0, 0.0, 0.0)
     cost = round(p_tok / 1e6 * P_IN + c_tok / 1e6 * P_OUT, 5)
-    rec = {"latency_s": round(dt, 1), "llm_calls_fresh": None, "llm_calls": calls, "cache_hits": None,
+    rec = {"latency_s": round(dt, 1), "llm_calls_fresh": fresh, "llm_calls": calls, "cache_hits": None,
            "tokens": p_tok + c_tok, "reasoning_tokens": None, "cost_usd": cost, "cost_is_estimate": True,
            "n_out": len(out), "n_gold": len(gold), **metric_fields(name, P, R),
            "quality": M, "error": err, "ran_at": stamp}
     raw_entry = {"predicted": [list(x) for x in out][:5000]}
     tag = f"ERR {err}" if err else f"{metric_tag(name, P, R)} quality={M}"
-    line = (f"{name:4} lat={rec['latency_s']:7.1f}s calls={calls:>6} tok={rec['tokens']:>9} ~${cost:.4f}  "
-            f"n={rec['n_out']}/{rec['n_gold']}  {tag}")
+    line = (f"{name:4} lat={rec['latency_s']:7.1f}s calls={calls:>6} fresh={str(fresh):>5} tok={rec['tokens']:>9} "
+            f"~${cost:.4f}  n={rec['n_out']}/{rec['n_gold']}  {tag}")
     return rec, raw_entry, line
 
 
