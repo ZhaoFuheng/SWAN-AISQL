@@ -1,26 +1,25 @@
 # SemBench / agent_bench harnesses
 
-Recorded numbers to cite live in the memory index and in DESIGN.md §9; this file is the operating
-protocol. Rules, in order of how often they were broken:
+The numbers are in the main README and in docs/DESIGN.md §9; this file is the operating protocol: where the
+queries come from, how to rerun every system, and the notes behind each table. First, the rules for recording
+a new run:
 
 0. **Record SemBench one query at a time** (`swan_ecomm.py --serial`, `swan_movie.py --serial`; MMQA's runner is
    serial already). The concurrent default launches every query at once -- up to 14 x 20 in-flight two-image
-   requests on ECOMM -- which the provider answers with 429s and connection errors (2026-10-21: 393 errors in
-   the first ten minutes, 0 once serial) and which also inflates every per-query latency with contention. The
-   concurrent mode is for cache replay only.
+   requests on ECOMM -- which the provider answers with 429s and connection errors and which also inflates
+   every per-query latency with contention. The concurrent mode is for cache replay only.
 1. **Never rebuild the engine while a run is in flight** -- each query spawns a fresh CLI, so a
    mid-run rebuild silently mixes two binaries.
 2. **Back-to-back recording for any latency claim.** Record the compared systems per query, LOTUS then
    SWAN (and PLOP / BlendSQL where they run), into a fresh store through a second proxy (`CACHE_PROXY_PORT=4011 CACHE_DB=<new file>`,
-   alias OFF, the conda `swan-ai-sql` python -- `/usr/local/bin/python3` has no duckdb), then merge
-   with `serve/merge_cache.py` (migrates `recorded_at`, upserts, self-verifies).
+   alias OFF), then merge with `serve/merge_cache.py` (migrates `recorded_at`, upserts, self-verifies).
    The proxy inserts `ON CONFLICT DO NOTHING`, so the main cache cannot be "repopulated" in place.
 3. **Back up the results files first.** Every runner overwrites its `*_results.json` per query.
 4. **Check `pmset -g log` for a laptop sleep** across the run; find recordings that overlap it with
    `recorded_at - latency < wake AND recorded_at > sleep` (`recorded_at` is UTC) and rerun that query.
-5. **A provider error aborts a LOTUS query outright** (one rejected image cost MMQA q7 18 minutes);
-   rerun it against the partial store -- completed calls replay, only the remainder is fresh.
-6. **Always score a run.** A call-count drop once hid a 0.929 macro-F1 with three broken queries.
+5. **A provider error aborts a LOTUS query outright**; rerun it against the partial store -- completed calls
+   replay, only the remainder is fresh.
+6. **Always score a run.** A drop in calls can hide broken queries.
 7. **agent_bench needs the proxy started with `CACHE_ALIAS_CHAT=1`.** SWAN and PLOP send prompt-identical
    user text under different envelopes; the alias serves SWAN's request from PLOP's recorded sample keyed on
    the user text alone, so both engines consume the same verdict *and* the same recorded latency. Without it
@@ -43,12 +42,9 @@ its `LLMMap` frame); on agent_bench, `AGENTBENCH/blendsql_queries/QN.sql` is the
 the SWAN queries (`translate_to_blendsql.py`). Neither supports images, so ECOMM and MMQA are not run for
 them. Running the PLOP fork: `PLOP_FORK.md`.
 
-Sema: Sema's repository ships no SemBench queries, so `MOVIE/sema_queries/qN.sql` carry the SWAN queries' prompt
-text in its `s'...'` dialect, where a semantic string is a filter in WHERE and a map anywhere else (q4's ratio is
-therefore two filtered counts). On agent_bench, `AGENTBENCH/sema_queries/QN.sql` is the mechanical translation of
-PLOP's queries (`translate_to_sema.py`): the prompt text as PLOP's model sees it, with a NULL prompt column written
-as empty text and the answer-format sentence PLOP's engine appends to an integer question. An apostrophe in a prompt
-is the typographic one, the only form Sema's string syntax carries. Sema takes no images, so ECOMM and MMQA are not
+Sema: its repository ships no SemBench queries, so `MOVIE/sema_queries/qN.sql` carry the SWAN queries' prompt
+text in its `s'...'` dialect; on agent_bench, `AGENTBENCH/sema_queries/QN.sql` is the mechanical translation of
+PLOP's queries (`translate_to_sema.py` documents the mapping). Sema takes no images, so ECOMM and MMQA are not
 run for it.
 
 Palimpzest: `MOVIE/palimpzest_queries.py`, `MMQA/palimpzest_queries.py` and `ECOMM/palimpzest_queries/qN.py`
@@ -90,8 +86,9 @@ Not committed (images, raw sources, caches):
   only the image files are missing, so text-only queries (q1, q3, q5, q7) run as-is.
 - `MMQA/files/mmqa/source_data/` and the image files under `files/mmqa/data/` -- from the SemBench MMQA
   release; the sf_200 CSVs that `setup.sql` reads are committed.
-- `serve/.llm_cache.duckdb` -- THE recorded LLM answers of every system on every suite (latency + cost replay), one store since 2026-10-22 (SWAN 2.0's former separate store is folded in; the :4021 proxy is retired, the harness's default endpoint :4001 serves it). Without it every run is
-  fresh against the provider; with it, reruns are free and latency-faithful.
+- `serve/.llm_cache.duckdb` -- the recorded LLM answers of every system on every suite (latency + cost replay);
+  `serve/fetch_cache.sh` downloads the published copy. Without it every run is fresh against the provider; with
+  it, reruns are free and latency-faithful.
 
 Runners default to `../../build/release/duckdb`; set `DUCKDB_BIN` to use another build (e.g. reldebug).
 
@@ -162,12 +159,11 @@ python3 plop_movie.py                       # PLOP_BIN = the Morrila fork's shel
 <python with blendsql> blendsql_movie.py    # e.g. ../../../SWAN_bench/.venv/bin/python
 ```
 
-Sema on the same ten queries (`sema_queries/`), from the authors' fork built once by `setup_sema.sh` (about 55
-minutes replayed; $4.46 recorded; writes `sema_movie_results.json`):
+Sema on the same ten queries (`sema_queries/`; about 55 minutes replayed; $4.46 recorded):
 
 ```sh
-../setup_sema.sh                            # once: Sema next to this repository (../Sema), pinned commit, patched, built
-python3 sema_movie.py                       # SEMA_BIN = its shell, default ../../../Sema/build/release/duckdb
+../setup_sema.sh                            # once: clones and builds the fork next to this repository (../Sema)
+python3 sema_movie.py                       # SEMA_BIN = its shell, if it is somewhere else
 ```
 
 Palimpzest (PyPI `palimpzest` 1.5.3, MIT DSG's semantic-operator system) on SemBench's own Palimpzest programs
@@ -193,7 +189,7 @@ python3 compare.py MOVIE
 It prints one row per query with each recorded system's quality (SemBench's own metric per query: F1,
 count/ratio accuracy, Spearman for the ranking queries), calls, latency and cost, and a macro row that is the
 README's MOVIE table (for BlendSQL, PLOP and Palimpzest the README's quality is the mean over replays; see the
-protocol notes). It is not printed when the recorded runs differ in model or in requests in flight.
+protocol notes).
 
 **ECOMM and MMQA** (the image suites: ECOMM sf500, 14 queries over fashion product listings with photos; MMQA
 sf200, 11 queries over tables that mix text and images; quality = macro F1 / count accuracy / ARI) run the same
@@ -226,16 +222,11 @@ python3 sema_agentbench.py                     # Sema Q1..Q30 (translate_to_sema
 python3 eval_agentbench.py swan lotus plop blendsql palimpzest sema   # quality of each vs the LIMIT-free ground truth
 SWAN_TAG=swan python3 report_three_way.py      # per-query table of every system -> results/agentbench_comparison_three_way.md
                                                # (the committed table is SWAN_TAG=swan_20261111, the run behind the README row)
-python3 test_scoring.py                        # checks of the scoring commands themselves, on made-up results
-python3 test_runners.py                        # checks of the SWAN and BlendSQL runners' call counts, on stand-ins
-python3 ../test_sema.py                        # checks of the Sema port (runners and translator), without Sema or a model
 ```
 
 The SWAN translations are `swan_queries/Q*.sql` (`translate_to_swan.py` documents the mapping). Runs are tagged
-(`SWAN_TAG=my_run` → `results/my_run/` + `results/my_run_agentbench_results.json`; `SEMA_TAG` does the same for
-Sema) and scored by tag: `python3 eval_agentbench.py my_run plop`. A query a run has not reached is n/a in both
-commands and outside its macro, and the report is not written when the selected runs differ in model or in
-requests in flight. The runner sends `ai_filter`'s prompt bare, so the proxy's alias serves
+(`SWAN_TAG=my_run` → `results/my_run/` + `results/my_run_agentbench_results.json`) and scored by tag:
+`python3 eval_agentbench.py my_run plop`. The runner sends `ai_filter`'s prompt bare, so the proxy's alias serves
 PLOP's recorded verdict to SWAN; without it a run samples the model anew (rule 7).
 
 **SWAN 2.0.** [SWAN 2.0](https://github.com/ZhaoFuheng/SWANBench) is a 120-question benchmark over four BIRD
@@ -257,13 +248,9 @@ repository. The 120 queries are also kept here under `SWAN2/`.
   recordings: `PYTHONHASHSEED=0` (its system prompt lists an operator's input types in set order), its
   sequential executor for MMQA q5 (one call over sixteen rows, which must arrive in table order) and a
   tie-break by image id in ECOMM q14 (our program). The runners set all three.
-- **Sema** runs the authors' fork at commit a86cb62 with its default settings: a lone semantic filter or map asks
-  one row per request (`semantic_batch_size` 1). `sema_fork.patch` swaps its Linux-only epoll loop for poll()
-  and lets the runners cap it at the 20 requests in flight every system gets (`SEMA_LLM_MAX_CONNECTIONS` with
-  `SET threads=1`, and `SEMA_LLM_TIMEOUT_S`, since its request timeout runs while a request waits in that queue).
-  A runner starts only on that patched build with Sema's shipped settings, records them with each result, and
-  records a query as failed when a model request failed during it (Sema puts false or an empty string where an
-  answer is missing).
+- **Sema** runs the authors' fork at commit a86cb62 with its default settings, where a lone semantic filter or
+  map asks one row per request. `sema_fork.patch` makes it build on macOS and holds it to the 20 requests in
+  flight every system gets.
 - **SWAN-AISQL (Jev)** is `run_sembench_typesafe.sh`: `SET ai_typesafe='filter,classify'` (MOVIE:
   `'filter,classify,score'`) with model `jev-latest`; image-bearing prompts, `ai_complete` and `ai_agg` stay on
   `gpt-5.6-luna`. Its recorded TypeSafe answers replay from the store like any other call. Per query:
@@ -284,8 +271,7 @@ repository. The 120 queries are also kept here under `SWAN2/`.
   BlendSQL's, Palimpzest's and Sema's verdicts are independent samples, so where an answer hinges on
   a few judgments any disagreement scores 0. A LIMIT with no ORDER BY below a semantic function decides which rows
   the function is asked about, so that input depended on the engine and the machine; every system's copy
-  orders those LIMITs by key (Q29, Q30 since 2026-10-15; Q15-Q19, Q25, Q27, Q28 since 2026-11-10, with the
-  ground truth and every system's rows re-recorded on 2026-11-11), the only edit to the queries. The list and the rule are in
+  orders those LIMITs by key (Q15-Q19, Q25, Q27-Q30), the only edit to the queries. The list and the rule are in
   [PLOP_FORK.md](PLOP_FORK.md). BlendSQL runs our mechanical translation of the SWAN queries
   (`AGENTBENCH/translate_to_blendsql.py`). Palimpzest runs the LOTUS programs unchanged with their semantic operators served by Palimpzest
   (`palimpzest_hybrid_exec.py`), its Abacus optimizer choosing each operator's plan.
