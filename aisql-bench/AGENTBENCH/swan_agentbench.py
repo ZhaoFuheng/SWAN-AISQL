@@ -3,7 +3,9 @@
 
 Per query: a fresh CLI process (query-scoped local cache by construction), routed via the
 :4001 recording proxy; calls = chat only (embeds excluded, per the reporting rule); the final
-SELECT's rows go to results/swan/QN.csv for cross-system agreement.
+SELECT's rows go to results/swan/QN.csv for cross-system agreement. Fresh calls (llm_calls_fresh, as every
+other runner records them) = the requests the proxy had to send on to the provider while the query ran, its
+miss-counter delta: 0 in a replay. Run it with nothing else on the proxy.
 
   run:  python3 swan_agentbench.py [Q1 Q2 ...]
   env:  DUCKDB_BIN, AI_PROXY_URL (:4001), AI_MODEL (gpt-5.6-luna), AI_MAX_CONCURRENCY (20), AI_PROMPT_VARIANT (plain)
@@ -13,6 +15,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.request
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -45,6 +48,15 @@ ENV = {**os.environ, "DUCKDB_AGENT_MODE": "0",  # the 2.0 shell's agent mode tru
        "AI_TIMEOUT_MS": "180000", "AI_PROMPT_VARIANT": os.environ.get("AI_PROMPT_VARIANT", "plain")}
 
 
+def cache_misses():
+    """The requests the cache proxy has sent on to the provider so far (its /cache/stats), or None when that
+    cannot be read: the endpoint is not the cache proxy, so what was fresh is not known."""
+    try:
+        return int(json.load(urllib.request.urlopen(PROXY + "/cache/stats", timeout=5))["misses"])
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def csv_row_count(text):
     """Data rows in a CSV string, counted by the csv module so quoted newlines do not inflate it."""
     if not text.strip():
@@ -72,9 +84,12 @@ def main():
         csv_path = os.path.join(HERE, "results", TAG, name + ".csv")
         if os.path.exists(csv_path):
             os.remove(csv_path)
+        m0 = cache_misses()
         t0 = time.time()
         p = subprocess.run([BIN], input=script, env=ENV, text=True, capture_output=True, cwd=HERE)
         dt = time.time() - t0
+        m1 = cache_misses()
+        fresh = m1 - m0 if m0 is not None and m1 is not None else None
         err = None
         rows = 0
         chat = hits = tok = hedged = 0
@@ -98,11 +113,11 @@ def main():
             open(csv_path, "w").write(result_csv + "\n")
         elif not err:
             err = "no usage marker in output"
-        rec = {"latency_s": round(dt, 1), "llm_calls": chat, "local_hits": hits, "tokens": tok,
-               "cost_usd": cost, "hedged": hedged, "rows": rows, "error": err, "ran_at": stamp}
+        rec = {"latency_s": round(dt, 1), "llm_calls": chat, "llm_calls_fresh": fresh, "local_hits": hits,
+               "tokens": tok, "cost_usd": cost, "hedged": hedged, "rows": rows, "error": err, "ran_at": stamp}
         per_query[name] = rec
-        print(f"{name:>4} lat={dt:7.1f}s calls={chat:>6} hits={hits:>6} tok={tok:>8} ${cost:.4f} "
-              f"rows={rows}" + (f"  ERR {err}" if err else ""), flush=True)
+        print(f"{name:>4} lat={dt:7.1f}s calls={chat:>6} fresh={str(fresh):>6} hits={hits:>6} tok={tok:>8} "
+              f"${cost:.4f} rows={rows}" + (f"  ERR {err}" if err else ""), flush=True)
         path = os.path.join(HERE, "results", TAG + "_agentbench_results.json")
         old = json.load(open(path)) if os.path.exists(path) else {"per_query": {}}
         old["model"], old["concurrency"], old["updated"] = MODEL, CONC, stamp

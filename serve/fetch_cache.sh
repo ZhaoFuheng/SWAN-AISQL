@@ -8,7 +8,7 @@
 # Without a URL the script asks Zenodo for the LATEST version of the record (concept DOI
 # 10.5281/zenodo.23112764; published versions are immutable, so an updated cache is always a new version),
 # checks the download against the md5 Zenodo publishes for it, and unpacks it (the published file is the
-# gzip-compressed DuckDB file: about 1 GB to download, about 4.8 GB on disk). A download cut short resumes
+# gzip-compressed DuckDB file: about 1.1 GB to download, about 5 GB on disk). A download cut short resumes
 # where it stopped, also when the script is run again. A URL ending in .gz is unpacked the same way; any
 # other URL is taken as the DuckDB file itself.
 #

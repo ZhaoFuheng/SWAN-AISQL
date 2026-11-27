@@ -13,6 +13,10 @@ So a limited query is scored on what the SQL actually promises:
   * COMPLETE -- exactly min(k, |ground truth|) rows are returned
 Both hold => 1.0. Unlimited queries keep exact row-multiset F1, which is the right measure there.
 
+A query the system did not run is no observation: it is shown as n/a and left out of the macro, which then says how
+many queries it covers (report_three_way.py does the same, from the same test: score_agentbench.py's `ran`). A query
+that ran and failed scores 0.
+
   python3 eval_agentbench.py [systems...]      (default: swan plop -- the runner's default tag)
   env: GT_TAG (default plop_gt)
 """
@@ -34,25 +38,17 @@ exec(compile(scorer_src, "score_agentbench.py", "exec"), scorer.__dict__)
 LIMITS = json.load(open(os.path.join(HERE, "plop_gt_queries", "output_limits.json")))
 
 
-_RECORDS = {}
-
-
-def record(system, q):
-    """The runner's own record of this query (results/<system>_agentbench_results.json); {} if there is none."""
-    if system not in _RECORDS:
-        path = os.path.join(HERE, "results", system + "_agentbench_results.json")
-        _RECORDS[system] = json.load(open(path)).get("per_query", {}) if os.path.exists(path) else {}
-    return _RECORDS[system].get(q) or {}
-
-
 def score(system, q):
-    """(score, note) for one query."""
+    """(score, note) for one query; (None, why) when there is nothing to score."""
     gt_cols, _ = scorer.load_rows(GT_TAG, q)
     if gt_cols is None:
         return None, "no ground truth"
+    # A query the system did not run is no observation (n/a, outside the macro), not a wrong answer.
+    if not scorer.ran(system, q):
+        return None, "not run"
     # A query the system could not run scores 0, whatever file its runner left: a failed query writes an empty
     # result, which read as "ran and returned no rows" and scored 1.000 (BlendSQL Q6-Q9 until 2026-11-20).
-    if record(system, q).get("error"):
+    if scorer.failed(system, q):
         return 0.0, "the query failed in this system"
     cols, rows = scorer.load_rows(system, q, cols=gt_cols)
     # A system whose output cannot be PARSED must not score: with cols=None the shared column list
@@ -71,6 +67,12 @@ def score(system, q):
             return 0.0, "system returned no rows, the ground truth has rows"
 
     shared = [c for c in gt_cols if cols and c in cols]
+    if cols and not shared:
+        # a result with none of the ground truth's columns: projected onto no column both sides are empty, which
+        # scored 1.000; it matches only when neither side has a row
+        _, gt_all = scorer.load_rows(GT_TAG, q)
+        _, actual = scorer.load_rows(system, q)
+        return (1.0, "both empty") if not gt_all and not actual else (0.0, "no column in common with the ground truth")
     _, gt_rows = scorer.load_rows(GT_TAG, q, cols=shared) if shared else (None, Counter())
 
     k = LIMITS.get(q)
@@ -90,16 +92,11 @@ def score(system, q):
 
 def main():
     systems = sys.argv[1:] or ["swan", "plop"]
-    calls = {}
-    for s in systems:
-        path = os.path.join(HERE, "results", s + "_agentbench_results.json")
-        calls[s] = json.load(open(path))["per_query"] if os.path.exists(path) else {}
-
     width = max(len(s) for s in systems) + 2
     header = f"{'q':<5}" + "".join(f"{s:>{width}}" for s in systems) + "   note"
     print(header)
     print("-" * len(header))
-    macro = {s: [] for s in systems}
+    macro, unreadable = {s: [] for s in systems}, {s: [] for s in systems}
     for i in range(1, 31):
         q = f"Q{i}"
         line, note = f"{q:<5}", ""
@@ -109,15 +106,21 @@ def main():
                 line += f"{'n/a':>{width}}"
                 continue
             macro[s].append(v)
+            if n == "system output missing or unparseable":
+                unreadable[s].append(q)
             line += f"{v:>{width}.3f}"
             if q in LIMITS and s == systems[0]:
                 note = n
         print(line + ("   " + note if note else ""))
     print("-" * len(header))
     print(f"{'macro':<5}" + "".join(
-        f"{(sum(macro[s]) / len(macro[s]) if macro[s] else float('nan')):>{width}.3f}" for s in systems))
+        (f"{sum(macro[s]) / len(macro[s]):>{width}.3f}" if macro[s] else f"{'n/a':>{width}}") for s in systems))
     for s in systems:
-        total = sum(v.get("llm_calls", 0) for v in calls[s].values()) if calls[s] else 0
+        if scorer.coverage_note(s, len(macro[s])):
+            print(scorer.coverage_note(s, len(macro[s])))
+        if unreadable[s]:
+            print(f"  {s}: no readable rows file for {', '.join(unreadable[s])} (results/{s}/<query>.csv or .csv.gz): scored 0")
+        total = sum(v.get("llm_calls", 0) for v in (scorer.per_query(s) or {}).values())
         if total:
             print(f"  {s}: {total:,} calls")
 
