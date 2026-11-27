@@ -4,8 +4,9 @@ SWAN AISQL introduces the `ai_filter / ai_classify / ai_score / ai_complete / ai
 semantic operators to DuckDB, with an optimizer and executor built around **factorized ("two-currency")
 execution**: every LLM call runs once per *distinct* input, joins over AI predicates evaluate the distinct
 *pair domain* without materializing the cross product, and learned predicate ordering, Yannakakis semi-join
-reduction and LIMIT early-stop minimize calls. It is benchmarked against LOTUS, BlendSQL, Palimpzest
-and PLOP ([Morrila](https://github.com/DMoRanSky/Morrila), the authors' DuckDB fork) on SemBench
+reduction and LIMIT early-stop minimize calls. It is benchmarked against LOTUS, BlendSQL, Palimpzest,
+PLOP ([Morrila](https://github.com/DMoRanSky/Morrila), the authors' DuckDB fork) and Sema
+([BITQiKangK/Sema](https://github.com/BITQiKangK/Sema), the authors' DuckDB fork) on SemBench
 (MOVIE / ECOMM / MMQA), on the 30-query hybrid bench of the PLOP paper, and on
 [SWAN 2.0](https://github.com/ZhaoFuheng/SWANBench). The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
@@ -61,6 +62,7 @@ protocol behind each table, and how to rerun every system, is in [aisql-bench/RE
 | BlendSQL 0.1.27 | 0.718† | 18.7k | $1.44 | 1,163 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.761† | 68.5k | $17.88 | 4,778 s |
 | PLOP-DP | 0.729† | 19.2k | $1.70 | 1,649 s |
+| Sema | 0.751 | 77.9k | $4.46 | 3,193 s |
 | **SWAN-AISQL** | **0.818** | 18.8k | $2.25 | 1,487 s |
 | SWAN-AISQL (Jev) | 0.795 | 18.8k | $0.39 | 458 s |
 
@@ -68,7 +70,7 @@ protocol behind each table, and how to rerun every system, is in [aisql-bench/RE
 so a single replay varies.
 
 **SemBench ECOMM** (14 queries over fashion product listings with photos) and **MMQA** (11 queries over
-tables that mix text and images). BlendSQL and PLOP take no images.
+tables that mix text and images). BlendSQL, PLOP and Sema take no images.
 
 | ECOMM | quality | calls | cost | latency |
 |---|---|---|---|---|
@@ -93,6 +95,7 @@ tables that mix text and images). BlendSQL and PLOP take no images.
 | BlendSQL 0.1.27 | 0.714* | 25,441 | $2.91 | 1,954 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.735* | 25,777 | $6.82 | 2,040 s |
 | PLOP-DP | 1.000 | 13,328 | $0.50 | 905 s |
+| Sema | 0.672* | 245,857 | $20.40 | 13,064 s |
 | **SWAN-AISQL** | **1.000** | **10,995** | **$0.28** | **732 s** |
 
 SWAN and PLOP consume the same recorded verdict per shared prompt, so both match the ground truth (PLOP's
@@ -108,9 +111,10 @@ every system plans itself)
 | BlendSQL 0.1.27 | 0.761 | 59,620 | $4.95 | 4,958 s |
 | Palimpzest 1.5.3 (Abacus optimizer) | 0.778 | 70,925 | $9.81 | 5,202 s |
 | PLOP-DP | 0.698 | 25,639 | $1.11 | 10,208 s |
+| Sema | 0.757 | 57,005 | $3.05 | 3,256 s |
 | **SWAN-AISQL** | 0.777 | **18,548** | **$2.00** | **1,673 s** |
 
-Quality is at parity among LOTUS, BlendSQL, Palimpzest and SWAN (the model's verdicts bound it); calls, cost
+Quality is at parity among LOTUS, BlendSQL, Palimpzest, Sema and SWAN (the model's verdicts bound it); calls, cost
 and latency are the separation.
 
 **Reproducing the tables.** The recorded answers of every system on every benchmark live in one store,

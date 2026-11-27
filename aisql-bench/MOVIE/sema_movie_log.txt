@@ -1,0 +1,14 @@
+
+== 2026-11-26 20:06:44 MST ==
+SEMA MOVIE gpt-5.6-luna via meter -> http://localhost:4001  sf2000  serial  concurrency=20  settings={'enable_semantic_filter_multiplexer': 'false', 'semantic_batch_size': '1', 'semantic_filter_accuracy_threshold': '0.95', 'semantic_filter_batch_size': '4', 'semantic_filter_latency_first': 'true', 'semantic_filter_voting_rounds': '1', 'semantic_voting_rounds': '1', 'threads': '1'}  queries=['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10']
+q1   lat=   82.2s calls=  2000 errors=   0 fresh=     0 tok=   254751 $0.0810  n=5/1487  P=1.0 R=1.0 quality=1.0
+q2   lat=    5.0s calls=   120 errors=   0 fresh=     0 tok=    14592 $0.0045  n=5/14  P=0.8 R=0.8 quality=0.8
+q3   lat=    5.3s calls=   120 errors=   0 fresh=     0 tok=    14757 $0.0048  n=1/1  value=8.0 rel_err=0.4286 quality=0.571
+q4   lat=    5.1s calls=   120 errors=   0 fresh=     0 tok=    14386 $0.0044  n=1/1  value=0.0667 rel_err=0.4286 quality=0.571
+q5   lat=  176.5s calls=  4064 errors=   0 fresh=     0 tok=   876300 $0.2661  n=10/32288  P=0.9 R=0.9 quality=0.9
+q6   lat=  159.6s calls=  4064 errors=   0 fresh=     0 tok=   837492 $0.2236  n=10/32736  P=0.778 R=0.7 quality=0.737
+q7   lat= 2663.9s calls= 65024 errors=   0 fresh=     0 tok= 13317268 $3.7516  n=27036/32736  P=0.757 R=0.757 quality=0.757
+q8   lat=    4.5s calls=   120 errors=   0 fresh=     0 tok=    11966 $0.0030  n=2/2  value=0.0 rel_err=0.0404 quality=0.96
+q9   lat=   11.0s calls=   256 errors=   0 fresh=     0 tok=    56198 $0.0156  n=256/256  P=0.753 R=0.596 quality=0.753
+q10  lat=   79.7s calls=  2000 errors=   0 fresh=     0 tok=   409178 $0.1083  n=105/116  P=0.461 R=0.325 quality=0.461
+TOTAL(10q)  latency=3192.8s  calls=77888  errors=0  cost=$4.4629  tokens=15806888  macro-quality=0.751

@@ -43,6 +43,14 @@ its `LLMMap` frame); on agent_bench, `AGENTBENCH/blendsql_queries/QN.sql` is the
 the SWAN queries (`translate_to_blendsql.py`). Neither supports images, so ECOMM and MMQA are not run for
 them. Running the PLOP fork: `PLOP_FORK.md`.
 
+Sema: Sema's repository ships no SemBench queries, so `MOVIE/sema_queries/qN.sql` carry the SWAN queries' prompt
+text in its `s'...'` dialect, where a semantic string is a filter in WHERE and a map anywhere else (q4's ratio is
+therefore two filtered counts). On agent_bench, `AGENTBENCH/sema_queries/QN.sql` is the mechanical translation of
+PLOP's queries (`translate_to_sema.py`): the prompt text as PLOP's model sees it, with a NULL prompt column written
+as empty text and the answer-format sentence PLOP's engine appends to an integer question. An apostrophe in a prompt
+is the typographic one, the only form Sema's string syntax carries. Sema takes no images, so ECOMM and MMQA are not
+run for it.
+
 Palimpzest: `MOVIE/palimpzest_queries.py`, `MMQA/palimpzest_queries.py` and `ECOMM/palimpzest_queries/qN.py`
 are **SemBench's own Palimpzest programs**, copied from the SemBench repository (MOVIE q1–q10, MMQA all
 eleven, ECOMM q1–q13, of which q12 is changed, see ECOMM below; SemBench wrote none for ECOMM q14, so
@@ -72,7 +80,7 @@ Committed: every query (SWAN, PLOP, PLOP ground-truth, LOTUS), the harnesses, go
 suite databases (`ECOMM/ecomm.db`, `MOVIE/movie.db`, `MMQA/mmqa.db`), the agent_bench datasets
 (`AGENTBENCH/dataset/`, TPC-H sf0.005 parquet + book_review/yelp/googlelocal/stockindex), the per-run
 summaries (`*_results.json`, comparison `.md`) and the result rows of the cited runs
-(`AGENTBENCH/results/{plop,plop_gt,lotus,blendsql,palimpzest,swan_20261111}`; the 52MB Q19 outputs are gzipped and
+(`AGENTBENCH/results/{plop,plop_gt,lotus,blendsql,palimpzest,sema,swan_20261111}`; the large Q19 outputs are gzipped and
 the scorer reads `.csv.gz`).
 
 Not committed (images, raw sources, caches):
@@ -154,6 +162,14 @@ python3 plop_movie.py                       # PLOP_BIN = the Morrila fork's shel
 <python with blendsql> blendsql_movie.py    # e.g. ../../../SWAN_bench/.venv/bin/python
 ```
 
+Sema on the same ten queries (`sema_queries/`), from the authors' fork built once by `setup_sema.sh` (about 55
+minutes replayed; $4.46 recorded; writes `sema_movie_results.json`):
+
+```sh
+../setup_sema.sh                            # once: Sema next to this repository (../Sema), pinned commit, patched, built
+python3 sema_movie.py                       # SEMA_BIN = its shell, default ../../../Sema/build/release/duckdb
+```
+
 Palimpzest (PyPI `palimpzest` 1.5.3, MIT DSG's semantic-operator system) on SemBench's own Palimpzest programs
 (`palimpzest_queries.py`, copied from the SemBench repository; all ten MOVIE queries), under SemBench's
 Palimpzest settings (MaxQuality, parallel execution, 20 workers) with its Abacus optimizer's pareto plan search,
@@ -177,7 +193,7 @@ python3 compare.py MOVIE
 It prints one row per query with each recorded system's quality (SemBench's own metric per query: F1,
 count/ratio accuracy, Spearman for the ranking queries), calls, latency and cost, and a macro row that is the
 README's MOVIE table (for BlendSQL, PLOP and Palimpzest the README's quality is the mean over replays; see the
-protocol notes).
+protocol notes). It is not printed when the recorded runs differ in model or in requests in flight.
 
 **ECOMM and MMQA** (the image suites: ECOMM sf500, 14 queries over fashion product listings with photos; MMQA
 sf200, 11 queries over tables that mix text and images; quality = macro F1 / count accuracy / ARI) run the same
@@ -206,14 +222,19 @@ python3 swan_agentbench.py Q16 Q17             # a subset
 ../.venv-lotus/bin/python lotus_agentbench.py  # LOTUS Q1..Q30 (our translations, lotus_queries/; ~30 min replayed, $3 recorded)
 <python with blendsql> blendsql_agentbench.py  # BlendSQL Q1..Q30 (translate_to_blendsql.py; ~35 min, $3)
 python3 palimpzest_agentbench.py               # Palimpzest Q1..Q30 (the LOTUS programs, operators served by Palimpzest; ../setup_palimpzest.sh first)
-python3 eval_agentbench.py swan lotus plop blendsql palimpzest   # quality of each vs the LIMIT-free ground truth
+python3 sema_agentbench.py                     # Sema Q1..Q30 (translate_to_sema.py; ../setup_sema.sh first; ~3.6 h replayed, $20 recorded)
+python3 eval_agentbench.py swan lotus plop blendsql palimpzest sema   # quality of each vs the LIMIT-free ground truth
 SWAN_TAG=swan python3 report_three_way.py      # per-query table of every system -> results/agentbench_comparison_three_way.md
                                                # (the committed table is SWAN_TAG=swan_20261111, the run behind the README row)
+python3 test_scoring.py                        # checks of the scoring commands themselves, on made-up results
+python3 ../test_sema.py                        # checks of the Sema port (runners and translator), without Sema or a model
 ```
 
 The SWAN translations are `swan_queries/Q*.sql` (`translate_to_swan.py` documents the mapping). Runs are tagged
-(`SWAN_TAG=my_run` → `results/my_run/` + `results/my_run_agentbench_results.json`) and scored by tag:
-`python3 eval_agentbench.py my_run plop`. The runner sends `ai_filter`'s prompt bare, so the proxy's alias serves
+(`SWAN_TAG=my_run` → `results/my_run/` + `results/my_run_agentbench_results.json`; `SEMA_TAG` does the same for
+Sema) and scored by tag: `python3 eval_agentbench.py my_run plop`. A query a run has not reached is n/a in both
+commands and outside its macro, and the report is not written when the selected runs differ in model or in
+requests in flight. The runner sends `ai_filter`'s prompt bare, so the proxy's alias serves
 PLOP's recorded verdict to SWAN; without it a run samples the model anew (rule 7).
 
 **SWAN 2.0.** [SWAN 2.0](https://github.com/ZhaoFuheng/SWANBench) is a 120-question benchmark over four BIRD
@@ -235,6 +256,13 @@ repository. The 120 queries are also kept here under `SWAN2/`.
   recordings: `PYTHONHASHSEED=0` (its system prompt lists an operator's input types in set order), its
   sequential executor for MMQA q5 (one call over sixteen rows, which must arrive in table order) and a
   tie-break by image id in ECOMM q14 (our program). The runners set all three.
+- **Sema** runs the authors' fork at commit a86cb62 with its default settings: a lone semantic filter or map asks
+  one row per request (`semantic_batch_size` 1). `sema_fork.patch` swaps its Linux-only epoll loop for poll()
+  and lets the runners cap it at the 20 requests in flight every system gets (`SEMA_LLM_MAX_CONNECTIONS` with
+  `SET threads=1`, and `SEMA_LLM_TIMEOUT_S`, since its request timeout runs while a request waits in that queue).
+  A runner starts only on that patched build with Sema's shipped settings, records them with each result, and
+  records a query as failed when a model request failed during it (Sema puts false or an empty string where an
+  answer is missing).
 - **SWAN-AISQL (Jev)** is `run_sembench_typesafe.sh`: `SET ai_typesafe='filter,classify'` (MOVIE:
   `'filter,classify,score'`) with model `jev-latest`; image-bearing prompts, `ai_complete` and `ai_agg` stay on
   `gpt-5.6-luna`. Its recorded TypeSafe answers replay from the store like any other call. Per query:
@@ -252,7 +280,7 @@ repository. The 120 queries are also kept here under `SWAN2/`.
   never differs between two executions of the same prompt; that is why PLOP-DP scores 1.000 here where the
   PLOP paper reports 0.848 against the same reference (there the optimized and unoptimized plans sampled
   gpt-5-mini separately, and the gap is the model's run-to-run variance, not the rewrite). LOTUS's,
-  BlendSQL's and Palimpzest's verdicts are independent samples, so where an answer hinges on
+  BlendSQL's, Palimpzest's and Sema's verdicts are independent samples, so where an answer hinges on
   a few judgments any disagreement scores 0. A LIMIT with no ORDER BY below a semantic function decides which rows
   the function is asked about, so that input depended on the engine and the machine; every system's copy
   orders those LIMITs by key (Q29, Q30 since 2026-10-15; Q15-Q19, Q25, Q27, Q28 since 2026-11-10, with the
